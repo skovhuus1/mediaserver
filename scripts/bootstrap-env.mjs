@@ -7,12 +7,12 @@ const root = process.cwd();
 const envPath = join(root, '.env');
 const examplePath = join(root, '.env.example');
 
-function loadFile(filePath: string): string {
+function loadFile(filePath) {
   return readFileSync(filePath, 'utf8');
 }
 
-function parseEnv(raw: string): Map<string, string> {
-  const map = new Map<string, string>();
+function parseEnv(raw) {
+  const map = new Map();
 
   raw.split(/\r?\n/).forEach((line) => {
     const trimmed = line.trim();
@@ -35,7 +35,7 @@ function parseEnv(raw: string): Map<string, string> {
   return map;
 }
 
-function isPlaceholder(value: string): boolean {
+function isPlaceholder(value) {
   const lowered = value.toLowerCase();
   return !value ||
     value.startsWith('change-') ||
@@ -45,7 +45,7 @@ function isPlaceholder(value: string): boolean {
     lowered.includes('todo');
 }
 
-function ensureGeneratedKeys(vars: Map<string, string>) {
+function ensureGeneratedKeys(vars) {
   const secret = vars.get('JWT_SECRET') ?? '';
   if (!secret || secret.trim().length < 16 || isPlaceholder(secret)) {
     const next = randomBytes(48).toString('hex');
@@ -78,9 +78,9 @@ function ensureGeneratedKeys(vars: Map<string, string>) {
   }
 }
 
-function renderEnv(vars: Map<string, string>, source: string): string {
-  const keep = new Set<string>(vars.keys());
-  const out: string[] = [];
+function renderEnv(vars, source) {
+  const keep = new Set(vars.keys());
+  const out = [];
 
   source.split(/\r?\n/).forEach((line) => {
     const trimmed = line.trim();
