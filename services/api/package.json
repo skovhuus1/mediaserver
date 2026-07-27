@@ -7,7 +7,7 @@
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --exclude test/*.integration.spec.ts",
+    "test": "vitest run --exclude \"test/*.integration.spec.ts\"",
     "test:integration": "vitest run test/*.integration.spec.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy"

@@ -81,7 +81,7 @@ Lokalt valideret med Node.js 22 og npm 10:
 - Prisma client generation og schema validation.
 - ESLint.
 - TypeScript typecheck for shared contracts, API, worker og admin.
-- Tolv unit tests; database-integrationstests kører kun mod en URL med `bbmedia_test`.
+- Tolv unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
 - Produktionsbuild af shared contracts, NestJS API, worker og Next.js admin.
 
 PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres lokalt på den aktuelle Windows-maskine uden lokal PostgreSQL-testdatabase og Docker. De er verificeret i [GitHub Actions-run 30304933724](https://github.com/skovhuus1/mediaserver/actions/runs/30304933724), hvor følgende gates passerede:
