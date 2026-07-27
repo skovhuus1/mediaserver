@@ -92,6 +92,16 @@ PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres 
 - Produktionsaudit med 0 kendte sårbarheder på high-niveau eller højere.
 - Docker Compose-konfiguration og container-build af API, admin og worker.
 
+Fase-2 mediepipelinen er verificeret i [GitHub Actions-run 30315230245](https://github.com/skovhuus1/mediaserver/actions/runs/30315230245):
+
+- Migration `0002_media_pipeline` anvendes efter fase-1-migrationen på en frisk PostgreSQL 16-database.
+- Unit-steppet kører 12 tests uden databasefiler; integrationssteppet kører separat 2/2 tests.
+- To samtidige scan-triggers opretter præcis én scan-ledger og ét durable worker-job.
+- Stream reservation ved limit 1 accepterer fortsat præcis én af to samtidige requests.
+- API, admin og worker bygges, produktion-audit er grøn, Compose valideres, og worker-imaget med FFmpeg-laget bygges.
+
+CI har ikke kørt en fuld scanning af en rigtig mediefil eller afspillet en stor fil gennem nginx. Det kræver en staging-server med et faktisk read-only media mount og indgår i den næste smoke-test.
+
 ## Ikke implementeret endnu
 
 - Metadataudbydere, titelmatchning og poster-download.
