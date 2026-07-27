@@ -16,8 +16,8 @@ if [[ "$("$NODE_BIN" -p 'process.versions.node.split(\".\")[0]')" != "22" ]]; th
   echo "Node.js 22 is required."
   exit 1
 fi
-if ! command -v nginx >/dev/null || ! command -v psql >/dev/null || ! command -v redis-cli >/dev/null; then
-  echo "nginx, PostgreSQL client and Redis client must be installed first."
+if ! command -v nginx >/dev/null || ! command -v psql >/dev/null || ! command -v redis-cli >/dev/null || ! command -v ffprobe >/dev/null; then
+  echo "nginx, PostgreSQL client, Redis client and ffprobe must be installed first."
   exit 1
 fi
 

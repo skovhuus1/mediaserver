@@ -1,4 +1,4 @@
-import { ForbiddenException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, HttpException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { isPrivileged } from '../common/auth';
 import { correlationId } from '../common/request-context';
@@ -32,8 +32,17 @@ export class PlaybackService {
       });
     }
 
-    const media = await this.prisma.mediaItem.findFirst({ where: { id: dto.mediaId, accountId: actor.accountId } });
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: dto.mediaId, accountId: actor.accountId },
+      include: { file: true },
+    });
     if (!media) throw new NotFoundException({ code: 'media_not_found', message: 'Media item was not found' });
+    if (!media.file || media.file.status !== 'ready') {
+      throw new UnprocessableEntityException({
+        code: 'media_file_not_ready',
+        message: 'The media item has no readable scanned file',
+      });
+    }
     const decision = choosePlaybackMethod({
       codec: media.codec,
       container: media.container,
@@ -62,6 +71,7 @@ export class PlaybackService {
         logicalSessionId: session.logicalSessionId,
         method: decision.method,
         streamToken: session.streamToken,
+        streamUrl: `/api/v1/playback/sessions/${session.id}/stream?token=${encodeURIComponent(session.streamToken)}`,
         leaseExpiresAt: session.leaseExpiresAt,
         decision: { entitlement, playback: decision },
       };
@@ -121,4 +131,3 @@ export class PlaybackService {
     });
   }
 }
-

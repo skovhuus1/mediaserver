@@ -24,6 +24,8 @@ Eksponeret port er `5555`. Databasen og Redis publiceres ikke på hosten.
 
 Installerens sudoers-regel tillader kun restart af `bb-media.target`. Den giver ikke generel root-shell.
 
+`ffprobe` skal være installeret og tilgængelig i `PATH`; direct-installeren stopper før ændringer, hvis kravet mangler. Worker-containeren installerer FFmpeg-pakken i runtime-imaget. Mediebrugeren skal have læseadgang til de konfigurerede mount points.
+
 ## Secrets
 
 `.env` må ikke committes. Backup skal inkludere `.env`, men filen skal opbevares krypteret. Hvis `ENCRYPTION_KEY` mistes, kan krypterede integration secrets ikke gendannes. Hvis `JWT_SECRET` roteres, bliver eksisterende access tokens ugyldige.
