@@ -69,7 +69,7 @@ docker compose up --detach --build
 - Docker Compose med PostgreSQL, Redis, API, admin, worker og nginx reverse proxy.
 - Direkte Linux/systemd-installation uden Docker.
 - Sikker updater med fast-forward-krav og eksplicit Docker opt-in.
-- CI-gates for migration, lint, typecheck, unit/integration tests, builds, dependency audit og Docker builds.
+- CI-gates på Node.js 22 for migration, lint, typecheck, unit/integration tests, builds, dependency audit og Docker builds; workflow-actions bruger Node-24-kompatible v5-runtimes.
 
 ## Valideringsstatus
 

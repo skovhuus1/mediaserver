@@ -20,7 +20,7 @@ jobs:
       JWT_SECRET: ci-only-secret-ci-only-secret-ci-only-secret-ci-only-secret-ci-only-secret
       JWT_ACCESS_TTL_SECONDS: 900
       JWT_REFRESH_TTL_DAYS: 30
-      ENCRYPTION_KEY: base64:Y2ktb25seS0zMi1ieXRlLWVuY3J5cHRpb24ta2V5IQ==
+      ENCRYPTION_KEY: base64:Y2ktb25seS0zMi1ieXRlLWVuY3J5cHRpb24ta2V5ISE=
       SESSION_LEASE_SECONDS: 90
       BILLING_ENABLED: false
       BB_MEDIA_UPDATE_ENABLED: false
@@ -49,8 +49,8 @@ jobs:
           --health-retries 20
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
