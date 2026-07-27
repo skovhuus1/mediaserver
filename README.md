@@ -13,9 +13,12 @@ Derudover leveres Docker- og driftinfrastruktur under `infra/` og `docker-compos
 ```bash
 npm install
 cp .env.example .env
+node scripts/bootstrap-env.mjs
 # Udfyld DATABASE_URL m.v. hvis nødvendigt
 npm run dev
 ```
+
+Default eksterne port i Docker er nu `5555` (via nginx-proxy). API kører internt på `3001`, admin på `3000` i Docker-netværket.
 
 ## Fase-1 endpoints
 

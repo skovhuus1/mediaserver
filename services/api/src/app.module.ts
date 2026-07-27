@@ -28,7 +28,7 @@ import { StructuredLoggingInterceptor } from './common/interceptors/structured-l
     JwtModule.registerAsync({
       global: true,
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET') ?? 'change-me',
+        secret: config.get<string>('JWT_SECRET') ?? process.env.JWT_SECRET,
         signOptions: {
           expiresIn: config.get<string>('JWT_ACCESS_TTL') ?? '15m',
         },
