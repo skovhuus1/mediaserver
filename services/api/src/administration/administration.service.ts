@@ -189,7 +189,7 @@ export class AdministrationService {
         SELECT pg_advisory_xact_lock(
           hashtext('bbmedia:plan-version'),
           hashtext(CAST(${dto.planId} AS text))
-        )
+        )::text AS lock_result
       `;
       const plan = await tx.plan.findFirst({ where: { id: dto.planId, accountId: actor.accountId } });
       if (!plan) throw new NotFoundException({ code: 'plan_not_found', message: 'Plan was not found in this account' });

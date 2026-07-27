@@ -33,7 +33,7 @@ export class StreamReservationService {
         SELECT pg_advisory_xact_lock(
           hashtext('bbmedia:stream-reservation'),
           hashtext(CAST(${input.actor.sub} AS text))
-        )
+        )::text AS lock_result
       `;
       const expired = await tx.playbackSession.findMany({
         where: {
