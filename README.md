@@ -81,7 +81,13 @@ Lokalt valideret med Node.js 22 og npm 10:
 - Syv unit tests.
 - Produktionsbuild af shared contracts, NestJS API, worker og Next.js admin.
 
-PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres lokalt på den aktuelle Windows-maskine uden lokal PostgreSQL-testdatabase og Docker. De køres derfor som obligatoriske CI-gates, før branch’en kan betragtes som leveringsklar.
+PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres lokalt på den aktuelle Windows-maskine uden lokal PostgreSQL-testdatabase og Docker. De er verificeret i [GitHub Actions-run 30304933724](https://github.com/skovhuus1/mediaserver/actions/runs/30304933724), hvor følgende gates passerede:
+
+- Initial migration på en frisk PostgreSQL 16-database.
+- Samtidighedstest: ved to parallelle reservationsforsøg og stream-limit 1 accepteres præcis ét.
+- Redis/PostgreSQL service health.
+- Produktionsaudit med 0 kendte sårbarheder på high-niveau eller højere.
+- Docker Compose-konfiguration og container-build af API, admin og worker.
 
 ## Ikke implementeret endnu
 
