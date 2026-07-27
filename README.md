@@ -73,7 +73,7 @@ API er versioneret med `/api/v1`.
 - ✅ Self-update API endpoints (`/system/update/status`, `/system/update/check`, `/system/update/apply`) med konfigurerbar restart-strategi.
 - ✅ Billing ledger for webhook-idempotens (`billing_webhook_events`) med deduplikeringsnøgle + fejlstatus.
 - ✅ Brugeroprettelse validere e-mail pr. konto.
-- 🛠️ GitHub Actions eksporterer nu isolerede CI-værdier for PostgreSQL, Redis og applikationssecrets til alle migrations-, test- og build-steps; fuld grøn pipeline afrapporteres først efter verificeret run.
+- 🛠️ GitHub Actions eksporterer nu isolerede CI-værdier for PostgreSQL, Redis og applikationssecrets til alle migrations-, test- og build-steps; den initiale SQL-migration er samtidig normaliseret til BOM-fri UTF-8 for PostgreSQL-kompatibilitet. Fuld grøn pipeline afrapporteres først efter verificeret run.
 
 ## Hvad mangler stadig (fase 1 færdiggørelse)
 

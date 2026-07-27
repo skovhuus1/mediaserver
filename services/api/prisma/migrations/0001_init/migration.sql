@@ -1,4 +1,4 @@
-﻿-- Prisma migration: BB-Media API baseline schema for phase-1
+-- Prisma migration: BB-Media API baseline schema for phase-1
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
