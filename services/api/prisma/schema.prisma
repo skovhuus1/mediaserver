@@ -75,6 +75,7 @@ model accounts {
   media_items       media_items[]
   playback_sessions playback_sessions[]
   playback_history  playback_history[]
+  user_entitlement_overrides user_entitlement_overrides[]
   audit_logs        audit_logs[]
   system_settings   system_settings[]
   refresh_tokens    refresh_tokens[]
@@ -127,6 +128,7 @@ model profiles {
   users            users?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
   playback_sessions playback_sessions[]
   playback_history  playback_history[]
+  audit_logs        audit_logs[]
 
   @@index([account_id])
   @@index([user_id])
