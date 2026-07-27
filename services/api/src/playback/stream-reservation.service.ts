@@ -29,7 +29,12 @@ export class StreamReservationService {
     const leaseExpiresAt = new Date(now.getTime() + this.leaseSeconds * 1000);
 
     const session = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${input.actor.sub}))`;
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:stream-reservation'),
+          hashtext(CAST(${input.actor.sub} AS text))
+        )
+      `;
       const expired = await tx.playbackSession.findMany({
         where: {
           userId: input.actor.sub,
@@ -86,7 +91,7 @@ export class StreamReservationService {
           },
         },
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 
     return { ...session, streamToken };
   }
@@ -141,4 +146,3 @@ export class StreamReservationService {
     return session;
   }
 }
-

@@ -42,7 +42,13 @@ describe('stream reservation concurrency', () => {
       maxConcurrentStreams: 1,
     };
     const outcomes = await Promise.allSettled([reservations.reserve(request), reservations.reserve(request)]);
-    expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    const failureDetails = outcomes
+      .filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+      .map(({ reason }) => reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason));
+    expect(
+      outcomes.filter(({ status }) => status === 'fulfilled'),
+      `Reservation outcomes: ${failureDetails.join(' | ')}`,
+    ).toHaveLength(1);
     expect(outcomes.filter(({ status }) => status === 'rejected')).toHaveLength(1);
   });
 });
