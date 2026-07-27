@@ -1,0 +1,8 @@
+{
+  "type": "module",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "types": ["node"]
+  }
+}

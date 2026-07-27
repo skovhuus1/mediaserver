@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: bbmedia
+          POSTGRES_USER: bbmedia
+          POSTGRES_PASSWORD: bbmedia_pass
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps
+        run: npm install
+      - name: Lint
+        run: npm run lint
+      - name: Type check
+        run: npm run typecheck
+      - name: API tests
+        run: npm run test --workspace=services/api
+      - name: API build
+        run: npm run build:api
+      - name: Shared types build
+        run: npm run build --workspace=shared/types
+      - name: Web build
+        run: npm run build:web
+      - name: Docker compose validation
+        run: docker compose -f docker-compose.yml config
+      - name: Docker compose build
+        run: docker compose -f docker-compose.yml build --no-cache

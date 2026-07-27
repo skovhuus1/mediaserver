@@ -1,0 +1,13 @@
+/dist
+/node_modules
+/.env
+/.next
+/.turbo
+/.idea
+/.vscode
+/.DS_Store
+coverage
+*.log
+coverage
+**/tmp
+**/.prisma
