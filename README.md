@@ -26,6 +26,9 @@ API er versioneret med `/api/v1`.
 - `GET  /api/v1/system/health`
 - `GET  /api/v1/system/ready`
 - `GET  /api/v1/system/metrics`
+- `GET  /api/v1/system/update/status`
+- `POST /api/v1/system/update/check`
+- `POST /api/v1/system/update/apply`
 - `POST /api/v1/system/webhook/billing`
 - `POST /api/v1/auth/register-admin`
 - `POST /api/v1/auth/login`
@@ -64,6 +67,7 @@ API er versioneret med `/api/v1`.
 - ✅ API-moduler for konto, auth, brugere/profiler, enheder, planer, abonnementer, entitlement-evaluering og playback.
 - ✅ Session reservation med lease/heartbeat + pause-reservationsopførsel + automatisk udløbsrens i `PlaybackService.listSessions`.
 - ✅ Setup-flow og system endpoints (`/system/setup`, `/system/health`, `/system/ready`, `/system/metrics`, webhook).
+- ✅ Self-update API endpoints (`/system/update/status`, `/system/update/check`, `/system/update/apply`) med konfigurerbar restart-strategi.
 - ✅ Billing ledger for webhook-idempotens (`billing_webhook_events`) med deduplikeringsnøgle + fejlstatus.
 - ✅ Brugeroprettelse validere e-mail pr. konto.
 
@@ -73,6 +77,18 @@ API er versioneret med `/api/v1`.
 - ⏳ CI-pipeline færdig afrapporteret (pipeline findes, men skal verificeres med konkrete gates).
 - ⏳ Forretningskritiske policy-tests i API (planversion snapshots, overrides, suspension flow).
 - ⏳ Playback pipeline (FFmpeg/worker orchestration) og klientudrulning.
+
+## Update-opdatering (fase 1)
+
+- Opdatering kører med Git-træk fra den branch angivet i `BB_MEDIA_UPDATE_GIT_BRANCH` (default `main`), typisk i admin-panelet via:
+  - `POST /api/v1/system/update/check`
+  - `POST /api/v1/system/update/apply`
+- `GET /api/v1/system/update/status` kan bruges til health-check fra CI eller script.
+- Auto-restart styres via `BB_MEDIA_UPDATE_RESTART_MODE`:
+  - `docker-compose` (standard): trækker og kører `docker compose pull` + `up --detach --remove-orphans` på `BB_MEDIA_COMPOSE_FILE`.
+  - `systemctl`: genstarter en `systemd` service defineret af `BB_MEDIA_SYSTEMD_SERVICE` (kan kombineres med `BB_MEDIA_SYSTEMD_USE_SUDO`).
+  - `none`: trækker koden ind men genstarter ikke automatisk.
+- Hvis du ikke bruger Docker, sæt `BB_MEDIA_UPDATE_RESTART_MODE=systemctl` eller `none` og genstart serveren via din egen process manager (`pm2`, `nssm`, service script) efter apply.
 
 ## Push-flow for hver leverance (`mediaserver` repo)
 

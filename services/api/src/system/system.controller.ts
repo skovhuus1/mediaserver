@@ -1,14 +1,16 @@
-﻿import { BadRequestException, Body, Controller, Get, HttpCode, Post, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Post, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import * as promClient from 'prom-client';
 import { AppRole } from '../common/constants';
+import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { encryptSecret, decryptSecret } from '../common/utils/crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService, BillingWebhookPayload } from '../billing/billing.service';
+import { SystemUpdateService } from './system-update.service';
 
 type SetupDto = {
   accountName: string;
@@ -29,6 +31,7 @@ export class SystemController {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly billingService: BillingService,
+    private readonly systemUpdateService: SystemUpdateService,
   ) {}
 
   @Get('health')
@@ -182,6 +185,24 @@ export class SystemController {
     return this.billingService.ingestWebhook(payload);
   }
 
+  @Get('update/status')
+  @Roles(AppRole.ADMIN)
+  async updateStatus() {
+    return this.systemUpdateService.checkForUpdate();
+  }
+
+  @Post('update/check')
+  @Roles(AppRole.ADMIN)
+  async updateCheck() {
+    return this.systemUpdateService.checkForUpdate();
+  }
+
+  @Post('update/apply')
+  @Roles(AppRole.ADMIN)
+  async updateApply() {
+    return this.systemUpdateService.applyUpdate();
+  }
+
   private normalizeMountPath(rawValue?: string) {
     const raw = (rawValue ?? '/media').trim();
     if (!raw) {
@@ -199,4 +220,3 @@ export class SystemController {
     return raw.replace(/\/+$/, '') || '/';
   }
 }
-
