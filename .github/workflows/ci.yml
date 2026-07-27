@@ -7,6 +7,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://bbmedia:bbmedia_pass@localhost:5432/bbmedia
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-only-jwt-secret-that-is-never-used-outside-github-actions
+      ENCRYPTION_KEY: base64:Y2ktb25seS0zMi1ieXRlLWVuY3J5cHRpb24ta2V5IQ==
+      BILLING_ENABLED: false
+      BB_MEDIA_UPDATE_ENABLED: false
     services:
       postgres:
         image: postgres:16-alpine
