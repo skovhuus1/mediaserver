@@ -1,60 +1,61 @@
-﻿"use client";
+'use client';
 
 import { FormEvent, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Brand } from '@/components/brand';
+import { api, deviceFingerprint, saveSession, type ApiFailure } from '@/lib/api';
+import { t } from '@/lib/messages';
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
-const apiUrl = (path: string) => `${API_BASE || ''}${path}`;
+type LoginResult = { accessToken: string; refreshToken: string };
 
 export default function LoginPage() {
-  const [state, setState] = useState('');
+  const router = useRouter();
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  async function submitForm(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const payload = {
-      email: String(form.get('email') || ''),
-      password: String(form.get('password') || ''),
-      deviceName: 'web-admin',
-      deviceType: 'web',
-    };
-
-    const res = await fetch(apiUrl('/api/v1/auth/login'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const body = await res
-        .json()
-        .catch(() => ({ error: { message: 'Login mislykkedes uden body' } }));
-      setState(body?.error?.message ?? body?.message ?? 'Login mislykkedes');
-      return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await api<LoginResult>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: form.get('email'),
+          password: form.get('password'),
+          deviceFingerprint: deviceFingerprint(),
+          deviceName: navigator.platform || 'Webbrowser',
+          deviceType: 'web',
+          platform: navigator.platform,
+        }),
+      }, false);
+      saveSession(result.accessToken, result.refreshToken);
+      router.replace('/');
+    } catch (failure) {
+      const apiFailure = failure as ApiFailure;
+      setError(apiFailure.message ?? 'Login mislykkedes');
+    } finally {
+      setBusy(false);
     }
-
-    const data = await res.json();
-    localStorage.setItem('bb-media-access', data.accessToken);
-    localStorage.setItem('bb-media-refresh', data.refreshToken);
-    setState('Login ok');
   }
 
   return (
-    <div style={{ display: 'grid', gap: 10, maxWidth: 420 }}>
-      <h1>Login</h1>
-      <form onSubmit={submitForm} style={{ display: 'grid', gap: 10 }}>
-        <label>
-          E-mail
-          <br />
-          <input name="email" type="email" required />
-        </label>
-        <label>
-          Password
-          <br />
-          <input name="password" type="password" required minLength={8} />
-        </label>
-        <button type="submit">Login</button>
-      </form>
-      <p>{state}</p>
-    </div>
+    <main className="auth-page">
+      <section className="auth-panel">
+        <Brand />
+        <span className="eyebrow">SECURE ACCESS</span>
+        <h1>{t.loginTitle}</h1>
+        <p>Administrer bibliotek, streams og serveropdateringer.</p>
+        <form onSubmit={submit}>
+          <label>{t.email}<input name="email" type="email" autoComplete="email" required /></label>
+          <label>{t.password}<input name="password" type="password" autoComplete="current-password" minLength={8} required /></label>
+          {error && <div className="form-error">{error}</div>}
+          <button disabled={busy}>{busy ? 'Logger ind...' : t.signIn}</button>
+        </form>
+        <a href="/setup">Første opsætning</a>
+      </section>
+      <aside className="auth-art"><span /><div><b>Din server.</b><b>Dine medier.</b><b>Dine regler.</b></div></aside>
+    </main>
   );
 }

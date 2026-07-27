@@ -31,576 +31,523 @@ enum SubscriptionStatus {
   suspended
 }
 
-enum PlaybackSessionStatus {
+enum PlaybackStatus {
   reserving
   active
   paused
-  stopping
   completed
   disconnected
   expired
-  terminated_by_admin
   failed
   user_stopped
+  terminated_by_admin
+}
+
+enum MediaType {
+  movie
+  series
+  season
+  episode
 }
 
 enum LibraryType {
   movie
   series
-  home_video
+  mixed
 }
 
-enum MediaType {
-  movie
-  episode
+model SystemBootstrap {
+  id          String   @id @default("singleton")
+  accountId   String   @unique @map("account_id")
+  completedAt DateTime @default(now()) @map("completed_at")
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@map("system_bootstrap")
 }
 
-model accounts {
+model Account {
   id           String        @id @default(uuid())
   name         String
-  server_name  String        @default("BoltBytes Media")
-  external_url String?
-  language     String        @default("en")
+  serverName   String        @default("BoltBytes Media") @map("server_name")
+  externalUrl  String?       @map("external_url")
+  language     String        @default("da")
   timezone     String        @default("Europe/Copenhagen")
   status       AccountStatus @default(active)
-  created_at   DateTime      @default(now())
-  updated_at   DateTime      @updatedAt
-
-  users             users[]
-  profiles          profiles[]
-  devices           devices[]
-  storage_roots     storage_roots[]
-  subscriptions     subscriptions[]
-  libraries         libraries[]
-  media_items       media_items[]
-  playback_sessions playback_sessions[]
-  playback_history  playback_history[]
-  user_entitlement_overrides user_entitlement_overrides[]
-  audit_logs        audit_logs[]
-  system_settings   system_settings[]
-  refresh_tokens    refresh_tokens[]
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  bootstrap    SystemBootstrap?
+  users        User[]
+  profiles     Profile[]
+  devices      Device[]
+  refreshTokens RefreshToken[]
+  plans        Plan[]
+  subscriptions Subscription[]
+  entitlementOverrides EntitlementOverride[]
+  storageRoots StorageRoot[]
+  libraries    Library[]
+  mediaItems   MediaItem[]
+  playbackSessions PlaybackSession[]
+  playbackHistory PlaybackHistory[]
+  auditLogs    AuditLog[]
+  settings     SystemSetting[]
+  jobs         SystemJob[]
 
   @@map("accounts")
 }
 
-model users {
-  id             String      @id @default(uuid())
-  account_id     String
-  email          String
-  password_hash  String
-  display_name   String
-  status         UserStatus  @default(active)
-  created_at     DateTime    @default(now())
-  updated_at     DateTime    @updatedAt
+model User {
+  id           String     @id @default(uuid())
+  accountId    String     @map("account_id")
+  email        String
+  passwordHash String     @map("password_hash")
+  displayName  String     @map("display_name")
+  status       UserStatus @default(active)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  account      Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profiles     Profile[]
+  roles        UserRole[]
+  devices      Device[]
+  refreshTokens RefreshToken[]
+  subscriptions Subscription[]
+  entitlementOverrides EntitlementOverride[]
+  playbackSessions PlaybackSession[]
+  playbackHistory PlaybackHistory[]
+  auditLogs    AuditLog[]
 
-  accounts        accounts                 @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  profiles        profiles[]
-  user_roles      user_roles[]
-  devices         devices[]
-  refresh_tokens  refresh_tokens[]
-  subscriptions   subscriptions[]
-  user_entitlement_overrides user_entitlement_overrides[]
-  playback_sessions playback_sessions[]
-  playback_history playback_history[]
-  audit_logs      audit_logs[]
-
-  @@index([account_id])
-  @@unique([account_id, email])
-  @@index([account_id, email])
+  @@unique([accountId, email])
+  @@index([accountId, status])
   @@map("users")
 }
 
-model profiles {
-  id                  String   @id @default(uuid())
-  account_id          String
-  user_id             String?
-  name                String
-  is_child_profile    Boolean  @default(false)
-  pin_hash            String?
-  language            String   @default("en")
-  subtitle_preference String   @default("default")
-  audio_preference    String   @default("default")
-  quality_profile     String   @default("auto")
-  created_at          DateTime @default(now())
-  updated_at          DateTime @updatedAt
+model Profile {
+  id             String   @id @default(uuid())
+  accountId      String   @map("account_id")
+  userId         String   @map("user_id")
+  name           String
+  isChildProfile Boolean  @default(false) @map("is_child_profile")
+  pinHash        String?  @map("pin_hash")
+  language       String   @default("da")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entitlementOverrides EntitlementOverride[]
+  playbackSessions PlaybackSession[]
+  playbackHistory PlaybackHistory[]
+  auditLogs      AuditLog[]
 
-  accounts         accounts    @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  users            users?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
-  playback_sessions playback_sessions[]
-  playback_history  playback_history[]
-  audit_logs        audit_logs[]
-
-  @@index([account_id])
-  @@index([user_id])
+  @@index([accountId, userId])
   @@map("profiles")
 }
 
-model roles {
-  id               String             @id @default(uuid())
-  code             String             @unique
-  description      String?
-  created_at       DateTime           @default(now())
-  user_roles       user_roles[]
-  role_permissions role_permissions[]
+model Role {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  users       UserRole[]
+  permissions RolePermission[]
 
   @@map("roles")
 }
 
-model permissions {
-  id               String             @id @default(uuid())
-  code             String             @unique
-  description      String?
-  created_at       DateTime           @default(now())
-  role_permissions role_permissions[]
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  roles       RolePermission[]
 
   @@map("permissions")
 }
 
-model role_permissions {
-  id            String @id @default(uuid())
-  role_id       String
-  permission_id String
-  roles         roles       @relation(fields: [role_id], references: [id], onDelete: Cascade)
-  permissions   permissions @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+model UserRole {
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
-  @@unique([role_id, permission_id])
-  @@map("role_permissions")
-}
-
-model user_roles {
-  id      String @id @default(uuid())
-  user_id String
-  role_id String
-  users   users  @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  roles   roles  @relation(fields: [role_id], references: [id], onDelete: Cascade)
-
-  @@unique([user_id, role_id])
+  @@id([userId, roleId])
   @@map("user_roles")
 }
 
-model devices {
-  id              String   @id @default(uuid())
-  account_id      String
-  user_id         String
-  device_name     String
-  device_type     String
-  platform        String?
-  app_version     String?
-  first_seen_at   DateTime @default(now())
-  last_seen_at    DateTime @default(now())
-  last_ip_address String?
-  is_trusted      Boolean  @default(false)
-  is_revoked      Boolean  @default(false)
-  capabilities    Json
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
-  accounts          accounts       @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  users             users          @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  playback_sessions playback_sessions[]
-  refresh_tokens    refresh_tokens[]
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
 
-  @@unique([account_id, device_name])
-  @@index([account_id])
-  @@index([user_id])
+model Device {
+  id           String   @id @default(uuid())
+  accountId    String   @map("account_id")
+  userId       String   @map("user_id")
+  fingerprint  String
+  name         String
+  type         String
+  platform     String?
+  appVersion   String?  @map("app_version")
+  capabilities Json     @default("{}")
+  isRevoked    Boolean  @default(false) @map("is_revoked")
+  firstSeenAt  DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt   DateTime @default(now()) @map("last_seen_at")
+  account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+  playbackSessions PlaybackSession[]
+
+  @@unique([userId, fingerprint])
+  @@index([accountId, userId])
   @@map("devices")
 }
 
-model refresh_tokens {
+model RefreshToken {
   id           String   @id @default(uuid())
-  token_hash   String   @unique
-  user_id      String
-  account_id   String
-  device_id    String
-  family_id    String
-  revoked_at   DateTime?
-  expires_at   DateTime
-  created_at   DateTime @default(now())
-  last_used_at DateTime?
+  tokenHash    String   @unique @map("token_hash")
+  familyId     String   @map("family_id")
+  accountId    String   @map("account_id")
+  userId       String   @map("user_id")
+  deviceId     String   @map("device_id")
+  expiresAt    DateTime @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  lastUsedAt   DateTime? @map("last_used_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device       Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
-  users     users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  accounts  accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  devices   devices  @relation(fields: [device_id], references: [id], onDelete: Cascade)
-
-  @@index([account_id])
-  @@index([user_id])
-  @@index([device_id])
+  @@index([familyId])
+  @@index([userId, deviceId])
   @@map("refresh_tokens")
 }
 
-model plans {
-  id                 String    @id @default(uuid())
-  name               String
-  internal_code      String    @unique
-  description        String?
-  is_active          Boolean   @default(true)
-  is_public          Boolean   @default(false)
-  price              Decimal   @default(0) @db.Decimal(12, 2)
-  currency           String    @default("USD")
-  billing_interval   String    @default("monthly")
-  trial_days         Int       @default(0)
-  grace_period_days  Int       @default(0)
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
+model Plan {
+  id          String   @id @default(uuid())
+  accountId   String   @map("account_id")
+  name        String
+  internalCode String  @map("internal_code")
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  versions    PlanVersion[]
 
-  plan_versions      plan_versions[]
-
+  @@unique([accountId, internalCode])
   @@map("plans")
 }
 
-model plan_versions {
-  id                       String      @id @default(uuid())
-  plan_id                  String
-  version_number           Int
-  is_active                Boolean     @default(false)
-  effective_at             DateTime    @default(now())
-  max_concurrent_streams   Int         @default(1)
-  max_registered_devices   Int         @default(1)
-  max_offline_downloads    Int         @default(0)
-  max_video_resolution     Int?        @default(1080)
-  max_video_bitrate        Int?        @default(4000)
-  max_audio_channels       Int?        @default(2)
-  allow_direct_play        Boolean     @default(true)
-  allow_direct_stream      Boolean     @default(false)
-  allow_video_transcode    Boolean     @default(false)
-  allow_audio_transcode    Boolean     @default(false)
-  allow_subtitle_burn_in   Boolean     @default(false)
-  allow_remote_streaming   Boolean     @default(true)
-  allow_offline_downloads  Boolean     @default(false)
-  allow_chromecast         Boolean     @default(false)
-  allow_hdr                Boolean     @default(false)
-  allow_dolby_vision       Boolean     @default(false)
-  allow_lossless_audio     Boolean     @default(false)
-  release_delay_months     Int         @default(0)
-  release_delay_days       Int         @default(0)
-  snapshot                 Json
+model PlanVersion {
+  id                    String   @id @default(uuid())
+  planId                String   @map("plan_id")
+  version               Int
+  isActive              Boolean  @default(false) @map("is_active")
+  effectiveAt           DateTime @default(now()) @map("effective_at")
+  maxConcurrentStreams  Int      @default(1) @map("max_concurrent_streams")
+  maxRegisteredDevices  Int      @default(1) @map("max_registered_devices")
+  maxVideoResolution    Int      @default(1080) @map("max_video_resolution")
+  maxVideoBitrate       Int      @default(4000) @map("max_video_bitrate")
+  allowDirectPlay       Boolean  @default(true) @map("allow_direct_play")
+  allowDirectStream     Boolean  @default(false) @map("allow_direct_stream")
+  allowVideoTranscode   Boolean  @default(false) @map("allow_video_transcode")
+  allowAudioTranscode   Boolean  @default(false) @map("allow_audio_transcode")
+  allowSubtitleBurnIn   Boolean  @default(false) @map("allow_subtitle_burn_in")
+  allowChromecast       Boolean  @default(false) @map("allow_chromecast")
+  allowOfflineDownload  Boolean  @default(false) @map("allow_offline_download")
+  releaseDelayMonths    Int      @default(0) @map("release_delay_months")
+  releaseDelayDays      Int      @default(0) @map("release_delay_days")
+  snapshot              Json
+  plan                  Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  entitlement           PlanEntitlement?
+  subscriptions         Subscription[]
 
-  plans             plans          @relation(fields: [plan_id], references: [id], onDelete: Cascade)
-  subscriptions     subscriptions[]
-  plan_entitlements plan_entitlements?
-
-  @@unique([plan_id, version_number])
+  @@unique([planId, version])
   @@map("plan_versions")
 }
 
-model plan_entitlements {
-  id             String   @id @default(uuid())
-  plan_version_id String   @unique
-  snapshot       Json
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
-
-  plan_versions  plan_versions @relation(fields: [plan_version_id], references: [id], onDelete: Cascade)
+model PlanEntitlement {
+  id            String      @id @default(uuid())
+  planVersionId String      @unique @map("plan_version_id")
+  snapshot      Json
+  createdAt     DateTime    @default(now()) @map("created_at")
+  planVersion   PlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
 
   @@map("plan_entitlements")
 }
 
-model subscriptions {
-  id               String             @id @default(uuid())
-  account_id       String
-  user_id          String?
-  plan_version_id  String
-  status           SubscriptionStatus @default(pending)
-  starts_at        DateTime           @default(now())
-  ends_at          DateTime?
-  suspended_until  DateTime?
-  suspended_reason String?
-  created_at       DateTime           @default(now())
-  updated_at       DateTime           @updatedAt
-  snapshot_at      DateTime?
+model Subscription {
+  id            String             @id @default(uuid())
+  accountId     String             @map("account_id")
+  userId        String             @map("user_id")
+  planVersionId String             @map("plan_version_id")
+  status        SubscriptionStatus @default(pending)
+  startsAt      DateTime           @default(now()) @map("starts_at")
+  endsAt        DateTime?          @map("ends_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  account       Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planVersion   PlanVersion        @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  events        SubscriptionEvent[]
+  snapshot      SubscriptionSnapshot?
 
-  accounts      accounts      @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  users         users?        @relation(fields: [user_id], references: [id], onDelete: SetNull)
-  plan_versions plan_versions @relation(fields: [plan_version_id], references: [id], onDelete: Restrict)
-  snapshot      subscription_snapshots?
-  events        subscription_events[]
-
-  @@index([account_id])
-  @@index([plan_version_id])
-  @@index([status])
+  @@index([accountId, userId, status])
   @@map("subscriptions")
 }
 
-model subscription_events {
-  id              String   @id @default(uuid())
-  subscription_id String
-  event_type      String
-  event_payload   Json
-  created_at      DateTime @default(now())
+model SubscriptionEvent {
+  id             String       @id @default(uuid())
+  subscriptionId String       @map("subscription_id")
+  type           String
+  payload        Json
+  createdAt      DateTime     @default(now()) @map("created_at")
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
-  subscriptions   subscriptions @relation(fields: [subscription_id], references: [id], onDelete: Cascade)
-
-  @@index([subscription_id])
+  @@index([subscriptionId, createdAt])
   @@map("subscription_events")
 }
 
-model subscription_snapshots {
-  id              String   @id @default(uuid())
-  subscription_id String   @unique
-  snapshot        Json
-  created_at      DateTime @default(now())
-
-  subscriptions   subscriptions @relation(fields: [subscription_id], references: [id], onDelete: Cascade)
+model SubscriptionSnapshot {
+  id             String       @id @default(uuid())
+  subscriptionId String       @unique @map("subscription_id")
+  snapshot       Json
+  createdAt      DateTime     @default(now()) @map("created_at")
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
   @@map("subscription_snapshots")
 }
 
-model user_entitlement_overrides {
+model EntitlementOverride {
   id         String   @id @default(uuid())
-  account_id String
-  user_id    String
-  overrides  Json
-  granted_at DateTime @default(now())
-  expires_at DateTime?
+  accountId  String   @map("account_id")
+  userId     String   @map("user_id")
+  profileId  String?  @map("profile_id")
+  values     Json
+  reason     String
+  expiresAt  DateTime? @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile    Profile? @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
-  accounts   accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@index([account_id])
-  @@index([user_id])
-  @@index([expires_at])
+  @@index([accountId, userId, profileId])
   @@map("user_entitlement_overrides")
 }
 
-model storage_roots {
+model StorageRoot {
   id         String   @id @default(uuid())
-  account_id String
+  accountId  String   @map("account_id")
   label      String
-  mount_path String
+  mountPath  String   @map("mount_path")
   type       String   @default("local")
-  is_readonly Boolean @default(false)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  isReadOnly Boolean  @default(true) @map("is_read_only")
+  createdAt  DateTime @default(now()) @map("created_at")
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  libraries  Library[]
 
-  accounts  accounts    @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  libraries libraries[]
-
-  @@index([account_id])
+  @@unique([accountId, label])
   @@map("storage_roots")
 }
 
-model libraries {
-  id             String      @id @default(uuid())
-  account_id     String
-  storage_root_id String
-  name           String
-  type           LibraryType @default(movie)
-  created_at     DateTime    @default(now())
-  updated_at     DateTime    @updatedAt
+model Library {
+  id            String      @id @default(uuid())
+  accountId     String      @map("account_id")
+  storageRootId String      @map("storage_root_id")
+  name          String
+  type          LibraryType
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  account       Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  storageRoot   StorageRoot @relation(fields: [storageRootId], references: [id], onDelete: Restrict)
+  paths         LibraryPath[]
+  mediaItems    MediaItem[]
 
-  accounts       accounts      @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  storage_roots  storage_roots @relation(fields: [storage_root_id], references: [id], onDelete: Cascade)
-  library_paths  library_paths[]
-  media_items    media_items[]
-
-  @@index([account_id])
-  @@index([storage_root_id])
+  @@index([accountId])
   @@map("libraries")
 }
 
-model library_paths {
-  id              String   @id @default(uuid())
-  library_id      String
-  path            String
-  recursive       Boolean  @default(true)
-  include_patterns Json?
-  exclude_patterns Json?
+model LibraryPath {
+  id        String  @id @default(uuid())
+  libraryId String  @map("library_id")
+  path      String
+  recursive Boolean @default(true)
+  library   Library @relation(fields: [libraryId], references: [id], onDelete: Cascade)
 
-  libraries       libraries @relation(fields: [library_id], references: [id], onDelete: Cascade)
-
-  @@index([library_id])
+  @@unique([libraryId, path])
   @@map("library_paths")
 }
 
-model media_items {
+model MediaItem {
   id                    String    @id @default(uuid())
-  account_id            String
-  library_id            String
+  accountId             String    @map("account_id")
+  libraryId             String    @map("library_id")
   title                 String
-  description           String?
-  media_type            MediaType
-  metadata_release_date DateTime?
-  original_release_date DateTime?
-  digital_release_date  DateTime?
-  physical_release_date DateTime?
-  first_air_date        DateTime?
-  availability_date     DateTime?
-  availability_override DateTime?
-  created_at            DateTime  @default(now())
-  updated_at            DateTime  @updatedAt
+  type                  MediaType
+  codec                 String?
+  container             String?
+  bitrate               Int?
+  width                 Int?
+  height                Int?
+  releaseDate           DateTime? @map("release_date")
+  availabilityOverride  DateTime? @map("availability_override")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  account               Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  library               Library   @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  playbackSessions      PlaybackSession[]
+  playbackHistory       PlaybackHistory[]
 
-  accounts          accounts         @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  libraries         libraries        @relation(fields: [library_id], references: [id], onDelete: Cascade)
-  playback_history   playback_history[]
-  playback_sessions playback_sessions[]
-
-  @@index([account_id])
-  @@index([library_id])
-  @@index([media_type])
+  @@index([accountId, type])
   @@map("media_items")
 }
 
-model playback_sessions {
-  id                 String               @id @default(uuid())
-  account_id         String
-  profile_id         String
-  user_id            String
-  device_id          String
-  media_id           String
-  media_source_id    String?
-  playback_method    String
-  stream_token       String
-  started_at         DateTime             @default(now())
-  last_heartbeat_at  DateTime?
-  lease_expires_at   DateTime
-  ended_at           DateTime?
-  status             PlaybackSessionStatus @default(reserving)
-  is_local           Boolean              @default(false)
-  is_cast_session    Boolean              @default(false)
-  ip_address         String?
-  created_at         DateTime             @default(now())
-  updated_at         DateTime             @updatedAt
+model PlaybackSession {
+  id               String         @id @default(uuid())
+  accountId        String         @map("account_id")
+  userId           String         @map("user_id")
+  profileId        String         @map("profile_id")
+  deviceId         String         @map("device_id")
+  mediaId          String         @map("media_id")
+  logicalSessionId String         @map("logical_session_id")
+  method           String
+  status           PlaybackStatus @default(reserving)
+  streamTokenHash  String         @unique @map("stream_token_hash")
+  isCastSession    Boolean        @default(false) @map("is_cast_session")
+  leaseExpiresAt   DateTime       @map("lease_expires_at")
+  lastHeartbeatAt  DateTime       @default(now()) @map("last_heartbeat_at")
+  startedAt        DateTime       @default(now()) @map("started_at")
+  endedAt          DateTime?      @map("ended_at")
+  account          Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  profile          Profile        @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  device           Device         @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  media            MediaItem      @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  reservation      StreamReservation?
+  history          PlaybackHistory[]
 
-  accounts          accounts          @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  profiles          profiles          @relation(fields: [profile_id], references: [id], onDelete: Restrict)
-  users             users             @relation(fields: [user_id], references: [id], onDelete: Restrict)
-  devices           devices           @relation(fields: [device_id], references: [id], onDelete: Restrict)
-  media_items       media_items       @relation(fields: [media_id], references: [id], onDelete: Restrict)
-  stream_reservations stream_reservations[]
-  playback_history   playback_history[]
-
-  @@index([account_id])
-  @@index([user_id])
-  @@index([status])
-  @@index([lease_expires_at])
+  @@index([userId, status, leaseExpiresAt])
+  @@index([accountId, status])
   @@map("playback_sessions")
 }
 
-model stream_reservations {
-  id                  String   @id @default(uuid())
-  playback_session_id  String   @unique
-  account_id          String
-  device_id           String
-  media_id            String
-  reserved_at         DateTime @default(now())
-  started_at          DateTime?
-  released_at         DateTime?
-  reason              String?
+model StreamReservation {
+  id                String          @id @default(uuid())
+  playbackSessionId String          @unique @map("playback_session_id")
+  accountId         String          @map("account_id")
+  userId            String          @map("user_id")
+  reservedAt        DateTime        @default(now()) @map("reserved_at")
+  releasedAt        DateTime?       @map("released_at")
+  reason            String?
+  playbackSession   PlaybackSession @relation(fields: [playbackSessionId], references: [id], onDelete: Cascade)
 
-  playback_sessions   playback_sessions @relation(fields: [playback_session_id], references: [id], onDelete: Cascade)
-
-  @@index([account_id])
-  @@index([device_id])
+  @@index([userId, releasedAt])
   @@map("stream_reservations")
 }
 
-model playback_history {
-  id                 String    @id @default(uuid())
-  account_id         String
-  profile_id         String
-  user_id            String
-  playback_session_id String
-  media_id           String?
-  device_id          String
-  position_ms        Int       @default(0)
-  played_ms          Int       @default(0)
-  completed          Boolean   @default(false)
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
+model PlaybackHistory {
+  id                String          @id @default(uuid())
+  accountId         String          @map("account_id")
+  userId            String          @map("user_id")
+  profileId         String          @map("profile_id")
+  mediaId           String          @map("media_id")
+  playbackSessionId String          @map("playback_session_id")
+  positionMs        Int             @default(0) @map("position_ms")
+  completed         Boolean         @default(false)
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  account           Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile           Profile         @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  media             MediaItem       @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  playbackSession   PlaybackSession @relation(fields: [playbackSessionId], references: [id], onDelete: Cascade)
 
-  accounts         accounts         @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  profiles         profiles         @relation(fields: [profile_id], references: [id], onDelete: Restrict)
-  users            users            @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  playback_sessions playback_sessions @relation(fields: [playback_session_id], references: [id], onDelete: Cascade)
-  media_items      media_items?      @relation(fields: [media_id], references: [id], onDelete: SetNull)
-
-  @@index([account_id])
-  @@index([user_id])
-  @@index([profile_id])
-  @@index([playback_session_id])
+  @@unique([profileId, mediaId])
   @@map("playback_history")
 }
 
-model audit_logs {
-  id         String   @id @default(uuid())
-  account_id String?
-  user_id    String?
-  profile_id String?
-  device_id  String?
-  session_id String?
-  category   String
-  action     String
-  reason     String?
-  details    Json?
-  ip_address String?
-  created_at DateTime @default(now())
+model BillingWebhookEvent {
+  id          String   @id @default(uuid())
+  provider    String
+  eventId     String   @map("event_id")
+  type        String
+  payload     Json
+  signatureOk Boolean  @default(false) @map("signature_ok")
+  processedAt DateTime? @map("processed_at")
+  attempts    Int      @default(0)
+  lastError   String?  @map("last_error")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  accounts    accounts? @relation(fields: [account_id], references: [id], onDelete: SetNull)
-  users       users?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
-  profiles    profiles? @relation(fields: [profile_id], references: [id], onDelete: SetNull)
+  @@unique([provider, eventId])
+  @@map("billing_webhook_events")
+}
 
-  @@index([account_id])
-  @@index([user_id])
-  @@index([created_at])
+model AuditLog {
+  id            String   @id @default(uuid())
+  accountId     String   @map("account_id")
+  userId        String?  @map("user_id")
+  profileId     String?  @map("profile_id")
+  correlationId String?  @map("correlation_id")
+  action        String
+  outcome       String
+  code          String
+  details       Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  profile       Profile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([accountId, createdAt])
   @@map("audit_logs")
 }
 
-model system_settings {
-  id            String   @id @default(uuid())
-  account_id    String
-  setting_key   String
-  setting_value String
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+model SystemSetting {
+  id        String   @id @default(uuid())
+  accountId String   @map("account_id")
+  key       String
+  value     Json
+  encrypted Boolean  @default(false)
+  updatedAt DateTime @updatedAt @map("updated_at")
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
-  accounts      accounts @relation(fields: [account_id], references: [id], onDelete: Cascade)
-
-  @@unique([account_id, setting_key])
+  @@unique([accountId, key])
   @@map("system_settings")
 }
 
-model system_jobs {
-  id        String    @id @default(uuid())
-  name      String
-  queue_name String
-  status    String
-  payload   Json?
-  attempts  Int       @default(0)
-  last_error String?
-  created_at DateTime  @default(now())
-  updated_at DateTime  @updatedAt
+model SystemJob {
+  id          String   @id @default(uuid())
+  accountId   String   @map("account_id")
+  type        String
+  status      String
+  payload     Json
+  availableAt DateTime @default(now()) @map("available_at")
+  lockedAt    DateTime? @map("locked_at")
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+  workerId    String?  @map("worker_id")
+  attemptCount Int     @default(0) @map("attempt_count")
+  maxAttempts Int      @default(5) @map("max_attempts")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  attempts    JobAttempt[]
 
-  job_attempts job_attempts[]
-
-  @@index([status])
+  @@index([status, availableAt, leaseExpiresAt])
   @@map("system_jobs")
 }
 
-model job_attempts {
-  id         String   @id @default(uuid())
-  job_id     String
-  attempt    Int
-  status     String
-  started_at DateTime @default(now())
-  finished_at DateTime?
-  error      String?
+model JobAttempt {
+  id        String    @id @default(uuid())
+  jobId     String    @map("job_id")
+  number    Int
+  status    String
+  error     String?
+  startedAt DateTime  @default(now()) @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  job       SystemJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
-  system_jobs system_jobs @relation(fields: [job_id], references: [id], onDelete: Cascade)
-
-  @@index([job_id])
+  @@unique([jobId, number])
   @@map("job_attempts")
-}
-
-model billing_webhook_events {
-  id           String   @id @default(uuid())
-  provider     String
-  event_id     String
-  event_type   String
-  payload      Json
-  processed    Boolean  @default(false)
-  retry_count  Int      @default(0)
-  last_error   String?
-  created_at   DateTime @default(now())
-  processed_at DateTime?
-
-  @@unique([provider, event_id])
-  @@map("billing_webhook_events")
 }

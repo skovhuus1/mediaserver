@@ -1,34 +1,29 @@
-﻿# Deployment og drift
+# Deployment
 
-## Lokal udvikling
+## Docker Compose
 
-1. Start PostgreSQL + Redis via compose:
+Kør secret-bootstrap før første start. PostgreSQL- og Redis-data ligger i named volumes. `/media` monteres read-only, mens `/downloads`, `/transcode` og `/app/data` er skrivbare.
 
-```bash
-docker compose up -d postgres redis
-```
-
-2. Kør API migration + service:
+Miljøspecifikke host paths kan sættes før start:
 
 ```bash
-cd services/api
-npm run prisma:migrate
-npm run dev
+MEDIA_PATH=/mnt/media DOWNLOADS_PATH=/mnt/downloads docker compose up -d --build
 ```
 
-3. Kør admin web:
+Eksponeret port er `5555`. Databasen og Redis publiceres ikke på hosten.
 
-```bash
-cd ../../web/admin
-npm run dev
-```
+## Direkte Linux
 
-## Produktionsstack (lokal)
+`scripts/install-direct.sh` opretter:
 
-- `docker-compose.yml` bygger tre services: `api`, `admin`, `reverse-proxy`.
-- `infra/docker/nginx.conf` router `/api` til API og fallback til admin.
-- Health checks bygger på `GET /api/v1/system/health`.
+- `bb-media-api.service`
+- `bb-media-admin.service`
+- `bb-media-worker.service`
+- `bb-media.target`
+- nginx site på port `5555`
 
-## CI
+Installerens sudoers-regel tillader kun restart af `bb-media.target`. Den giver ikke generel root-shell.
 
-- `.github/workflows/ci.yml` kører lint, tests, builds og docker compose validation.
+## Secrets
+
+`.env` må ikke committes. Backup skal inkludere `.env`, men filen skal opbevares krypteret. Hvis `ENCRYPTION_KEY` mistes, kan krypterede integration secrets ikke gendannes. Hvis `JWT_SECRET` roteres, bliver eksisterende access tokens ugyldige.

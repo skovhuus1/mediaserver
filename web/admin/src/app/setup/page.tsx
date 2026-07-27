@@ -1,101 +1,67 @@
-﻿"use client";
+'use client';
 
-import { FormEvent, useState } from 'react';
-
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
-const apiUrl = (path: string) => `${API_BASE || ''}${path}`;
+import { FormEvent, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Brand } from '@/components/brand';
+import { api, type ApiFailure } from '@/lib/api';
+import { t } from '@/lib/messages';
 
 export default function SetupPage() {
-  const [status, setStatus] = useState('');
+  const router = useRouter();
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<{ configured: boolean }>('/setup/status', {}, false)
+      .then(({ configured }) => { if (configured) router.replace('/login'); })
+      .catch(() => setError('API kan ikke kontaktes'));
+  }, [router]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     const form = new FormData(event.currentTarget);
-    const payload = {
-      accountName: String(form.get('accountName') || ''),
-      adminEmail: String(form.get('adminEmail') || ''),
-      adminPassword: String(form.get('adminPassword') || ''),
-      adminDisplayName: String(form.get('adminDisplayName') || 'Administrator'),
-      serverName: String(form.get('serverName') || 'BoltBytes Media'),
-      externalUrl: String(form.get('externalUrl') || ''),
-      mountPath: String(form.get('mountPath') || '/media'),
-      language: String(form.get('language') || 'da'),
-      timezone: String(form.get('timezone') || 'Europe/Copenhagen'),
-    };
-
-    const res = await fetch(apiUrl('/api/v1/system/setup'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const body = await res.json().catch(() => ({
-      message: 'Setup fejlede uden body',
-    }));
-
-    if (!res.ok && res.status !== 200 && res.status !== 201) {
-      setStatus(body?.message ?? body?.error?.message ?? body?.reason ?? 'Setup fejlede');
-      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api('/setup', {
+        method: 'POST',
+        body: JSON.stringify({
+          accountName: form.get('accountName'),
+          serverName: form.get('serverName'),
+          adminDisplayName: form.get('adminDisplayName'),
+          adminEmail: form.get('adminEmail'),
+          adminPassword: form.get('adminPassword'),
+          language: 'da',
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          mountPath: form.get('mountPath'),
+        }),
+      }, false);
+      router.replace('/login');
+    } catch (failure) {
+      setError((failure as ApiFailure).message ?? 'Opsætningen mislykkedes');
+    } finally {
+      setBusy(false);
     }
-
-    setStatus(`Setup gennemført for ${body.accountName ?? 'server'} (${body.accountId ?? 'n/a'})`);
   }
 
   return (
-    <div style={{ display: 'grid', gap: 12, maxWidth: 560 }}>
-      <h1>Første konfiguration</h1>
-      <form onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
-        <label>
-          Kontonavn
-          <br />
-          <input name="accountName" required />
-        </label>
-        <label>
-          Admin e-mail
-          <br />
-          <input name="adminEmail" type="email" required />
-        </label>
-        <label>
-          Admin navn
-          <br />
-          <input name="adminDisplayName" required />
-        </label>
-        <label>
-          Adgangskode
-          <br />
-          <input name="adminPassword" type="password" minLength={10} required />
-        </label>
-        <label>
-          Servernavn
-          <br />
-          <input name="serverName" defaultValue="BoltBytes Media" />
-        </label>
-        <label>
-          Externe URL
-          <br />
-          <input name="externalUrl" defaultValue="https://media.local" />
-        </label>
-        <label>
-          Mount-sti
-          <br />
-          <input name="mountPath" defaultValue="/media" />
-        </label>
-        <label>
-          Sprog
-          <select name="language" defaultValue="da">
-            <option value="da">Dansk</option>
-            <option value="en">English</option>
-          </select>
-        </label>
-        <label>
-          Tidszone
-          <br />
-          <input name="timezone" defaultValue="Europe/Copenhagen" />
-        </label>
-        <button type="submit">Start setup</button>
-      </form>
-      <p>{status}</p>
-    </div>
+    <main className="setup-page">
+      <header><Brand /><span>TRIN 1 AF 1</span></header>
+      <section className="setup-card">
+        <span className="eyebrow">FØRSTEGANGSOPSÆTNING</span>
+        <h1>{t.setupTitle}</h1>
+        <p>{t.setupLead}</p>
+        <form onSubmit={submit} className="setup-form">
+          <label>{t.accountName}<input name="accountName" defaultValue="BoltBytes" required /></label>
+          <label>{t.serverName}<input name="serverName" defaultValue="BoltBytes Media" required /></label>
+          <label>{t.displayName}<input name="adminDisplayName" required /></label>
+          <label>{t.email}<input name="adminEmail" type="email" required /></label>
+          <label className="full">{t.password}<input name="adminPassword" type="password" minLength={12} required /><small>Minimum 12 tegn</small></label>
+          <label className="full">{t.mountPath}<input name="mountPath" defaultValue="/media" required /></label>
+          {error && <div className="form-error full">{error}</div>}
+          <button className="full" disabled={busy}>{busy ? 'Opretter...' : t.saveSetup}</button>
+        </form>
+      </section>
+    </main>
   );
 }

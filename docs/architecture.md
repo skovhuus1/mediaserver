@@ -1,29 +1,38 @@
-﻿# Arkitektur (Fase 1)
+# Arkitektur
 
-## Domænemoduler i API
+## Runtime
 
-- `auth` – login/register/refresh/logout, token-rotation.
-- `accounts`, `users`, `profiles`, `devices` – kontosætning og identitetsdomæne.
-- `plans`, `subscriptions`, `entitlements`, `system` – kontrakter og abonnementer.
-- `media`, `libraries`, `playback` – playback forretningslogik.
-- `billing` – webhook ledger + provider-port til fremtidig abonnementsintegration.
+BoltBytes er en modulær monolit med en separat worker-proces:
 
-## Sessionmodel
+```text
+Klient -> nginx:5555 -> Next admin:3000
+                    -> Nest API:3001 -> PostgreSQL
+                                    -> Redis
+Worker ----------------------------> PostgreSQL job ledger
+```
 
-`playback_sessions` repræsenterer en aktiv session med lease og status. `stream_reservations` er en afledt post, der binder en session til konkret reservation.
+API’et ejer alle beslutninger om identitet, konto, plan, entitlement, playback-metode og streamgrænser. Klientfelter bruges kun som input og kan ikke ændre effektive rettigheder.
 
-Kontrakt: sessioner udnyttes gennem:
+## Identitet
 
-1. `EntitlementService.evaluateForProfile`
-2. `PlaybackDecisionService.chooseMethod`
-3. `StreamReservationService.reserve`
+Access tokens er kortlivede JWT’er. Refresh tokens er tilfældige 384-bit værdier, og kun SHA-256-hash lagres. Rotation udføres i en serializable transaktion med conditional revoke; genbrug af et roteret token tilbagekalder hele tokenfamilien.
 
-## Databasen
+## Entitlements
 
-`services/api/prisma/schema.prisma` indeholder den fulde fase-1 model med:
+Effektive rettigheder beregnes i denne rækkefølge:
 
-- `accounts`, `users`, `profiles`, `roles`, `permissions`
-- `plans`, `plan_versions`, `plan_entitlements`, `subscriptions`, `subscription_events`, `subscription_snapshots`
-- `playback_sessions`, `stream_reservations`, `playback_history`
-- `system_settings`, `system_jobs`, `job_attempts`, `billing_webhook_events`
-- auth relaterede tabeller (devices, refresh_tokens)
+```text
+PlanVersion snapshot -> user override -> profile override
+```
+
+Kun kendte booleske og numeriske felter kan overrides. Release delay anvender UTC og clamped kalendermåneder, så 31. januar plus en måned bliver sidste gyldige dag i februar.
+
+## Playback reservation
+
+Reservationer serialiseres pr. bruger med en PostgreSQL transaction-level advisory lock. Inde i samme transaktion ryddes udløbne leases, aktive slots tælles, og session plus reservation oprettes. En afbrudt transaktion kan derfor ikke efterlade en halv reservation.
+
+Heartbeat og stop kræver både account scope og session-ejerskab. Administrator/operator kan se kontosessions; almindelige brugere kan kun se og ændre egne sessions.
+
+## Worker
+
+Jobs er vedvarende rækker i `system_jobs`. Workers claimer med `FOR UPDATE SKIP LOCKED`, skriver `job_attempts`, holder lease og bruger eksponentiel retry. Ukendte jobtyper fejler eksplicit og markeres aldrig som gennemført.

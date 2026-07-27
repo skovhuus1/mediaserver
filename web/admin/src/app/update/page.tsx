@@ -1,171 +1,76 @@
-"use client";
+'use client';
 
-import { FormEvent, useState } from 'react';
+import { RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AppShell } from '@/components/app-shell';
+import { api, type ApiFailure } from '@/lib/api';
+import { t } from '@/lib/messages';
 
 type UpdateStatus = {
   enabled: boolean;
   configured: boolean;
-  repoPath: string;
-  remote: string;
   branch: string;
   localCommit: string | null;
   remoteCommit: string | null;
   hasUpdate: boolean;
-  reason?: string;
-};
-
-type UpdateApplyResult = UpdateStatus & {
-  fetchOutput: string;
-  pullOutput: string;
   restartMode: string;
-  restartOutput: string;
-  restarted: boolean;
 };
-
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
 export default function UpdatePage() {
-  const [status, setStatus] = useState('Klik for at tjekke om der findes ny version.');
-  const [checkResult, setCheckResult] = useState<UpdateStatus | null>(null);
-  const [applyResult, setApplyResult] = useState<UpdateApplyResult | null>(null);
+  const [status, setStatus] = useState<UpdateStatus | null>(null);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  function getToken(): string {
-    const token = localStorage.getItem('bb-media-access');
-    if (!token) {
-      throw new Error('Ingen adgangstoken fundet. Login igen i admin first.');
-    }
-    return token;
-  }
-
-  async function callApi<T>(path: string, method: 'GET' | 'POST' = 'GET') {
-    const token = getToken();
-    const res = await fetch(`${API_BASE}/api/v1/system/update/${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    const body = await res.json().catch(() => ({ error: { message: 'Tom respons' } }));
-    if (!res.ok) {
-      throw new Error(body?.message ?? body?.error?.message ?? `HTTP ${res.status}`);
-    }
-
-    return body as T;
-  }
-
-  async function checkUpdate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStatus('Checker main branch...');
-
+  async function check() {
+    setBusy(true);
+    setMessage('');
     try {
-      const result = await callApi<UpdateStatus>('check', 'POST');
-      setCheckResult(result);
-      setApplyResult(null);
-      setStatus(result.hasUpdate ? 'Ny version fundet. Vurder at trykke installer.' : 'Ingen ny version fundet.');
-    } catch (error: any) {
-      setStatus(error?.message ?? 'Fejl ved check af update');
-      setCheckResult(null);
-      setApplyResult(null);
+      setStatus(await api<UpdateStatus>('/system/update/check', { method: 'POST' }));
+    } catch (failure) {
+      setMessage((failure as ApiFailure).message ?? 'Opdateringstjek fejlede');
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function applyUpdate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStatus('Anvender opdatering...');
-
+  async function apply() {
+    setBusy(true);
+    setMessage('');
     try {
-      const result = await callApi<UpdateApplyResult>('apply', 'POST');
-      setApplyResult(result);
-      setCheckResult(result);
-      setStatus(
-        result.hasUpdate
-          ? `Apply udforet. Restart strategy: ${result.restartMode}. Restartet: ${result.restarted ? 'Ja' : 'Nej'}`
-          : 'Ingen opdatering blev gennemfoert.',
-      );
-    } catch (error: any) {
-      setStatus(error?.message ?? 'Fejl ved install af update');
-      setApplyResult(null);
+      const result = await api<{ updated: boolean; restartScheduled: boolean }>('/system/update/apply', { method: 'POST' });
+      setMessage(result.updated ? `Opdateret. Genstart ${result.restartScheduled ? 'er planlagt' : 'skal udfÃ¸res manuelt'}.` : 'Serveren er allerede opdateret.');
+      await check();
+    } catch (failure) {
+      setMessage((failure as ApiFailure).message ?? 'Opdateringen fejlede');
+      setBusy(false);
     }
   }
+
+  useEffect(() => { void check(); }, []);
 
   return (
-    <div style={{ display: 'grid', gap: 12, maxWidth: 760 }}>
-      <h1>Server-opdatering</h1>
-      <p>Checker mod github main og opdaterer kode direkte fra admin.</p>
-
-      <form onSubmit={checkUpdate} style={{ display: 'grid', gap: 8, maxWidth: 320 }}>
-        <button type="submit">Tjek opdatering</button>
-      </form>
-
-      {checkResult ? (
-        <section style={{ background: '#0e1e3d', border: '1px solid #3f6fb7', borderRadius: 10, padding: 12 }}>
-          <h2>Status</h2>
-          <div>
-            <strong>Enabled:</strong> {String(checkResult.enabled)}
-          </div>
-          <div>
-            <strong>Configured:</strong> {String(checkResult.configured)}
-          </div>
-          <div>
-            <strong>Repo:</strong> {checkResult.repoPath}
-          </div>
-          <div>
-            <strong>Remote:</strong> {checkResult.remote}
-          </div>
-          <div>
-            <strong>Branch:</strong> {checkResult.branch}
-          </div>
-          <div>
-            <strong>Local commit:</strong> {checkResult.localCommit ?? '-'}
-          </div>
-          <div>
-            <strong>Remote commit:</strong> {checkResult.remoteCommit ?? '-'}
-          </div>
-          <div>
-            <strong>Ny version:</strong> {checkResult.hasUpdate ? 'Ja' : 'Nej'}
-          </div>
-          {checkResult.reason ? <p>Reason: {checkResult.reason}</p> : null}
-        </section>
-      ) : null}
-
-      {checkResult?.hasUpdate ? (
-        <form onSubmit={applyUpdate} style={{ display: 'grid', gap: 8, maxWidth: 320 }}>
-          <button type="submit">Installer opdatering og genstart</button>
-          <p>Dette trækker ny kode fra main branch og forsøger genstart afhængigt af serverkonfiguration.</p>
-        </form>
-      ) : null}
-
-      {applyResult ? (
-        <section style={{ background: '#101f38', border: '1px solid #4c7dc0', borderRadius: 10, padding: 12 }}>
-          <h2>Apply resultat</h2>
-          <div>
-            <strong>Fetch:</strong> {applyResult.fetchOutput || '-'}
-          </div>
-          <div>
-            <strong>Pull:</strong> {applyResult.pullOutput || '-'}
-          </div>
-          <div>
-            <strong>Restart mode:</strong> {applyResult.restartMode}
-          </div>
-          <div>
-            <strong>Restart udført:</strong> {applyResult.restarted ? 'Ja' : 'Nej'}
-          </div>
-          <pre
-            style={{
-              background: '#08122a',
-              color: '#d8e8ff',
-              padding: 12,
-              borderRadius: 6,
-              overflowX: 'auto',
-            }}
-          >
-            {applyResult.restartOutput}
-          </pre>
-        </section>
-      ) : null}
-
-      <p>{status}</p>
-    </div>
+    <AppShell rail={<aside className="rail-card"><ShieldCheck /><h3>Sikker update</h3><p>Kun clean worktree og fast-forward accepteres.</p></aside>}>
+      <section className="update-page">
+        <span className="eyebrow">SERVER MAINTENANCE</span>
+        <h1>{t.updateTitle}</h1>
+        <p>Hent ny kode fra den konfigurerede Git-branch og genstart med valgt driftsmetode.</p>
+        <div className="update-card">
+          <Sparkles size={26} />
+          <dl>
+            <div><dt>Status</dt><dd>{status?.enabled ? (status.configured ? t.ready : 'Ikke konfigureret') : t.disabled}</dd></div>
+            <div><dt>Branch</dt><dd>{status?.branch ?? '...'}</dd></div>
+            <div><dt>Lokal commit</dt><dd>{status?.localCommit?.slice(0, 12) ?? '...'}</dd></div>
+            <div><dt>Remote commit</dt><dd>{status?.remoteCommit?.slice(0, 12) ?? '...'}</dd></div>
+            <div><dt>Genstart</dt><dd>{status?.restartMode ?? '...'}</dd></div>
+          </dl>
+          <strong>{status?.hasUpdate ? 'Ny version fundet' : 'Ingen ventende opdatering'}</strong>
+        </div>
+        {message && <div className="update-message">{message}</div>}
+        <div className="update-actions">
+          <button onClick={() => void check()} disabled={busy}><RefreshCw size={16} />{t.checkUpdate}</button>
+          <button className="primary" onClick={() => void apply()} disabled={busy || !status?.hasUpdate}><Sparkles size={16} />{t.applyUpdate}</button>
+        </div>
+      </section>
+    </AppShell>
   );
 }

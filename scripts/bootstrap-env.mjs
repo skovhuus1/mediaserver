@@ -1,129 +1,72 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
 
-const root = process.cwd();
-const envPath = join(root, '.env');
-const examplePath = join(root, '.env.example');
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const envPath = join(repositoryRoot, '.env');
+const examplePath = join(repositoryRoot, '.env.example');
+const temporaryPath = `${envPath}.tmp`;
 
-function loadFile(filePath) {
-  return readFileSync(filePath, 'utf8');
+function parseEnvironment(source) {
+  const values = new Map();
+  for (const rawLine of source.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const separator = line.indexOf('=');
+    if (separator <= 0) continue;
+    values.set(line.slice(0, separator).trim(), line.slice(separator + 1));
+  }
+  return values;
 }
 
-function parseEnv(raw) {
-  const map = new Map();
-
-  raw.split(/\r?\n/).forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) {
-      return;
-    }
-
-    const idx = line.indexOf('=');
-    if (idx <= 0) {
-      return;
-    }
-
-    const key = line.substring(0, idx).trim();
-    const value = line.substring(idx + 1).trim();
-    if (key) {
-      map.set(key, value);
-    }
-  });
-
-  return map;
+function isMissingSecret(value) {
+  if (!value) return true;
+  const normalized = value.toLowerCase();
+  return normalized.includes('change-me') || normalized.includes('replace-me') || normalized.includes('todo');
 }
 
-function isPlaceholder(value) {
-  const lowered = value.toLowerCase();
-  return !value ||
-    value.startsWith('change-') ||
-    lowered.includes('replace') ||
-    lowered.includes('setme') ||
-    lowered.includes('please') ||
-    lowered.includes('todo');
+if (!existsSync(examplePath)) {
+  throw new Error(`Missing environment template: ${examplePath}`);
 }
 
-function ensureGeneratedKeys(vars) {
-  const secret = vars.get('JWT_SECRET') ?? '';
-  if (!secret || secret.trim().length < 16 || isPlaceholder(secret)) {
-    const next = randomBytes(48).toString('hex');
-    vars.set('JWT_SECRET', next);
-  }
+const template = readFileSync(examplePath, 'utf8');
+const current = existsSync(envPath) ? readFileSync(envPath, 'utf8') : template;
+const values = parseEnvironment(current);
 
-  const encryption = vars.get('ENCRYPTION_KEY') ?? '';
-  if (!encryption || encryption.trim().length < 16 || isPlaceholder(encryption) || !encryption.startsWith('base64:')) {
-    vars.set('ENCRYPTION_KEY', `base64:${randomBytes(32).toString('base64')}`);
-  }
-
-  if (!vars.has('BB_MEDIA_UPDATE_REPO_PATH') || !vars.get('BB_MEDIA_UPDATE_REPO_PATH')) {
-    vars.set('BB_MEDIA_UPDATE_REPO_PATH', root.replace(/\\/g, '/'));
-  }
-
-  if (!vars.has('BB_MEDIA_UPDATE_GIT_REMOTE') || !vars.get('BB_MEDIA_UPDATE_GIT_REMOTE')) {
-    vars.set('BB_MEDIA_UPDATE_GIT_REMOTE', 'origin');
-  }
-
-  if (!vars.has('BB_MEDIA_UPDATE_GIT_BRANCH') || !vars.get('BB_MEDIA_UPDATE_GIT_BRANCH')) {
-    vars.set('BB_MEDIA_UPDATE_GIT_BRANCH', 'main');
-  }
-
-  if (!vars.has('BB_MEDIA_UPDATE_RESTART_MODE') || !vars.get('BB_MEDIA_UPDATE_RESTART_MODE')) {
-    vars.set('BB_MEDIA_UPDATE_RESTART_MODE', 'docker-compose');
-  }
-
-  if (!vars.has('BB_MEDIA_UPDATE_AUTO_RESTART')) {
-    vars.set('BB_MEDIA_UPDATE_AUTO_RESTART', 'true');
-  }
+if (isMissingSecret(values.get('JWT_SECRET'))) {
+  values.set('JWT_SECRET', randomBytes(64).toString('hex'));
+}
+if (isMissingSecret(values.get('ENCRYPTION_KEY'))) {
+  values.set('ENCRYPTION_KEY', `base64:${randomBytes(32).toString('base64')}`);
+}
+if (!values.get('BB_MEDIA_UPDATE_REPO_PATH')) {
+  values.set('BB_MEDIA_UPDATE_REPO_PATH', repositoryRoot.replaceAll('\\', '/'));
 }
 
-function renderEnv(vars, source) {
-  const keep = new Set(vars.keys());
-  const out = [];
-
-  source.split(/\r?\n/).forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) {
-      out.push(line);
-      return;
-    }
-
-    const eq = line.indexOf('=');
-    if (eq <= 0) {
-      out.push(line);
-      return;
-    }
-
-    const key = line.substring(0, eq).trim();
-    if (vars.has(key)) {
-      out.push(`${key}=${vars.get(key)}`);
-      keep.delete(key);
-    } else {
-      out.push(line);
-    }
-  });
-
-  keep.forEach((key) => {
-    out.push(`${key}=${vars.get(key)}`);
-  });
-
-  return out.join('\n').replace(/\n+$/, '\n');
-}
-
-function main() {
-  if (!existsSync(examplePath)) {
-    throw new Error(`Missing ${examplePath}. Run this script from repository root.`);
+const knownKeys = new Set(values.keys());
+const output = [];
+for (const rawLine of template.split(/\r?\n/)) {
+  const line = rawLine.trim();
+  const separator = line.indexOf('=');
+  if (!line || line.startsWith('#') || separator <= 0) {
+    output.push(rawLine);
+    continue;
   }
-
-  const source = existsSync(envPath) ? loadFile(envPath) : loadFile(examplePath);
-  const vars = parseEnv(source);
-  ensureGeneratedKeys(vars);
-
-  const updated = renderEnv(vars, source);
-  writeFileSync(envPath, updated, 'utf8');
-
-  console.log('Updated', envPath, 'with generated secure defaults where needed.');
+  const key = line.slice(0, separator).trim();
+  output.push(`${key}=${values.get(key) ?? ''}`);
+  knownKeys.delete(key);
+}
+for (const key of knownKeys) {
+  output.push(`${key}=${values.get(key) ?? ''}`);
 }
 
-main();
+writeFileSync(temporaryPath, `${output.join('\n').replace(/\n+$/, '')}\n`, { encoding: 'utf8', mode: 0o600 });
+renameSync(temporaryPath, envPath);
+try {
+  chmodSync(envPath, 0o600);
+} catch {
+  // Windows does not implement POSIX file modes.
+}
+console.log(`Environment ready at ${envPath}. Secrets were not printed.`);

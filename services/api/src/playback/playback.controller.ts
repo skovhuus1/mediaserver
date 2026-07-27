@@ -1,64 +1,36 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { EntitlementAction } from '@bb-media/shared-types';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '@boltbytes/contracts';
+import { CurrentUser } from '../common/auth';
+import { AuthorizePlaybackDto } from './playback.dto';
 import { PlaybackService } from './playback.service';
+import { StreamReservationService } from './stream-reservation.service';
 
-class PlaybackAuthorizeDto {
-  profileId!: string;
-  mediaId!: string;
-  deviceId!: string;
-  deviceType!: string;
-  isCastSession = false;
-  appVersion?: string;
-  deviceContext?: {
-    supportsCodecs?: string[];
-  };
-  requestedAction?: EntitlementAction;
-}
-
-@Controller('playback')
 @ApiTags('playback')
+@Controller('playback')
 export class PlaybackController {
-  constructor(private readonly playbackService: PlaybackService) {}
+  constructor(
+    private readonly playback: PlaybackService,
+    private readonly reservations: StreamReservationService,
+  ) {}
 
   @Post('authorize')
-  async authorize(@Body() dto: PlaybackAuthorizeDto, @CurrentUser() user: any) {
-    if (!user?.sub) {
-      throw new BadRequestException({ code: 'missing_user', message: 'Mangler bruger i kontekst' });
-    }
-
-    return this.playbackService.authorize(
-      user,
-      {
-        profileId: dto.profileId,
-        mediaId: dto.mediaId,
-        deviceId: dto.deviceId,
-        deviceType: dto.deviceType,
-        requestedAction: dto.requestedAction,
-        appVersion: dto.appVersion,
-        playbackContext: {
-          deviceId: dto.deviceId,
-          type: dto.deviceType,
-          supportsCodecs: dto.deviceContext?.supportsCodecs,
-        },
-        isCastSession: dto.isCastSession,
-      },
-    );
+  authorize(@CurrentUser() actor: AuthenticatedUser, @Body() dto: AuthorizePlaybackDto) {
+    return this.playback.authorize(actor, dto);
   }
 
   @Get('sessions')
-  async list(@CurrentUser() user: any) {
-    return this.playbackService.listSessions(user?.accountId);
+  sessions(@CurrentUser() actor: AuthenticatedUser) {
+    return this.playback.list(actor);
   }
 
   @Patch('sessions/:id/heartbeat')
-  async heartbeat(@Param('id') id: string, @Body() body: { leaseSeconds?: number }) {
-    return this.playbackService.refreshHeartbeat(id, body?.leaseSeconds ?? 60);
+  heartbeat(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.reservations.heartbeat(actor, id);
   }
 
   @Delete('sessions/:id')
-  async stop(@Param('id') id: string) {
-    return this.playbackService.releaseSession(id, 'user_stopped');
+  stop(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.reservations.release(actor, id);
   }
 }

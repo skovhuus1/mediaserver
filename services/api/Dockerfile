@@ -1,20 +1,29 @@
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS dependencies
 WORKDIR /app
+COPY package.json package-lock.json ./
+COPY services/api/package.json services/api/package.json
+COPY services/worker/package.json services/worker/package.json
+COPY web/admin/package.json web/admin/package.json
+COPY shared/contracts/package.json shared/contracts/package.json
+RUN npm ci
 
-COPY package.json .
-COPY services/api/package.json ./services/api/package.json
-COPY shared/types/package.json ./shared/types/package.json
-COPY services/api ./services/api
-COPY shared ./shared
-RUN npm install
-RUN npm run prisma:generate --workspace=services/api
-RUN npm run build --workspace=services/api
+FROM dependencies AS build
+COPY tsconfig.base.json eslint.config.mjs ./
+COPY shared/contracts shared/contracts
+COPY services/api services/api
+RUN npm run prisma:generate
+RUN npm run build --workspace=@boltbytes/contracts
+RUN npm run build --workspace=@boltbytes/api
 
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
+ENV NODE_ENV=production
 WORKDIR /app
-
-COPY --from=builder /app/services/api/package.json ./package.json
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/services/api/dist ./dist
+RUN apk add --no-cache git
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY --from=build /app/services/api/dist ./services/api/dist
+COPY --from=build /app/services/api/prisma ./services/api/prisma
+COPY --from=build /app/services/api/package.json ./services/api/package.json
+COPY package.json ./
+USER node
 EXPOSE 3001
-CMD ["node", "dist/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy --schema services/api/prisma/schema.prisma && node services/api/dist/main.js"]

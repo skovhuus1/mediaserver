@@ -1,0 +1,7 @@
+services:
+  api:
+    environment:
+      BB_MEDIA_UPDATE_ENABLED: "true"
+      BB_MEDIA_UPDATE_RESTART_MODE: docker-compose
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

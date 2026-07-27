@@ -1,0 +1,19 @@
+{
+  "name": "@boltbytes/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "start:dev": "ts-node src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3"
+  }
+}
