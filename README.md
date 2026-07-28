@@ -139,7 +139,7 @@ PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres 
 - Produktionsaudit med 0 kendte sårbarheder på high-niveau eller højere.
 - Docker Compose-konfiguration og container-build af API, admin og worker.
 
-Fase-2 mediepipelinen er verificeret i [GitHub Actions-run 30315230245](https://github.com/skovhuus1/mediaserver/actions/runs/30315230245):
+Den samlede fase-2 medie-, playback- og historikpipeline er verificeret i [GitHub Actions-run 30398129039](https://github.com/skovhuus1/mediaserver/actions/runs/30398129039):
 
 - Migration `0002_media_pipeline` anvendes efter fase-1-migrationen på en frisk PostgreSQL 16-database.
 - Unit-steppet kører 35 tests uden databasefiler; integrationssteppet kører separat 5/5 tests.
