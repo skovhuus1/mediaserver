@@ -3,5 +3,9 @@ services:
     environment:
       BB_MEDIA_UPDATE_ENABLED: "true"
       BB_MEDIA_UPDATE_RESTART_MODE: docker-compose
+      BB_MEDIA_UPDATE_REPO_PATH: ${BB_MEDIA_UPDATE_REPO_PATH:?Run scripts/bootstrap-env.mjs first}
+    group_add:
+      - "${DOCKER_GID:?Set DOCKER_GID to the Docker socket group ID}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ${BB_MEDIA_UPDATE_REPO_PATH}:${BB_MEDIA_UPDATE_REPO_PATH}

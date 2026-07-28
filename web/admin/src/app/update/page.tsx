@@ -14,12 +14,17 @@ type UpdateStatus = {
   remoteCommit: string | null;
   hasUpdate: boolean;
   restartMode: string;
+  currentBranch: string | null;
+  canApply: boolean;
+  blockers: string[];
 };
+type Branches = { selected: string; branches: string[] };
 
 export default function UpdatePage() {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
 
   async function check() {
     setBusy(true);
@@ -46,7 +51,22 @@ export default function UpdatePage() {
     }
   }
 
-  useEffect(() => { void check(); }, []);
+  async function selectBranch(branch: string) {
+    setBusy(true);
+    setMessage('');
+    try {
+      setStatus(await api<UpdateStatus>('/system/update/branch', { method: 'POST', body: JSON.stringify({ branch }) }));
+    } catch (failure) {
+      setMessage((failure as ApiFailure).message ?? 'Branch kunne ikke vælges');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    void check();
+    void api<Branches>('/system/update/branches').then((result) => setBranches(result.branches)).catch(() => undefined);
+  }, []);
 
   return (
     <AppShell rail={<aside className="rail-card"><ShieldCheck /><h3>Sikker update</h3><p>Kun clean worktree og fast-forward accepteres.</p></aside>}>
@@ -59,16 +79,19 @@ export default function UpdatePage() {
           <dl>
             <div><dt>Status</dt><dd>{status?.enabled ? (status.configured ? t.ready : 'Ikke konfigureret') : t.disabled}</dd></div>
             <div><dt>Branch</dt><dd>{status?.branch ?? '...'}</dd></div>
+            <div><dt>Kørende checkout</dt><dd>{status?.currentBranch ?? '...'}</dd></div>
             <div><dt>Lokal commit</dt><dd>{status?.localCommit?.slice(0, 12) ?? '...'}</dd></div>
             <div><dt>Remote commit</dt><dd>{status?.remoteCommit?.slice(0, 12) ?? '...'}</dd></div>
             <div><dt>Genstart</dt><dd>{status?.restartMode ?? '...'}</dd></div>
           </dl>
           <strong>{status?.hasUpdate ? 'Ny version fundet' : 'Ingen ventende opdatering'}</strong>
         </div>
+        {branches.length > 0 && <label className="branch-picker">Opdateringsbranch<select value={status?.branch ?? ''} disabled={busy} onChange={(event) => void selectBranch(event.target.value)}>{branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select></label>}
+        {status?.blockers.map((blocker) => <div className="form-error" key={blocker}>{blocker}</div>)}
         {message && <div className="update-message">{message}</div>}
         <div className="update-actions">
           <button onClick={() => void check()} disabled={busy}><RefreshCw size={16} />{t.checkUpdate}</button>
-          <button className="primary" onClick={() => void apply()} disabled={busy || !status?.hasUpdate}><Sparkles size={16} />{t.applyUpdate}</button>
+          <button className="primary" onClick={() => void apply()} disabled={busy || !status?.hasUpdate || !status?.canApply}><Sparkles size={16} />{t.applyUpdate}</button>
         </div>
       </section>
     </AppShell>
