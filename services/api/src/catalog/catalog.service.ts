@@ -140,7 +140,33 @@ export class CatalogService {
     });
     if (!library) throw new NotFoundException({ code: 'library_missing', message: 'Library does not exist in this account' });
     await this.assertLibraryIdle(library.id);
-    await this.prisma.library.delete({ where: { id: library.id } });
+    const mediaIds = (await this.prisma.mediaItem.findMany({
+      where: { libraryId: library.id, accountId: actor.accountId },
+      select: { id: true },
+    })).map(({ id }) => id);
+    if (mediaIds.length) {
+      const activePlayback = await this.prisma.playbackSession.findFirst({
+        where: {
+          mediaId: { in: mediaIds },
+          status: { in: ['reserving', 'active', 'paused'] },
+          leaseExpiresAt: { gt: new Date() },
+        },
+        select: { id: true },
+      });
+      if (activePlayback) {
+        throw new ConflictException({
+          code: 'library_playback_active',
+          message: 'Library cannot be deleted while one of its media items is actively playing',
+          details: { playbackSessionId: activePlayback.id },
+        });
+      }
+    }
+    await this.prisma.$transaction(async (tx) => {
+      if (mediaIds.length) {
+        await tx.playbackSession.deleteMany({ where: { mediaId: { in: mediaIds } } });
+      }
+      await tx.library.delete({ where: { id: library.id } });
+    });
     return { deleted: true, id: library.id };
   }
 

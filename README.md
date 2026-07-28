@@ -161,6 +161,8 @@ Admin-klienten roterer automatisk access- og refresh-tokens. Parallelle 401-svar
 
 Biblioteker kan oprettes, redigeres, flyttes mellem storage roots og slettes fra admin-panelet. Opret/ret realpath-validerer den valgte mappe og afviser manglende, ulæselige eller symlink-escaped stier. Redigering og sletning blokeres under queued/running scans, og sletning fjerner kun katalogdata, aldrig mediefiler på storage.
 
+Bibliotekssletning blokeres også, mens et medie har en aktiv, ikke-udløbet playback-lease. Når biblioteket kan slettes, fjernes dets afsluttede sessions, reservationer og historik transaktionelt før katalogdataene, så referentiel integritet bevares uden at røre mediefilerne.
+
 Biblioteksscanneren klassificerer filer deterministisk før ekstern metadataopslag. Film får renset titel, årstal og kategori fra mappestrukturen. Serie- og mixed-biblioteker genkender `S01E02`, `1x02`, `Season 01`, `Sæson 01` og `S01`, og gemmer kategori, serienavn, sæson og episode server-side. CI verificerer klassifikationen gennem en rigtig scannet MP4 og unit tests dækker film, serier og mixed-biblioteker.
 
 ## Ikke implementeret endnu
