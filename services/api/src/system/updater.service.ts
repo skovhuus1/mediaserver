@@ -127,7 +127,7 @@ export class UpdaterService {
       await this.run('git', ['switch', '--detach', remoteRef], 120_000);
       const after = (await this.run('git', ['rev-parse', 'HEAD'])).stdout.trim();
       const changed = before !== after;
-      const restartScheduled = changed && this.scheduleRestart();
+      const restartScheduled = changed ? await this.scheduleRestart() : false;
       return {
         updated: changed,
         previousCommit: before,
@@ -144,16 +144,15 @@ export class UpdaterService {
     return existsSync(this.repositoryPath) && existsSync(join(this.repositoryPath, '.git'));
   }
 
-  private scheduleRestart(): boolean {
+  private async scheduleRestart(): Promise<boolean> {
     if (this.restartMode === 'none') return false;
     const systemdService = process.env.BB_MEDIA_SYSTEMD_SERVICE ?? 'bb-media.target';
-    const command = this.restartMode === 'systemd' && this.useSudo ? 'sudo' : this.restartMode === 'systemd' ? 'systemctl' : 'docker';
-    const args = this.restartMode === 'systemd'
-      ? (this.useSudo ? ['-n', 'systemctl', 'restart', systemdService] : ['restart', systemdService])
-      : ['compose', 'up', '--detach', '--build', '--remove-orphans'];
     if (this.restartMode === 'docker-compose') {
-      args.splice(1, 0, '-f', 'docker-compose.yml', '-f', 'docker-compose.updater.yml');
+      await this.scheduleDockerComposeRestart();
+      return true;
     }
+    const command = this.useSudo ? 'sudo' : 'systemctl';
+    const args = this.useSudo ? ['-n', 'systemctl', 'restart', systemdService] : ['restart', systemdService];
     setTimeout(() => {
       const child = spawn(command, args, {
         cwd: this.repositoryPath,
@@ -164,6 +163,44 @@ export class UpdaterService {
       child.unref();
     }, 750);
     return true;
+  }
+
+  private async scheduleDockerComposeRestart(): Promise<void> {
+    const containerId = process.env.HOSTNAME;
+    if (!containerId) {
+      throw new ServiceUnavailableException({
+        code: 'update_runner_unavailable',
+        message: 'Updater could not identify the running API container',
+      });
+    }
+    const image = (await this.run('docker', ['inspect', '--format={{.Image}}', containerId])).stdout.trim();
+    if (!image) {
+      throw new ServiceUnavailableException({
+        code: 'update_runner_unavailable',
+        message: 'Updater could not identify its Docker image',
+      });
+    }
+    const runnerName = 'boltbytes-media-updater-runner';
+    await this.runWithExitCode('docker', ['rm', '--force', runnerName]);
+    await this.run('docker', [
+      'run',
+      '--detach',
+      '--name',
+      runnerName,
+      '--user',
+      '0:0',
+      '--volume',
+      '/var/run/docker.sock:/var/run/docker.sock',
+      '--volume',
+      `${this.repositoryPath}:${this.repositoryPath}`,
+      '--workdir',
+      this.repositoryPath,
+      '--entrypoint',
+      'sh',
+      image,
+      '-lc',
+      'sleep 2; docker compose -f docker-compose.yml -f docker-compose.updater.yml up --detach --build --remove-orphans --wait --wait-timeout 300 && docker compose -f docker-compose.yml -f docker-compose.updater.yml restart proxy',
+    ], 60_000);
   }
 
   private async selectedBranch(accountId: string): Promise<string> {
