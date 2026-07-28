@@ -46,6 +46,60 @@ export class SystemController {
     return register.metrics();
   }
 
+  @Get('errors')
+  @Roles('admin')
+  async errors(@CurrentUser() actor: AuthenticatedUser) {
+    const [scans, attempts] = await Promise.all([
+      this.prisma.libraryScan.findMany({
+        where: {
+          accountId: actor.accountId,
+          OR: [{ status: 'failed' }, { errors: { gt: 0 } }],
+        },
+        include: { library: { select: { id: true, name: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      this.prisma.jobAttempt.findMany({
+        where: { status: 'failed', job: { accountId: actor.accountId } },
+        include: { job: { select: { id: true, type: true } } },
+        orderBy: { startedAt: 'desc' },
+        take: 50,
+      }),
+    ]);
+    return [
+      ...scans.map((scan) => ({
+        id: `scan:${scan.id}`,
+        severity: scan.status === 'failed' ? 'error' : 'warning',
+        source: 'library-scanner',
+        code: scan.status === 'failed' ? 'library_scan_failed' : 'library_scan_partial',
+        message: scan.error ?? `${scan.errors} file(s) could not be processed`,
+        timestamp: (scan.finishedAt ?? scan.createdAt).toISOString(),
+        details: {
+          libraryId: scan.library.id,
+          libraryName: scan.library.name,
+          filesSeen: scan.filesSeen,
+          filesCreated: scan.filesCreated,
+          filesUpdated: scan.filesUpdated,
+          filesMissing: scan.filesMissing,
+          errors: scan.errors,
+        },
+      })),
+      ...attempts.map((attempt) => ({
+        id: `job:${attempt.id}`,
+        severity: 'error',
+        source: 'worker',
+        code: 'job_attempt_failed',
+        message: attempt.error ?? 'Worker job attempt failed without an error message',
+        timestamp: (attempt.endedAt ?? attempt.startedAt).toISOString(),
+        details: {
+          jobId: attempt.job.id,
+          jobType: attempt.job.type,
+          attempt: attempt.number,
+        },
+      })),
+    ].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp)).slice(0, 75);
+  }
+
   @Get('update/status')
   @Roles('admin')
   updateStatus(@CurrentUser() actor: AuthenticatedUser) {

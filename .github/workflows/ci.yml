@@ -94,6 +94,18 @@ jobs:
           }
           trap cleanup EXIT
 
+          mkdir -p media/Film/Action
+          docker compose run --rm --no-deps \
+            --user 0:0 \
+            --entrypoint ffmpeg \
+            -v "$PWD/media/Film/Action:/ci-media" \
+            worker \
+            -hide_banner -loglevel error \
+            -f lavfi -i color=c=black:s=320x240:d=1 \
+            -f lavfi -i anullsrc=r=48000:cl=stereo \
+            -shortest -c:v libx264 -c:a aac \
+            /ci-media/ci-smoke.mp4
+
           docker compose up --detach --wait --wait-timeout 180
           sleep 5
 
@@ -104,3 +116,38 @@ jobs:
           test "$(docker inspect --format '{{.State.Health.Status}}' "$api_id")" = "healthy"
           test "$(docker inspect --format '{{.State.Status}}' "$worker_id")" = "running"
           curl --fail --silent --show-error http://127.0.0.1:5555/api/v1/system/health
+
+          api_base="http://127.0.0.1:5555/api/v1"
+          curl --fail --silent --show-error \
+            -H 'content-type: application/json' \
+            -d '{"accountName":"CI Account","serverName":"CI Media","adminDisplayName":"CI Admin","adminEmail":"ci@example.test","adminPassword":"ci-password-123456","language":"da","timezone":"Europe/Copenhagen","mountPath":"/media"}' \
+            "$api_base/setup" >/dev/null
+          login="$(curl --fail --silent --show-error \
+            -H 'content-type: application/json' \
+            -d '{"email":"ci@example.test","password":"ci-password-123456","deviceFingerprint":"ci-device-fingerprint","deviceName":"CI Browser","deviceType":"web","platform":"linux"}' \
+            "$api_base/auth/login")"
+          token="$(jq -er '.accessToken' <<<"$login")"
+          root_id="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/storage-roots" | jq -er '.[0].id')"
+          library="$(curl --fail --silent --show-error \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d "{\"storageRootId\":\"$root_id\",\"name\":\"CI Film\",\"type\":\"movie\",\"path\":\"/media/Film\",\"recursive\":true}" \
+            "$api_base/libraries")"
+          library_id="$(jq -er '.id' <<<"$library")"
+          curl --fail --silent --show-error \
+            -X POST -H "authorization: Bearer $token" \
+            "$api_base/libraries/$library_id/scans" >/dev/null
+
+          scan_status=""
+          for _ in $(seq 1 45); do
+            scans="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/libraries/$library_id/scans")"
+            scan_status="$(jq -r '.[0].status // empty' <<<"$scans")"
+            if [ "$scan_status" = "completed" ] || [ "$scan_status" = "failed" ]; then break; fi
+            sleep 2
+          done
+          if [ "$scan_status" != "completed" ]; then
+            jq '.[0]' <<<"$scans"
+            exit 1
+          fi
+          test "$(jq -r '.[0].filesSeen' <<<"$scans")" -ge 1
+          test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/media" | jq 'length')" -ge 1

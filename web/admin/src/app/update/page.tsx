@@ -32,7 +32,7 @@ export default function UpdatePage() {
     try {
       setStatus(await api<UpdateStatus>('/system/update/check', { method: 'POST' }));
     } catch (failure) {
-      setMessage((failure as ApiFailure).message ?? 'Opdateringstjek fejlede');
+      setMessage(failureMessage(failure, 'Opdateringstjek fejlede'));
     } finally {
       setBusy(false);
     }
@@ -46,7 +46,7 @@ export default function UpdatePage() {
       setMessage(result.updated ? `Opdateret. Genstart ${result.restartScheduled ? 'er planlagt' : 'skal udføres manuelt'}.` : 'Serveren er allerede opdateret.');
       await check();
     } catch (failure) {
-      setMessage((failure as ApiFailure).message ?? 'Opdateringen fejlede');
+      setMessage(failureMessage(failure, 'Opdateringen fejlede'));
       setBusy(false);
     }
   }
@@ -57,7 +57,7 @@ export default function UpdatePage() {
     try {
       setStatus(await api<UpdateStatus>('/system/update/branch', { method: 'POST', body: JSON.stringify({ branch }) }));
     } catch (failure) {
-      setMessage((failure as ApiFailure).message ?? 'Branch kunne ikke vælges');
+      setMessage(failureMessage(failure, 'Branch kunne ikke vælges'));
     } finally {
       setBusy(false);
     }
@@ -96,4 +96,12 @@ export default function UpdatePage() {
       </section>
     </AppShell>
   );
+}
+
+function failureMessage(failure: unknown, fallback: string): string {
+  const apiFailure = failure as ApiFailure;
+  const details = typeof apiFailure.details === 'string'
+    ? apiFailure.details.trim()
+    : apiFailure.details ? JSON.stringify(apiFailure.details) : '';
+  return [apiFailure.message ?? fallback, details].filter(Boolean).join('\n');
 }

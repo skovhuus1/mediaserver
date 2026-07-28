@@ -12,6 +12,7 @@ type DirectoryListing = { currentPath: string; parentPath: string | null; direct
 type User = { id: string; email: string; displayName: string; status: string; profiles: Array<{ id: string; name: string }>; roles: Array<{ role: { code: string } }> };
 type Plan = { id: string; name: string; internalCode: string; description: string | null; versions: Array<{ version: number; isActive: boolean; maxConcurrentStreams: number; maxVideoResolution: number }> };
 type UpdateStatus = { enabled: boolean; configured: boolean; branch: string; restartMode: string; hasUpdate: boolean };
+type ErrorEntry = { id: string; severity: string; source: string; code: string; message: string; timestamp: string; details: Record<string, unknown> };
 
 export function ManagementView({ view }: { view: string }) {
   if (view === 'libraries') return <LibrariesView />;
@@ -131,8 +132,34 @@ function PlansView() {
 
 function SettingsView() {
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
-  useEffect(() => { void api<UpdateStatus>('/system/update/status').then(setUpdate).catch(() => undefined); }, []);
-  return <section className="management-page"><span className="eyebrow">SERVER CONTROL</span><h1>Indstillinger</h1><p>Driftsstatus og vedligeholdelse uden tomme kontrolknapper.</p><div className="management-card"><h2><Server size={18} /> Serveropdatering</h2><div className="data-row"><div><strong>{update?.enabled ? 'Updater aktiveret' : 'Updater deaktiveret'}</strong><small>Branch: {update?.branch ?? '...'}</small><small>Genstart: {update?.restartMode ?? '...'}</small></div><Link className="inline-action" href="/update">Åbn updater</Link></div></div></section>;
+  const [errors, setErrors] = useState<ErrorEntry[]>([]);
+  const [loadingErrors, setLoadingErrors] = useState(false);
+  async function loadErrors() {
+    setLoadingErrors(true);
+    try {
+      setErrors(await api<ErrorEntry[]>('/system/errors'));
+    } finally {
+      setLoadingErrors(false);
+    }
+  }
+  useEffect(() => {
+    void api<UpdateStatus>('/system/update/status').then(setUpdate).catch(() => undefined);
+    void loadErrors();
+  }, []);
+  return (
+    <section className="management-page">
+      <span className="eyebrow">SERVER CONTROL</span><h1>Indstillinger</h1><p>Driftsstatus, vedligeholdelse og durable fejl fra serveren.</p>
+      <div className="management-card">
+        <h2><Server size={18} /> Serveropdatering</h2>
+        <div className="data-row"><div><strong>{update?.enabled ? 'Updater aktiveret' : 'Updater deaktiveret'}</strong><small>Branch: {update?.branch ?? '...'}</small><small>Genstart: {update?.restartMode ?? '...'}</small></div><Link className="inline-action" href="/update">Åbn updater</Link></div>
+      </div>
+      <div className="management-card">
+        <div className="management-heading"><h2><ShieldCheck size={18} /> Fejllog</h2><button onClick={() => void loadErrors()} disabled={loadingErrors}>{loadingErrors ? 'Henter...' : 'Opdater'}</button></div>
+        {!errors.length && <p>Ingen durable scanner- eller workerfejl er registreret.</p>}
+        {errors.map((entry) => <article className={`error-entry ${entry.severity}`} key={entry.id}><div><strong>{entry.source} · {entry.code}</strong><time>{new Date(entry.timestamp).toLocaleString('da-DK')}</time></div><p>{entry.message}</p><pre>{JSON.stringify(entry.details, null, 2)}</pre></article>)}
+      </div>
+    </section>
+  );
 }
 
 function errorMessage(error: unknown): string {
