@@ -96,6 +96,7 @@ jobs:
 
           mkdir -p media/Film/Action
           docker compose run --rm --no-deps \
+            --user 0:0 \
             --entrypoint ffmpeg \
             -v "$PWD/media/Film/Action:/ci-media" \
             worker \
