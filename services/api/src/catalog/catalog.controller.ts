@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { BrowseLibraryDirectoriesDto, CreateLibraryDto, CreateMediaDto } from './catalog.dto';
+import { BrowseLibraryDirectoriesDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -30,6 +30,18 @@ export class CatalogController {
   @Roles('admin', 'operator')
   createLibrary(@CurrentUser() actor: AuthenticatedUser, @Body() dto: CreateLibraryDto) {
     return this.catalog.createLibrary(actor, dto);
+  }
+
+  @Patch('libraries/:id')
+  @Roles('admin', 'operator')
+  updateLibrary(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateLibraryDto) {
+    return this.catalog.updateLibrary(actor, id, dto);
+  }
+
+  @Delete('libraries/:id')
+  @Roles('admin', 'operator')
+  deleteLibrary(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.catalog.deleteLibrary(actor, id);
   }
 
   @Post('libraries/:id/scans')

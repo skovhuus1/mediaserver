@@ -125,6 +125,8 @@ Docker-opdateringer genstartes af en ekstern engangs-runner med navnet `boltbyte
 
 Admin-klienten roterer automatisk access- og refresh-tokens. Parallelle 401-svar samles om én refresh-request, hvert oprindeligt API-kald gentages højst én gang, og sessionen slettes kun ved et bekræftet ugyldigt refresh-token. Midlertidige netværks- og 5xx-fejl under en opdatering bevarer sessionen, så administratoren kan prøve igen, når serveren er healthy.
 
+Biblioteker kan oprettes, redigeres, flyttes mellem storage roots og slettes fra admin-panelet. Opret/ret realpath-validerer den valgte mappe og afviser manglende, ulæselige eller symlink-escaped stier. Redigering og sletning blokeres under queued/running scans, og sletning fjerner kun katalogdata, aldrig mediefiler på storage.
+
 ## Ikke implementeret endnu
 
 - Automatisk oprettelse og klassifikation af film-/seriebiblioteker samt mappebaserede kategorier som Action og Drama.

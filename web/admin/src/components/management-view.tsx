@@ -7,7 +7,7 @@ import { api, type ApiFailure } from '@/lib/api';
 
 type Root = { id: string; label: string; mountPath: string; isReadOnly: boolean };
 type Scan = { id: string; status: string; filesSeen: number; filesCreated: number; errors: number; error: string | null };
-type Library = { id: string; name: string; type: string; paths: Array<{ path: string }>; scans: Scan[] };
+type Library = { id: string; name: string; type: string; storageRoot: Root; paths: Array<{ path: string; recursive: boolean }>; scans: Scan[] };
 type DirectoryListing = { currentPath: string; parentPath: string | null; directories: Array<{ name: string; path: string }> };
 type User = { id: string; email: string; displayName: string; status: string; profiles: Array<{ id: string; name: string }>; roles: Array<{ role: { code: string } }> };
 type Plan = { id: string; name: string; internalCode: string; description: string | null; versions: Array<{ version: number; isActive: boolean; maxConcurrentStreams: number; maxVideoResolution: number }> };
@@ -27,6 +27,10 @@ function LibrariesView() {
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [selectedRoot, setSelectedRoot] = useState('');
   const [selectedPath, setSelectedPath] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [libraryName, setLibraryName] = useState('');
+  const [libraryType, setLibraryType] = useState('movie');
+  const [recursive, setRecursive] = useState(true);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -49,26 +53,58 @@ function LibrariesView() {
 
   useEffect(() => { void refresh().catch((error) => setMessage(errorMessage(error))); }, []);
 
-  async function create(event: FormEvent<HTMLFormElement>) {
+  async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
     setBusy(true);
     setMessage('');
     try {
-      await api('/libraries', {
-        method: 'POST',
-        body: JSON.stringify({
-          storageRootId: selectedRoot,
-          name: form.get('name'),
-          type: form.get('type'),
-          path: selectedPath,
-          recursive: true,
-        }),
+      await api(editingId ? `/libraries/${editingId}` : '/libraries', {
+        method: editingId ? 'PATCH' : 'POST',
+        body: JSON.stringify({ storageRootId: selectedRoot, name: libraryName, type: libraryType, path: selectedPath, recursive }),
       });
-      setMessage('Biblioteket er oprettet.');
+      setMessage(editingId ? 'Biblioteket er opdateret.' : 'Biblioteket er oprettet.');
+      cancelEdit();
       await refresh();
-      formElement.reset();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function edit(library: Library) {
+    setBusy(true);
+    setMessage('');
+    try {
+      setEditingId(library.id);
+      setLibraryName(library.name);
+      setLibraryType(library.type);
+      setRecursive(library.paths[0]?.recursive ?? true);
+      setSelectedRoot(library.storageRoot.id);
+      await browse(library.storageRoot.id, library.paths[0]?.path);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setLibraryName('');
+    setLibraryType('movie');
+    setRecursive(true);
+  }
+
+  async function remove(library: Library) {
+    if (!window.confirm(`Slet biblioteket "${library.name}" og dets importerede katalogdata? Mediefilerne på disken slettes ikke.`)) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      await api(`/libraries/${library.id}`, { method: 'DELETE' });
+      if (editingId === library.id) cancelEdit();
+      setMessage('Biblioteket er slettet. Mediefilerne er ikke ændret.');
+      await refresh();
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -78,6 +114,7 @@ function LibrariesView() {
 
   async function scan(libraryId: string) {
     setBusy(true);
+    setMessage('');
     try {
       await api(`/libraries/${libraryId}/scans`, { method: 'POST' });
       setMessage('Scanning er sat i kø.');
@@ -91,24 +128,30 @@ function LibrariesView() {
 
   return (
     <section className="management-page">
-      <span className="eyebrow">MEDIA CONTROL</span><h1>Biblioteker</h1><p>Opret rigtige biblioteker, vælg mapper og start scanning.</p>
+      <span className="eyebrow">MEDIA CONTROL</span><h1>Biblioteker</h1><p>Opret, rediger, slet og scan biblioteker med sikre servermapper.</p>
       <div className="management-grid">
-        <form className="management-card management-form" onSubmit={create}>
-          <h2><FolderOpen size={18} /> Opret bibliotek</h2>
+        <form className="management-card management-form" onSubmit={save}>
+          <h2><FolderOpen size={18} /> {editingId ? 'Rediger bibliotek' : 'Opret bibliotek'}</h2>
           <label>Storage root<select value={selectedRoot} onChange={(event) => { setSelectedRoot(event.target.value); void browse(event.target.value); }}>{roots.map((root) => <option key={root.id} value={root.id}>{root.label} · {root.mountPath}</option>)}</select></label>
-          <label>Navn<input name="name" required placeholder="Film" /></label>
-          <label>Type<select name="type"><option value="movie">Film</option><option value="series">Serier</option><option value="mixed">Blandet</option></select></label>
+          <label>Navn<input value={libraryName} onChange={(event) => setLibraryName(event.target.value)} required placeholder="Film" /></label>
+          <label>Type<select value={libraryType} onChange={(event) => setLibraryType(event.target.value)}><option value="movie">Film</option><option value="series">Serier</option><option value="mixed">Blandet</option></select></label>
           <label>Valgt mappe<input value={selectedPath} readOnly /></label>
+          <label><input type="checkbox" checked={recursive} onChange={(event) => setRecursive(event.target.checked)} /> Scan undermapper</label>
           <div className="folder-picker">
             <button type="button" disabled={!listing?.parentPath} onClick={() => listing?.parentPath && void browse(selectedRoot, listing.parentPath)}>Et niveau op</button>
             {listing?.directories.map((directory) => <button type="button" key={directory.path} onClick={() => void browse(selectedRoot, directory.path)}>{directory.name}</button>)}
           </div>
-          <button className="primary-action" disabled={busy || !selectedPath}>Opret bibliotek</button>
+          <button className="primary-action" disabled={busy || !selectedPath || !libraryName.trim()}>{editingId ? 'Gem ændringer' : 'Opret bibliotek'}</button>
+          {editingId && <button type="button" disabled={busy} onClick={cancelEdit}>Annuller</button>}
         </form>
         <div className="management-card">
           <h2><RefreshCw size={18} /> Eksisterende biblioteker</h2>
           {!libraries.length && <p>Ingen biblioteker er oprettet endnu.</p>}
-          {libraries.map((library) => <div className="data-row" key={library.id}><div><strong>{library.name}</strong><small>{library.type} · {library.paths[0]?.path}</small><small>Scan: {library.scans[0]?.status ?? 'aldrig kørt'}</small>{library.scans[0]?.error && <small className="scan-error">{library.scans[0].error}</small>}</div><button disabled={busy} onClick={() => void scan(library.id)}>Scan nu</button></div>)}
+          {libraries.map((library) => {
+            const latest = library.scans[0];
+            const active = latest?.status === 'queued' || latest?.status === 'running';
+            return <div className="data-row" key={library.id}><div><strong>{library.name}</strong><small>{library.type} · {library.paths[0]?.path}</small><small>Scan: {latest?.status ?? 'aldrig kørt'}{latest ? ` · set ${latest.filesSeen} · nye ${latest.filesCreated} · fejl ${latest.errors}` : ''}</small>{latest?.error && <small className="scan-error">{latest.error}</small>}</div><div className="row-actions"><button disabled={busy || active} onClick={() => void edit(library)}>Rediger</button><button disabled={busy || active} onClick={() => void scan(library.id)}>Scan nu</button><button disabled={busy || active} onClick={() => void remove(library)}>Slet</button></div></div>;
+          })}
         </div>
       </div>
       {message && <div className="update-message">{message}</div>}

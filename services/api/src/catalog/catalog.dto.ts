@@ -21,6 +21,30 @@ export class CreateLibraryDto {
   recursive = true;
 }
 
+export class UpdateLibraryDto {
+  @IsOptional()
+  @IsUUID()
+  storageRootId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  name?: string;
+
+  @IsOptional()
+  @IsIn(['movie', 'series', 'mixed'])
+  type?: 'movie' | 'series' | 'mixed';
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 1024)
+  path?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  recursive?: boolean;
+}
+
 export class BrowseLibraryDirectoriesDto {
   @IsUUID()
   storageRootId!: string;

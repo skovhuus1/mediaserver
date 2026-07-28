@@ -5,7 +5,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
-import { BrowseLibraryDirectoriesDto, CreateLibraryDto, CreateMediaDto } from './catalog.dto';
+import { BrowseLibraryDirectoriesDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
 
 @Injectable()
@@ -75,6 +75,7 @@ export class CatalogService {
     if (!root) throw new NotFoundException({ code: 'storage_root_missing', message: 'Storage root does not exist in this account' });
     const resolvedPath = resolveLibraryPath(root.mountPath, dto.path);
     if (!resolvedPath) throw new BadRequestException({ code: 'path_outside_root', message: 'Library path must stay within its storage root' });
+    await this.assertReadableLibraryPath(root.mountPath, resolvedPath);
     return this.prisma.library.create({
       data: {
         accountId: actor.accountId,
@@ -85,6 +86,61 @@ export class CatalogService {
       },
       include: { paths: true },
     });
+  }
+
+  async updateLibrary(actor: AuthenticatedUser, libraryId: string, dto: UpdateLibraryDto) {
+    const library = await this.prisma.library.findFirst({
+      where: { id: libraryId, accountId: actor.accountId },
+      include: { paths: { orderBy: { id: 'asc' } } },
+    });
+    if (!library) throw new NotFoundException({ code: 'library_missing', message: 'Library does not exist in this account' });
+    await this.assertLibraryIdle(libraryId);
+    const root = await this.prisma.storageRoot.findFirst({
+      where: { id: dto.storageRootId ?? library.storageRootId, accountId: actor.accountId },
+    });
+    if (!root) throw new NotFoundException({ code: 'storage_root_missing', message: 'Storage root does not exist in this account' });
+    const requestedPath = dto.path ?? library.paths[0]?.path;
+    if (!requestedPath) throw new BadRequestException({ code: 'library_path_missing', message: 'Library must have a media path' });
+    const resolvedPath = resolveLibraryPath(root.mountPath, requestedPath);
+    if (!resolvedPath) throw new BadRequestException({ code: 'path_outside_root', message: 'Library path must stay within its storage root' });
+    await this.assertReadableLibraryPath(root.mountPath, resolvedPath);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.library.update({
+        where: { id: library.id },
+        data: {
+          storageRootId: root.id,
+          name: dto.name?.trim() ?? library.name,
+          type: dto.type ?? library.type,
+        },
+      });
+      await tx.libraryPath.deleteMany({ where: { libraryId: library.id } });
+      await tx.libraryPath.create({
+        data: {
+          libraryId: library.id,
+          path: resolvedPath,
+          recursive: dto.recursive ?? library.paths[0]?.recursive ?? true,
+        },
+      });
+      return tx.library.findUnique({
+        where: { id: library.id },
+        include: {
+          paths: true,
+          storageRoot: { select: { id: true, label: true, mountPath: true, isReadOnly: true } },
+          scans: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+      });
+    });
+  }
+
+  async deleteLibrary(actor: AuthenticatedUser, libraryId: string) {
+    const library = await this.prisma.library.findFirst({
+      where: { id: libraryId, accountId: actor.accountId },
+      select: { id: true },
+    });
+    if (!library) throw new NotFoundException({ code: 'library_missing', message: 'Library does not exist in this account' });
+    await this.assertLibraryIdle(library.id);
+    await this.prisma.library.delete({ where: { id: library.id } });
+    return { deleted: true, id: library.id };
   }
 
   async listMedia(actor: AuthenticatedUser) {
@@ -173,5 +229,38 @@ export class CatalogService {
         availabilityOverride: dto.availabilityOverride ? new Date(dto.availabilityOverride) : null,
       },
     });
+  }
+
+  private async assertLibraryIdle(libraryId: string): Promise<void> {
+    const active = await this.prisma.libraryScan.findFirst({
+      where: { libraryId, status: { in: ['queued', 'running'] } },
+      select: { id: true, status: true },
+    });
+    if (active) {
+      throw new ConflictException({
+        code: 'library_scan_active',
+        message: 'Library cannot be changed while a scan is queued or running',
+        details: { scanId: active.id, status: active.status },
+      });
+    }
+  }
+
+  private async assertReadableLibraryPath(rootPath: string, libraryPath: string): Promise<void> {
+    try {
+      const [rootRealPath, libraryRealPath] = await Promise.all([realpath(rootPath), realpath(libraryPath)]);
+      if (!resolveStorageBrowsePath(rootRealPath, libraryRealPath)) {
+        throw new ForbiddenException({ code: 'path_outside_root', message: 'Resolved library path escapes its storage root' });
+      }
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        throw new NotFoundException({ code: 'media_directory_missing', message: 'Media directory does not exist' });
+      }
+      if (code === 'EACCES' || code === 'EPERM') {
+        throw new ForbiddenException({ code: 'media_directory_unreadable', message: 'Media directory cannot be read by BoltBytes' });
+      }
+      throw error;
+    }
   }
 }
