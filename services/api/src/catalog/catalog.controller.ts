@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
+import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -72,8 +72,8 @@ export class CatalogController {
 
   @Post('media/metadata/jobs')
   @Roles('admin', 'operator')
-  queueMetadata(@CurrentUser() actor: AuthenticatedUser) {
-    return this.catalog.queueMetadata(actor);
+  queueMetadata(@CurrentUser() actor: AuthenticatedUser, @Body() dto: QueueMetadataDto) {
+    return this.catalog.queueMetadata(actor, dto);
   }
 
   @Get('media/:id')

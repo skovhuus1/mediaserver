@@ -109,6 +109,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Server-side mediekatalog med paginering, tekstsøgning, bibliotek-/kategori-/typefiltre, stabil sortering, seriegruppering og kontoafgrænsede mediedetaljer. Adminpanelet har klikbare katalogkort, episodeoversigt, filterchips og fungerende sidekontroller.
 - Valgfri TMDB-metadata gennem durable, deduplikerede `media.metadata` jobs. En vellykket scan køer kun manglende metadata, mens admin kan gennemtvinge en opdatering. Overview, rating, udgivelsesdato, provider-id, plakat og backdrop gemmes server-side; API-tokenet eksponeres aldrig.
 - TMDB-token og metadata-sprog kan ændres uden container-genstart fra indstillingspanelet. Tokenet valideres mod TMDB, lagres AES-256-GCM-krypteret i `system_settings`, og API/worker bruger miljøvariablen som bagudkompatibel fallback.
+- `Kør metadata` i indstillingerne kan gennemtvinge en ny TMDB-opdatering for alle medier, kun film eller kun serieepisoder gennem den durable worker-kø.
 - Biblioteksformularer bevarer deres DOM-reference gennem async API-kald, og scannerens lagrede workerfejl vises direkte i bibliotek- og statusvisningen.
 - Indstillinger indeholder en durable fejllog med fejlede og delvist fejlede scanninger, worker-jobforsøg, tidsstempler og diagnostiske detaljer; updaterfejl viser også den konkrete kommandofejl.
 - Next.js adminskal inspireret af den godkendte BoltBytes-reference med rigtige API-data og tomme tilstande uden mock-film.

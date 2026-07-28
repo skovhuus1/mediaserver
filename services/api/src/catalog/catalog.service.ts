@@ -5,7 +5,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
-import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
+import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
 import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metadata-settings';
 
@@ -317,7 +317,7 @@ export class CatalogService {
     };
   }
 
-  async queueMetadata(actor: AuthenticatedUser) {
+  async queueMetadata(actor: AuthenticatedUser, dto: QueueMetadataDto = { mediaType: 'all' }) {
     const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
     if (!settings.token) {
       throw new ConflictException({
@@ -348,7 +348,7 @@ export class CatalogService {
           accountId: actor.accountId,
           type: 'media.metadata',
           status: 'queued',
-          payload: { onlyMissing: false, requestedBy: actor.sub },
+          payload: { onlyMissing: false, requestedBy: actor.sub, mediaType: dto.mediaType },
           maxAttempts: 3,
         },
       });

@@ -22,6 +22,7 @@ export async function enrichLibraryMetadata(
     accountId: string;
     libraryId?: string;
     onlyMissing: boolean;
+    mediaType?: 'all' | 'movie' | 'series';
     onProgress: () => Promise<void>;
   },
 ): Promise<MetadataStats> {
@@ -33,7 +34,13 @@ export async function enrichLibraryMetadata(
     where: {
       accountId: input.accountId,
       ...(input.libraryId ? { libraryId: input.libraryId } : {}),
-      type: { in: ['movie', 'episode'] },
+      type: {
+        in: input.mediaType === 'movie'
+          ? ['movie']
+          : input.mediaType === 'series'
+            ? ['episode']
+            : ['movie', 'episode'],
+      },
       ...(input.onlyMissing ? { metadataUpdatedAt: null } : {}),
     },
     orderBy: { updatedAt: 'asc' },

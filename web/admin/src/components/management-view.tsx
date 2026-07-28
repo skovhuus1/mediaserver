@@ -183,6 +183,7 @@ function SettingsView() {
   const [metadataMessage, setMetadataMessage] = useState('');
   const [metadataToken, setMetadataToken] = useState('');
   const [metadataLanguage, setMetadataLanguage] = useState('da-DK');
+  const [metadataScope, setMetadataScope] = useState<'all' | 'movie' | 'series'>('all');
   async function loadErrors() {
     setLoadingErrors(true);
     try {
@@ -203,8 +204,11 @@ function SettingsView() {
     setMetadataBusy(true);
     setMetadataMessage('');
     try {
-      await api('/media/metadata/jobs', { method: 'POST' });
-      setMetadataMessage('Metadataopdatering er sat i kø.');
+      await api('/media/metadata/jobs', {
+        method: 'POST',
+        body: JSON.stringify({ mediaType: metadataScope }),
+      });
+      setMetadataMessage(`Metadataopdatering for ${metadataScope === 'all' ? 'alle medier' : metadataScope === 'movie' ? 'alle film' : 'alle serier'} er sat i kø.`);
       setMetadata(await api<MetadataStatus>('/media/metadata/status'));
     } catch (error) {
       setMetadataMessage(errorMessage(error));
@@ -240,7 +244,7 @@ function SettingsView() {
       </div>
       <div className="management-card">
         <h2><Database size={18} /> Metadata</h2>
-        <div className="data-row"><div><strong>{metadata?.enabled ? 'TMDB aktiveret' : 'TMDB deaktiveret'}</strong><small>Sprog: {metadata?.language ?? 'da-DK'} · Kilde: {metadata?.source ?? 'ukendt'}</small><small>Seneste job: {metadata?.latestJob?.status ?? 'aldrig kørt'}</small></div><button disabled={!metadata?.enabled || metadataBusy || ['queued', 'running'].includes(metadata?.latestJob?.status ?? '')} onClick={() => void queueMetadata()}>{metadataBusy ? 'Arbejder...' : 'Opdater metadata'}</button></div>
+        <div className="data-row"><div><strong>{metadata?.enabled ? 'TMDB aktiveret' : 'TMDB deaktiveret'}</strong><small>Sprog: {metadata?.language ?? 'da-DK'} · Kilde: {metadata?.source ?? 'ukendt'}</small><small>Seneste job: {metadata?.latestJob?.status ?? 'aldrig kørt'}</small></div><div className="row-actions"><select aria-label="Medietype til metadata" value={metadataScope} onChange={(event) => setMetadataScope(event.target.value as 'all' | 'movie' | 'series')}><option value="all">Alle</option><option value="movie">Film</option><option value="series">Serier</option></select><button disabled={!metadata?.enabled || metadataBusy || ['queued', 'running'].includes(metadata?.latestJob?.status ?? '')} onClick={() => void queueMetadata()}>{metadataBusy ? 'Arbejder...' : 'Kør metadata'}</button></div></div>
         <form className="management-form" onSubmit={saveMetadata}>
           <label>TMDB API Read Access Token<input type="password" autoComplete="off" value={metadataToken} onChange={(event) => setMetadataToken(event.target.value)} minLength={20} required placeholder={metadata?.enabled ? 'Indtast kun for at erstatte den gemte nøgle' : 'eyJ...'} /></label>
           <label>Metadata-sprog<input value={metadataLanguage} onChange={(event) => setMetadataLanguage(event.target.value)} pattern="[a-z]{2}(-[A-Z]{2})?" required /></label>

@@ -116,7 +116,9 @@ export class PlaybackHistoryService {
         codec: entry.media.codec,
         container: entry.media.container,
         library: entry.media.library,
-        file: entry.media.file,
+        file: entry.media.file
+          ? { ...entry.media.file, sizeBytes: entry.media.file.sizeBytes.toString() }
+          : null,
         progress: {
           positionMs: entry.positionMs,
           durationMs,

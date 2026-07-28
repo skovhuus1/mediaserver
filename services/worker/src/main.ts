@@ -283,10 +283,14 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
 
 async function enrichMetadata(job: ClaimedJob): Promise<void> {
   const payload = asJsonObject(job.payload);
+  const mediaType = payload.mediaType === 'movie' || payload.mediaType === 'series'
+    ? payload.mediaType
+    : 'all';
   await enrichLibraryMetadata(prisma, {
     accountId: job.accountId,
     ...(typeof payload.libraryId === 'string' ? { libraryId: payload.libraryId } : {}),
     onlyMissing: payload.onlyMissing === true,
+    mediaType,
     onProgress: () => renewJobLease(job.id),
   });
 }
