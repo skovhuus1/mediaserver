@@ -96,14 +96,16 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Konto- og ejerskabskontrol på profiler, enheder, medier, biblioteker, abonnementer og playback sessions.
 - Entitlement-evaluering med user/profile overrides, deterministiske kalendermåneder og tydelige afvisningsårsager.
 - Entitlement-releasevinduer bruger en eksakt provider-dato, når den findes, og falder ellers tilbage til 1. januar i scannerens validerede udgivelsesår. Medier uden dato eller troværdigt år forbliver blokeret til administratorgennemgang.
-- Playback-metodevalg uden silent transcode fallback.
+- Playback-metodevalg uden silent fallback: browserkompatible MP4/WebM-filer bruger Direct Play, mens inkompatible codecs eller containere kun går til den serverautoriserede transcoder, når planen tillader det.
 - Atomisk stream reservation med Prisma-kompatibel, namespaced PostgreSQL advisory lock, frisk `READ COMMITTED`-visning efter låseventet, lease/heartbeat og kryptografisk stream-token.
 - Vedvarende worker-kø med `FOR UPDATE SKIP LOCKED`, jobforsøg, retry/backoff og lease-cleanup.
 - Manuel biblioteksscanning via durable `library.scan` jobs med sikker realpath-kontrol, symlink-afvisning, `ffprobe`-metadata og markering af manglende filer uden automatisk sletning.
 - Direkte medielevering med HTTP `HEAD`, single-range `GET`, `206 Partial Content`, suffix ranges og hash-valideret session-token; query strings udelades fra API-logs, og stream-access logs er deaktiveret i nginx.
-- Integreret HTML5-webafspiller med server-side authorize, browser-capabilities, kortlivet stream-token, 30-sekunders lease-heartbeat, fremdriftslagring hvert 10. sekund og sikker frigivelse af stream-plads ved stop.
+- Integreret fuldskærms-webafspiller med egen tidslinje, play/pause, 10-sekunders hop, lydstyrke, hastighed, lydspor, undertekststatus, kvalitetsvalg, information, tastaturstyring og responsivt mobillayout. Server-side authorize, kortlivet stream-token, 30-sekunders lease-heartbeat, fremdriftslagring hvert 10. sekund og sikker frigivelse af stream-plads ved stop er bevaret.
 - Konto-, bruger- og profilafgrænset playback-historik med idempotent upsert, positions-clamping, automatisk afslutning ved 90 procent og en live `Fortsæt med at se`-sektion, der genoptager fra den gemte position.
-- Klikbare `Afspil`-handlinger på film og enkelte serieepisoder; filer der kræver den endnu ikke implementerede transcoder afvises med en konkret fejl i stedet for skjult fallback.
+- Klikbare `Afspil`-handlinger på film og enkelte serieepisoder. Inkompatible filer køres gennem en separat durable `playback.transcode`-kø og FFmpeg-container, så scanning og metadataarbejde ikke blokeres af en lang film.
+- Tokenbeskyttet HLS med atomisk manifest-publicering, firesekunders MPEG-TS-segmenter, H.264/AAC-output, planens opløsnings-/bitrategrænser og `hls.js`-fallback i browsere uden native HLS. HLS-tokenet skrives ikke til nginx-accessloggen.
+- Chromecast Web Sender via Google Cast Default Media Receiver og et servervalideret handoff på den eksisterende logical session. Cast-knappen aktiveres kun, når browserens Cast Framework er tilgængeligt; controllerfanen skal fortsat være åben for heartbeat i denne første senderimplementation.
 - Scanstatus og manuel scan-trigger i admin-dashboardet.
 - Funktionel adminnavigation med live film-/seriefiltrering, søgning, bibliotek-oprettelse, sikker mappevælger, scanning, brugerliste, planliste og driftsindstillinger.
 - Server-side mediekatalog med paginering, tekstsøgning, bibliotek-/kategori-/typefiltre, stabil sortering, seriegruppering og kontoafgrænsede mediedetaljer. Adminpanelet har klikbare katalogkort, episodeoversigt, filterchips og fungerende sidekontroller.
@@ -142,12 +144,12 @@ PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres 
 Den samlede fase-2 medie-, playback- og historikpipeline er verificeret i [GitHub Actions-run 30398129039](https://github.com/skovhuus1/mediaserver/actions/runs/30398129039):
 
 - Migration `0002_media_pipeline` anvendes efter fase-1-migrationen på en frisk PostgreSQL 16-database.
-- Unit-steppet kører 35 tests uden databasefiler; integrationssteppet kører separat 5/5 tests.
+- Unit- og integrationssteps køres separat, så rene policytests ikke afhænger af en database, mens reservations- og katalogkontrakter valideres mod PostgreSQL.
 - To samtidige scan-triggers opretter præcis én scan-ledger og ét durable worker-job.
 - Stream reservation ved limit 1 accepterer fortsat præcis én af to samtidige requests.
-- API, admin og worker bygges, produktion-audit er grøn, Compose valideres, og worker-imaget med FFmpeg-laget bygges.
+- API, admin, worker og den isolerede transcoder bygges, produktion-audit er grøn, Compose valideres, og FFmpeg-laget bygges.
 - CI genererer en rigtig MP4, opretter server/admin/bibliotek gennem API’et, sætter en scan i kø og kræver, at worker/ffprobe registrerer mindst ét afspilleligt medie.
-- CI autoriserer derefter den importerede MP4 til Direct Play, kræver en tokenbeskyttet `206 Partial Content` Range-response gennem nginx, gemmer 25 procent fremdrift, finder mediet i `Fortsæt med at se` og kræver, at 95 procent markerer det afsluttet.
+- CI autoriserer derefter den importerede MP4 til Direct Play, kræver en tokenbeskyttet `206 Partial Content` Range-response gennem nginx, gemmer 25 procent fremdrift, finder mediet i `Fortsæt med at se` og kræver, at 95 procent markerer det afsluttet. Den samme fil tvinges derefter gennem transcoding, hvor CI kræver et omskrevet HLS-manifest og et ikke-tomt tokenbeskyttet segment.
 
 CI tester en lille rigtig MP4 gennem nginx, men afspiller endnu ikke en stor fil eller host-specifikke mountrettigheder. Det kræver fortsat en staging-server med det faktiske read-only media mount og en rigtig browser.
 
@@ -169,10 +171,10 @@ Biblioteksscanneren klassificerer filer deterministisk før ekstern metadataopsl
 
 - Automatisk oprettelse af flere biblioteker ud fra mappestrukturen; klassifikation og mappebaserede kategorier er implementeret, men biblioteker oprettes fortsat bevidst af administratoren.
 - Lokal caching/proxying af TMDB-billeder; den nuværende implementation gemmer validerede billedstier og henter billeder direkte fra TMDBs faste image-host.
-- HLS-packaging og signed segment URLs.
-- FFmpeg transcoding workers, scheduler og hardwareacceleration.
-- Container-remux/HLS for browserinkompatible codecs og containere; webafspilleren kan derfor kun afspille formater, som browseren selv understøtter.
-- Automatisk næste episode, intro-skip og undertekstvalg i webafspilleren.
+- Hardwareacceleration, flere adaptive HLS-renditions og serverstyret transcode-kapacitetsplanlægning; den nuværende separate transcoder bruger softwarebaseret `libx264` og producerer én planbegrænset rendition.
+- Ægte container-remux uden video-reencoding. `direct_stream` vælges derfor bevidst ikke endnu; browserinkompatible containere går gennem transcoding.
+- Automatisk næste episode, intro-/recap-markører og indlæsning/burn-in af eksterne undertekstfiler. Afspillermenuerne er funktionelle for browser-/HLS-spor, men scanneren importerer endnu ikke sidecar-undertekster.
+- Egen Chromecast receiver, receiver-heartbeat og fortsat afspilning efter controllerfanen lukkes. Den nuværende Default Media Receiver-handoff kræver, at fanen forbliver aktiv, og serverens URL skal kunne nås fra Chromecast-enheden.
 - TVDB-provider; TMDB er den aktive provider for både film og serier.
 - Chromecast sender/receiver og handoff-token.
 - Sonarr, Radarr og qBittorrent integration.

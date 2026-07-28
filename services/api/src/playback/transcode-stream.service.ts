@@ -1,0 +1,147 @@
+import {
+  GoneException,
+  HttpException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { createReadStream } from 'node:fs';
+import { access, readFile, realpath, stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import type { Response } from 'express';
+import { PrismaService } from '../prisma/prisma.service';
+import { isPathWithin, streamTokenMatches } from './direct-stream-policy';
+import { isAllowedHlsAsset, rewriteHlsPlaylist } from './transcode-stream-policy';
+
+type TranscodeLimits = {
+  maxVideoResolution: number;
+  maxVideoBitrate: number;
+};
+
+@Injectable()
+export class TranscodeStreamService {
+  private readonly transcodeRoot = resolve(process.env.TRANSCODE_PATH?.trim() || '/transcode');
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async enqueue(sessionId: string, accountId: string, limits: TranscodeLimits) {
+    await this.prisma.systemJob.create({
+      data: {
+        accountId,
+        type: 'playback.transcode',
+        status: 'queued',
+        payload: {
+          sessionId,
+          maxVideoResolution: limits.maxVideoResolution,
+          maxVideoBitrate: limits.maxVideoBitrate,
+        },
+        maxAttempts: 1,
+      },
+    });
+  }
+
+  async status(sessionId: string, token: string | undefined) {
+    const session = await this.validSession(sessionId, token);
+    const manifestPath = this.assetPath(session.id, 'master.m3u8');
+    try {
+      await access(manifestPath);
+      return { state: 'ready', message: 'HLS stream is ready' };
+    } catch {
+      // The worker writes the manifest atomically after the first complete segment.
+    }
+
+    const job = await this.prisma.systemJob.findFirst({
+      where: {
+        accountId: session.accountId,
+        type: 'playback.transcode',
+        payload: { path: ['sessionId'], equals: session.id },
+      },
+      include: { attempts: { orderBy: { number: 'desc' }, take: 1 } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!job) return { state: 'failed', message: 'The transcode job was not found' };
+    if (job.status === 'failed') {
+      return {
+        state: 'failed',
+        message: job.attempts[0]?.error ?? 'FFmpeg could not prepare this media file',
+      };
+    }
+    if (job.status === 'completed') {
+      return { state: 'failed', message: 'FFmpeg completed without producing an HLS manifest' };
+    }
+    return {
+      state: job.status === 'running' ? 'running' : 'queued',
+      message: job.status === 'running' ? 'FFmpeg is preparing the stream' : 'Waiting for a transcoder',
+    };
+  }
+
+  async sendAsset(
+    sessionId: string,
+    asset: string,
+    token: string | undefined,
+    response: Response,
+  ): Promise<void> {
+    const session = await this.validSession(sessionId, token);
+    if (!isAllowedHlsAsset(asset)) {
+      throw new NotFoundException({ code: 'hls_asset_missing', message: 'HLS asset was not found' });
+    }
+    const sessionRoot = await realpath(resolve(this.transcodeRoot, session.id)).catch(() => null);
+    if (!sessionRoot || !isPathWithin(this.transcodeRoot, sessionRoot)) {
+      throw new NotFoundException({ code: 'hls_not_ready', message: 'HLS stream is not ready' });
+    }
+    const candidate = this.assetPath(session.id, asset);
+    const mediaPath = await realpath(candidate).catch(() => null);
+    if (!mediaPath || !isPathWithin(sessionRoot, mediaPath)) {
+      throw new NotFoundException({ code: 'hls_asset_missing', message: 'HLS asset was not found' });
+    }
+
+    if (asset === 'master.m3u8') {
+      const playlist = await readFile(mediaPath, 'utf8');
+      response.status(200);
+      response.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      response.setHeader('Cache-Control', 'private, no-store');
+      response.send(rewriteHlsPlaylist(playlist, token!));
+      return;
+    }
+
+    const fileStat = await stat(mediaPath);
+    response.status(200);
+    response.setHeader('Content-Type', 'video/mp2t');
+    response.setHeader('Content-Length', String(fileStat.size));
+    response.setHeader('Cache-Control', 'private, max-age=3600');
+    await new Promise<void>((resolveStream, reject) => {
+      const stream = createReadStream(mediaPath);
+      stream.once('error', reject);
+      response.once('finish', resolveStream);
+      response.once('close', () => {
+        stream.destroy();
+        resolveStream();
+      });
+      stream.pipe(response);
+    });
+  }
+
+  private assetPath(sessionId: string, asset: string): string {
+    const candidate = resolve(this.transcodeRoot, sessionId, asset);
+    if (!isPathWithin(this.transcodeRoot, candidate)) {
+      throw new UnauthorizedException({ code: 'hls_path_invalid', message: 'HLS path escapes the transcode root' });
+    }
+    return candidate;
+  }
+
+  private async validSession(sessionId: string, token: string | undefined) {
+    if (!token) throw new UnauthorizedException({ code: 'stream_token_required', message: 'Stream token is required' });
+    const session = await this.prisma.playbackSession.findUnique({ where: { id: sessionId } });
+    if (!session) throw new NotFoundException({ code: 'stream_session_missing', message: 'Playback session was not found' });
+    if (!streamTokenMatches(token, session.streamTokenHash)) {
+      throw new UnauthorizedException({ code: 'stream_token_invalid', message: 'Stream token is invalid' });
+    }
+    if (!['reserving', 'active', 'paused'].includes(session.status) || session.leaseExpiresAt <= new Date()) {
+      throw new GoneException({ code: 'stream_session_expired', message: 'Playback session has expired' });
+    }
+    if (session.method !== 'transcode') {
+      throw new HttpException({ code: 'stream_method_invalid', message: 'This session does not use HLS transcoding' }, 409);
+    }
+    return session;
+  }
+}
