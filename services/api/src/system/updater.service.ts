@@ -188,7 +188,10 @@ export class UpdaterService {
 
   private async runWithExitCode(command: string, args: string[], timeout = 20_000): Promise<CommandResult & { exitCode: number }> {
     try {
-      const result = await execFileAsync(command, args, {
+      const commandArguments = command === 'git'
+        ? ['-c', `safe.directory=${this.repositoryPath}`, ...args]
+        : args;
+      const result = await execFileAsync(command, commandArguments, {
         cwd: this.repositoryPath,
         timeout,
         maxBuffer: 2 * 1024 * 1024,

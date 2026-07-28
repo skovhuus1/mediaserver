@@ -27,6 +27,7 @@ type LibraryScan = {
   filesUpdated: number;
   filesMissing: number;
   errors: number;
+  error: string | null;
 };
 type Library = {
   id: string;
@@ -194,7 +195,7 @@ function StatusRail({
       <section className="rail-card storage-card">
         <div className="rail-title"><h3>Biblioteksscanner</h3><HardDrive size={17} /></div>
         {latestScan
-          ? <p>Status: <strong>{latestScan.status}</strong><br />Set {latestScan.filesSeen} · Nye {latestScan.filesCreated} · Fejl {latestScan.errors}</p>
+          ? <><p>Status: <strong>{latestScan.status}</strong><br />Set {latestScan.filesSeen} · Nye {latestScan.filesCreated} · Fejl {latestScan.errors}</p>{latestScan.error && <p className="scan-error">{latestScan.error}</p>}</>
           : <p>Ingen scanninger er kørt endnu.</p>}
         {scanMessage ? <p>{scanMessage}</p> : null}
         <button disabled={!libraries.length || scanPending || ['queued', 'running'].includes(latestScan?.status ?? '')} onClick={() => void onScan()}>

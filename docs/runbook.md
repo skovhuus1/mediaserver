@@ -32,6 +32,7 @@ Stop applikationen, tag databasebackup og inspicer Prisma-fejlkoden. Brug aldrig
 - `update_dirty_worktree`: commit eller fjern bevidste tracked ændringer.
 - `update_not_fast_forward`: historikken divergerer og kræver manuel Git-gennemgang.
 - `update_command_failed`: kontroller Git-remote, netværk og servicebrugerens adgang.
+- `detected dubious ownership`: den indbyggede updater sender automatisk det eksakte `BB_MEDIA_UPDATE_REPO_PATH` som Git `safe.directory`; kontrollér at containeren kører en version med denne rettelse.
 
 Docker-updateren aktiveres eksplicit:
 
