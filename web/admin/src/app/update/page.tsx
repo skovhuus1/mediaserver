@@ -16,6 +16,8 @@ type UpdateStatus = {
   restartMode: string;
   currentBranch: string | null;
   canApply: boolean;
+  transitionMode: 'up-to-date' | 'fast-forward' | 'squash-equivalent' | 'blocked';
+  transitionReason: string;
   blockers: string[];
 };
 type Branches = { selected: string; branches: string[] };
@@ -42,8 +44,8 @@ export default function UpdatePage() {
     setBusy(true);
     setMessage('');
     try {
-      const result = await api<{ updated: boolean; restartScheduled: boolean }>('/system/update/apply', { method: 'POST' });
-      setMessage(result.updated ? `Opdateret. Genstart ${result.restartScheduled ? 'er planlagt' : 'skal udføres manuelt'}.` : 'Serveren er allerede opdateret.');
+      const result = await api<{ updated: boolean; restartScheduled: boolean; transitionMode: UpdateStatus['transitionMode'] }>('/system/update/apply', { method: 'POST' });
+      setMessage(result.updated ? `Opdateret via ${transitionLabel(result.transitionMode)}. Genstart ${result.restartScheduled ? 'er planlagt' : 'skal udføres manuelt'}.` : 'Serveren er allerede opdateret.');
       await check();
     } catch (failure) {
       setMessage(failureMessage(failure, 'Opdateringen fejlede'));
@@ -69,7 +71,7 @@ export default function UpdatePage() {
   }, []);
 
   return (
-    <AppShell rail={<aside className="rail-card"><ShieldCheck /><h3>Sikker update</h3><p>Kun clean worktree og fast-forward accepteres.</p></aside>}>
+    <AppShell rail={<aside className="rail-card"><ShieldCheck /><h3>Sikker update</h3><p>Clean worktree samt fast-forward eller eksakt squash-tree accepteres.</p></aside>}>
       <section className="update-page">
         <span className="eyebrow">SERVER MAINTENANCE</span>
         <h1>{t.updateTitle}</h1>
@@ -82,8 +84,10 @@ export default function UpdatePage() {
             <div><dt>Kørende checkout</dt><dd>{status?.currentBranch ?? '...'}</dd></div>
             <div><dt>Lokal commit</dt><dd>{status?.localCommit?.slice(0, 12) ?? '...'}</dd></div>
             <div><dt>Remote commit</dt><dd>{status?.remoteCommit?.slice(0, 12) ?? '...'}</dd></div>
+            <div><dt>Overgang</dt><dd>{status ? transitionLabel(status.transitionMode) : '...'}</dd></div>
             <div><dt>Genstart</dt><dd>{status?.restartMode ?? '...'}</dd></div>
           </dl>
+          {status?.transitionReason && <p>{status.transitionReason}</p>}
           <strong>{status?.hasUpdate ? 'Ny version fundet' : 'Ingen ventende opdatering'}</strong>
         </div>
         {branches.length > 0 && <label className="branch-picker">Opdateringsbranch<select value={status?.branch ?? ''} disabled={busy} onChange={(event) => void selectBranch(event.target.value)}>{branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</select></label>}
@@ -104,4 +108,11 @@ function failureMessage(failure: unknown, fallback: string): string {
     ? apiFailure.details.trim()
     : apiFailure.details ? JSON.stringify(apiFailure.details) : '';
   return [apiFailure.message ?? fallback, details].filter(Boolean).join('\n');
+}
+
+function transitionLabel(mode: UpdateStatus['transitionMode']): string {
+  if (mode === 'fast-forward') return 'fast-forward';
+  if (mode === 'squash-equivalent') return 'squash-merge';
+  if (mode === 'up-to-date') return 'allerede opdateret';
+  return 'blokeret';
 }

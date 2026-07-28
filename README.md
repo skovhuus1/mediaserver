@@ -54,7 +54,7 @@ Updateren kan bruges fra `Opdateringer` i adminpanelet:
 - `POST /api/v1/system/update/check`
 - `POST /api/v1/system/update/apply`
 
-Den kontrollerer remote commit, nægter at opdatere et dirty eller divergeret worktree, anvender kun `git pull --ff-only` og tillader kun faste kommandoer uden shell-interpolation.
+Den kontrollerer remote commit og nægter at opdatere et dirty eller reelt divergeret worktree. Almindelig fast-forward accepteres direkte. Efter et GitHub squash-merge accepteres overgangen kun, når den kørende versions komplette Git tree-hash findes i målbranchens historik. Checkout sker altid til den præcise SHA, der blev valideret efter fetch.
 
 Direkte installation aktiverer updateren og genstarter `bb-media.target` via en snæver sudoers-regel. Docker-updateren er et bevidst opt-in, fordi Docker-socket giver høj host-adgang:
 
@@ -67,6 +67,22 @@ Standard Docker-installation har updateren deaktiveret. Den sikre manuelle opdat
 ```bash
 git pull --ff-only origin main
 docker compose up --detach --build
+```
+
+Hvis en ældre updater allerede kører på en feature-commit, der blev squash-merget, kræves én manuel bootstrap. Kommandoen må kun skifte til `main`, når den kørende tree-hash findes i `origin/main`:
+
+```bash
+cd /home/seeds/mediaserver
+sudo -u seeds git fetch origin main
+running_tree="$(sudo -u seeds git show -s --format=%T HEAD)"
+if sudo -u seeds git log --format=%T origin/main | grep -Fxq "$running_tree"; then
+  sudo -u seeds git switch --detach origin/main
+else
+  echo "STOP: Den kørende version findes ikke sikkert i main-historikken."
+  exit 1
+fi
+sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml up -d --build --remove-orphans --wait --wait-timeout 300
+sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart proxy
 ```
 
 ## Implementeret i den nye baseline
@@ -94,8 +110,8 @@ docker compose up --detach --build
 - Docker Compose med PostgreSQL, Redis, API, admin, worker og nginx reverse proxy.
 - Prisma-klienten genereres under Docker-buildet og kopieres med de nødvendige engines til API- og worker-runtime-images; OpenSSL er eksplicit installeret i begge images.
 - Direkte Linux/systemd-installation uden Docker.
-- Sikker updater med fast-forward-krav og eksplicit Docker opt-in.
-- Docker-updater med valideret GitHub branchvalg, database-gemt valg, forward-only checkout, synlige blocker-årsager og bevaret updater-overlay efter genstart.
+- Sikker updater med fast-forward som standard og eksakt tree-verificeret overgang efter squash-merge.
+- Docker-updater med valideret GitHub branchvalg, database-gemt valg, SHA-låst checkout, synlige overgangstyper/blocker-årsager og bevaret updater-overlay efter genstart.
 - Updaterens Git-processer accepterer kun det eksakte konfigurerede repo som `safe.directory`, så host-mountet virker med den ikke-root API-bruger uden en usikker global wildcard-undtagelse.
 - CI-gates på Node.js 22 for migration, lint, typecheck, unit/integration tests, builds, dependency audit, Docker builds og rigtig Compose-opstart; workflow-actions bruger Node-24-kompatible v5-runtimes.
 
@@ -106,7 +122,7 @@ Lokalt valideret med Node.js 22 og npm 10:
 - Prisma client generation og schema validation.
 - ESLint.
 - TypeScript typecheck for shared contracts, API, worker og admin.
-- 21 unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
+- 26 unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
 - Produktionsbuild af shared contracts, NestJS API, worker og Next.js admin.
 
 PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres lokalt på den aktuelle Windows-maskine uden lokal PostgreSQL-testdatabase og Docker. De er verificeret i [GitHub Actions-run 30304933724](https://github.com/skovhuus1/mediaserver/actions/runs/30304933724), hvor følgende gates passerede:
@@ -120,7 +136,7 @@ PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres 
 Fase-2 mediepipelinen er verificeret i [GitHub Actions-run 30315230245](https://github.com/skovhuus1/mediaserver/actions/runs/30315230245):
 
 - Migration `0002_media_pipeline` anvendes efter fase-1-migrationen på en frisk PostgreSQL 16-database.
-- Unit-steppet kører 21 tests uden databasefiler; integrationssteppet kører separat 4/4 tests.
+- Unit-steppet kører 26 tests uden databasefiler; integrationssteppet kører separat 4/4 tests.
 - To samtidige scan-triggers opretter præcis én scan-ledger og ét durable worker-job.
 - Stream reservation ved limit 1 accepterer fortsat præcis én af to samtidige requests.
 - API, admin og worker bygges, produktion-audit er grøn, Compose valideres, og worker-imaget med FFmpeg-laget bygges.
