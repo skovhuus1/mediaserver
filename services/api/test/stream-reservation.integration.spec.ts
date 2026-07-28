@@ -118,5 +118,20 @@ async function createFixture(prisma: PrismaService) {
       releaseDate: new Date('2020-01-01T00:00:00.000Z'),
     },
   });
+  await prisma.mediaFile.create({
+    data: {
+      accountId: account.id,
+      libraryId: library.id,
+      storageRootId: root.id,
+      mediaItemId: media.id,
+      relativePath: 'Test.mp4',
+      sizeBytes: 1_024n,
+      modifiedAt: new Date(),
+      container: 'mp4',
+      videoCodec: 'h264',
+      audioCodec: 'aac',
+      durationMs: 100_000,
+    },
+  });
   return { accountId: account.id, userId: user.id, profileId: profile.id, deviceId: device.id, mediaId: media.id };
 }
