@@ -130,6 +130,7 @@ jobs:
             -d '{"email":"ci@example.test","password":"ci-password-123456","deviceFingerprint":"ci-device-fingerprint","deviceName":"CI Browser","deviceType":"web","platform":"linux"}' \
             "$api_base/auth/login")"
           token="$(jq -er '.accessToken' <<<"$login")"
+          test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/system/update/progress" | jq -r '.state')" = "idle"
           root_id="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/storage-roots" | jq -er '.[0].id')"
           library="$(curl --fail --silent --show-error \
             -H "authorization: Bearer $token" \
