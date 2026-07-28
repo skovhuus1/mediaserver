@@ -80,6 +80,11 @@ jobs:
           DOCKER_GID=999 docker compose -f docker-compose.yml -f docker-compose.updater.yml config --quiet
       - name: Build containers
         run: docker compose build
+      - name: Validate HDR transcoder capabilities
+        run: |
+          mkdir -p media/Film/Action
+          docker compose run --rm --no-deps --entrypoint sh worker -lc \
+            'ffmpeg -hide_banner -encoders 2>&1 | grep -q libx265 && ffmpeg -hide_banner -filters 2>&1 | grep -q zscale'
       - name: Smoke test container startup
         run: |
           set -Eeuo pipefail
@@ -105,6 +110,11 @@ jobs:
             -f lavfi -i anullsrc=r=48000:cl=stereo \
             -shortest -c:v libx264 -c:a aac \
             "/ci-media/CI Smoke (2026).mp4"
+          cat > "media/Film/Action/CI Smoke (2026).da.srt" <<'SUBTITLE'
+          1
+          00:00:00,000 --> 00:00:00,900
+          BoltBytes undertekst
+          SUBTITLE
 
           docker compose up --detach --wait --wait-timeout 180
           sleep 5
@@ -187,12 +197,23 @@ jobs:
           session_id="$(jq -er '.sessionId' <<<"$authorization")"
           stream_url="$(jq -er '.streamUrl' <<<"$authorization")"
           test "$(jq -r '.method' <<<"$authorization")" = "direct_play"
+          subtitle_url="$(jq -er '.subtitleTracks[] | select(.language == "da") | .src' <<<"$authorization")"
+          curl --fail --silent --show-error \
+            -H 'origin: https://cast.example.test' \
+            -D /tmp/bb-media-subtitle-headers \
+            -o /tmp/bb-media-subtitle.vtt \
+            "http://127.0.0.1:5555$subtitle_url"
+          grep -Eiq '^access-control-allow-origin: https://cast\.example\.test' /tmp/bb-media-subtitle-headers
+          grep -Fxq 'WEBVTT' /tmp/bb-media-subtitle.vtt
+          grep -Fq '00:00:00.000 --> 00:00:00.900' /tmp/bb-media-subtitle.vtt
           curl --fail --silent --show-error \
             -H 'range: bytes=0-31' \
+            -H 'origin: https://cast.example.test' \
             -D /tmp/bb-media-stream-headers \
             -o /tmp/bb-media-stream-body \
             "http://127.0.0.1:5555$stream_url"
           grep -Eq '^HTTP/[0-9.]+ 206' /tmp/bb-media-stream-headers
+          grep -Eiq '^access-control-allow-origin: https://cast\.example\.test' /tmp/bb-media-stream-headers
           test "$(wc -c < /tmp/bb-media-stream-body)" -eq 32
           curl --fail --silent --show-error \
             -X PATCH \
@@ -236,9 +257,18 @@ jobs:
           fi
           transcode_stream_url="$(jq -er '.streamUrl' <<<"$transcode_authorization")"
           curl --fail --silent --show-error \
+            -H 'origin: https://cast.example.test' \
+            -D /tmp/bb-media-master-headers \
             -o /tmp/bb-media-master.m3u8 \
             "http://127.0.0.1:5555$transcode_stream_url"
-          segment_path="$(grep -E '^segment[0-9]{5}\.ts\?token=' /tmp/bb-media-master.m3u8 | head -n1)"
+          grep -Eiq '^access-control-allow-origin: https://cast\.example\.test' /tmp/bb-media-master-headers
+          grep -Eq '^#EXT-X-STREAM-INF:.*BANDWIDTH=[1-9][0-9]*.*RESOLUTION=320x240' /tmp/bb-media-master.m3u8
+          variant_path="$(grep -E '^stream\.m3u8\?token=' /tmp/bb-media-master.m3u8 | head -n1)"
+          test -n "$variant_path"
+          curl --fail --silent --show-error \
+            -o /tmp/bb-media-stream.m3u8 \
+            "http://127.0.0.1:5555/api/v1/playback/sessions/$transcode_session_id/hls/$variant_path"
+          segment_path="$(grep -E '^segment[0-9]{5}\.ts\?token=' /tmp/bb-media-stream.m3u8 | head -n1)"
           test -n "$segment_path"
           curl --fail --silent --show-error \
             -o /tmp/bb-media-segment.ts \

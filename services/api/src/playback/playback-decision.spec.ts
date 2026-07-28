@@ -1,0 +1,45 @@
+import { describe, expect, it } from 'vitest';
+import type { EffectiveEntitlements } from '@boltbytes/contracts';
+import { choosePlaybackMethod } from './playback-decision';
+
+const entitlements: EffectiveEntitlements = {
+  maxConcurrentStreams: 1,
+  maxRegisteredDevices: 5,
+  maxVideoResolution: 2160,
+  maxVideoBitrate: 50_000,
+  allowDirectPlay: true,
+  allowDirectStream: true,
+  allowVideoTranscode: true,
+  allowAudioTranscode: true,
+  allowSubtitleBurnIn: false,
+  allowChromecast: true,
+  allowOfflineDownload: false,
+  releaseDelayMonths: 0,
+  releaseDelayDays: 0,
+};
+
+describe('playback decision quality and HDR gates', () => {
+  const base = {
+    codec: 'hevc',
+    container: 'mp4',
+    height: 2160,
+    bitrate: 40_000_000,
+    hdr: 'hdr10',
+    supportsHdr: true,
+    supportedCodecs: ['hevc'],
+    supportedContainers: ['mp4'],
+    entitlements,
+  };
+
+  it('allows 4K HDR Direct Play when plan and device both support it', () => {
+    expect(choosePlaybackMethod(base).method).toBe('direct_play');
+  });
+
+  it('requires transcoding for an SDR-only client or a 1080p plan', () => {
+    expect(choosePlaybackMethod({ ...base, supportsHdr: false }).method).toBe('transcode');
+    expect(choosePlaybackMethod({
+      ...base,
+      entitlements: { ...entitlements, maxVideoResolution: 1080 },
+    }).method).toBe('transcode');
+  });
+});

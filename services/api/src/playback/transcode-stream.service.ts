@@ -11,11 +11,13 @@ import { resolve } from 'node:path';
 import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { isPathWithin, streamTokenMatches } from './direct-stream-policy';
+import { applyMediaCors } from './media-cors';
 import { isAllowedHlsAsset, rewriteHlsPlaylist } from './transcode-stream-policy';
 
 type TranscodeLimits = {
   maxVideoResolution: number;
   maxVideoBitrate: number;
+  preserveHdr: boolean;
 };
 
 @Injectable()
@@ -34,6 +36,7 @@ export class TranscodeStreamService {
           sessionId,
           maxVideoResolution: limits.maxVideoResolution,
           maxVideoBitrate: limits.maxVideoBitrate,
+          preserveHdr: limits.preserveHdr,
         },
         maxAttempts: 1,
       },
@@ -44,7 +47,11 @@ export class TranscodeStreamService {
     const session = await this.validSession(sessionId, token);
     const manifestPath = this.assetPath(session.id, 'master.m3u8');
     try {
-      await access(manifestPath);
+      await Promise.all([
+        access(manifestPath),
+        access(this.assetPath(session.id, 'stream.m3u8')),
+        access(this.assetPath(session.id, 'segment00000.ts')),
+      ]);
       return { state: 'ready', message: 'HLS stream is ready' };
     } catch {
       // The worker writes the manifest atomically after the first complete segment.
@@ -79,8 +86,10 @@ export class TranscodeStreamService {
     sessionId: string,
     asset: string,
     token: string | undefined,
+    origin: string | undefined,
     response: Response,
   ): Promise<void> {
+    applyMediaCors(response, origin);
     const session = await this.validSession(sessionId, token);
     if (!isAllowedHlsAsset(asset)) {
       throw new NotFoundException({ code: 'hls_asset_missing', message: 'HLS asset was not found' });
@@ -95,10 +104,10 @@ export class TranscodeStreamService {
       throw new NotFoundException({ code: 'hls_asset_missing', message: 'HLS asset was not found' });
     }
 
-    if (asset === 'master.m3u8') {
+    if (asset.endsWith('.m3u8')) {
       const playlist = await readFile(mediaPath, 'utf8');
       response.status(200);
-      response.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      response.setHeader('Content-Type', 'application/x-mpegURL');
       response.setHeader('Cache-Control', 'private, no-store');
       response.send(rewriteHlsPlaylist(playlist, token!));
       return;
