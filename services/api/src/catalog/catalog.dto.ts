@@ -21,6 +21,16 @@ export class CreateLibraryDto {
   recursive = true;
 }
 
+export class BrowseLibraryDirectoriesDto {
+  @IsUUID()
+  storageRootId!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 4096)
+  path?: string;
+}
+
 export class CreateMediaDto {
   @IsUUID()
   libraryId!: string;

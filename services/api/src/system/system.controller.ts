@@ -1,9 +1,11 @@
-import { Controller, Get, Header, Post } from '@nestjs/common';
+import { Body, Controller, Get, Header, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../infra/redis.service';
-import { Public, Roles } from '../common/auth';
+import { CurrentUser, Public, Roles } from '../common/auth';
 import { UpdaterService } from './updater.service';
+import { SetUpdateBranchDto } from './system.dto';
 import { collectDefaultMetrics, register } from 'prom-client';
 
 let metricsInitialized = false;
@@ -46,19 +48,31 @@ export class SystemController {
 
   @Get('update/status')
   @Roles('admin')
-  updateStatus() {
-    return this.updater.status();
+  updateStatus(@CurrentUser() actor: AuthenticatedUser) {
+    return this.updater.status(actor.accountId);
   }
 
   @Post('update/check')
   @Roles('admin')
-  updateCheck() {
-    return this.updater.status();
+  updateCheck(@CurrentUser() actor: AuthenticatedUser) {
+    return this.updater.status(actor.accountId);
+  }
+
+  @Get('update/branches')
+  @Roles('admin')
+  updateBranches(@CurrentUser() actor: AuthenticatedUser) {
+    return this.updater.branches(actor.accountId);
+  }
+
+  @Post('update/branch')
+  @Roles('admin')
+  updateBranch(@CurrentUser() actor: AuthenticatedUser, @Body() dto: SetUpdateBranchDto) {
+    return this.updater.selectBranch(actor.accountId, dto.branch);
   }
 
   @Post('update/apply')
   @Roles('admin')
-  updateApply() {
-    return this.updater.apply();
+  updateApply(@CurrentUser() actor: AuthenticatedUser) {
+    return this.updater.apply(actor.accountId);
   }
 }

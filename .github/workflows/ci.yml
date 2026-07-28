@@ -77,6 +77,7 @@ jobs:
           cp .env.example .env
           node scripts/bootstrap-env.mjs
           docker compose config --quiet
+          DOCKER_GID=999 docker compose -f docker-compose.yml -f docker-compose.updater.yml config --quiet
       - name: Build containers
         run: docker compose build
       - name: Smoke test container startup

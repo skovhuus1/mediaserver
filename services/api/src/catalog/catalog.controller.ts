@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { CreateLibraryDto, CreateMediaDto } from './catalog.dto';
+import { BrowseLibraryDirectoriesDto, CreateLibraryDto, CreateMediaDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -13,6 +13,17 @@ export class CatalogController {
   @Get('libraries')
   libraries(@CurrentUser() actor: AuthenticatedUser) {
     return this.catalog.listLibraries(actor);
+  }
+
+  @Get('storage-roots')
+  storageRoots(@CurrentUser() actor: AuthenticatedUser) {
+    return this.catalog.listStorageRoots(actor);
+  }
+
+  @Get('libraries/directories')
+  @Roles('admin', 'operator')
+  directories(@CurrentUser() actor: AuthenticatedUser, @Query() query: BrowseLibraryDirectoriesDto) {
+    return this.catalog.browseDirectories(actor, query);
   }
 
   @Post('libraries')

@@ -2,10 +2,12 @@
 
 import { Activity, Database, Film, HardDrive, Radio, Server, Tv } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, clearSession } from '@/lib/api';
 import { t } from '@/lib/messages';
 import { AppShell } from './app-shell';
+import { ManagementView } from './management-view';
 
 type Media = { id: string; title: string; type: string; codec: string | null; container: string | null };
 type Session = {
@@ -34,6 +36,7 @@ type Library = {
 
 export function Dashboard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [media, setMedia] = useState<Media[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
@@ -67,8 +70,15 @@ export function Dashboard() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const movies = media.filter((item) => item.type === 'movie');
-  const series = media.filter((item) => item.type === 'series');
+  const query = (searchParams.get('q') ?? '').trim().toLocaleLowerCase('da');
+  const requestedType = searchParams.get('type');
+  const adminView = searchParams.get('admin');
+  const visibleMedia = media.filter((item) =>
+    (!query || item.title.toLocaleLowerCase('da').includes(query)) &&
+    (requestedType === 'movie' ? item.type === 'movie' : requestedType === 'series' ? ['series', 'season', 'episode'].includes(item.type) : true)
+  );
+  const movies = visibleMedia.filter((item) => item.type === 'movie');
+  const series = visibleMedia.filter((item) => ['series', 'season', 'episode'].includes(item.type));
   const queueScan = async () => {
     const library = libraries[0];
     if (!library || scanPending) return;
@@ -87,8 +97,10 @@ export function Dashboard() {
 
   return (
     <AppShell rail={<StatusRail health={health} sessions={sessions} mediaCount={media.length} libraries={libraries} scanPending={scanPending} scanMessage={scanMessage} onScan={queueScan} />}>
+      {adminView ? <ManagementView view={adminView} /> : (
+      <>
       <section className="hero-line">
-        <div><span className="eyebrow">CONTROL PLANE</span><h1>Dit mediebibliotek</h1><p>Rigtig server-state, ingen demodata.</p></div>
+        <div><span className="eyebrow">CONTROL PLANE</span><h1>{requestedType === 'movie' ? 'Film' : requestedType === 'series' ? 'Serier' : query ? `Søgning: ${searchParams.get('q')}` : 'Dit mediebibliotek'}</h1><p>Rigtig server-state, ingen demodata.</p></div>
         <span className={health?.status === 'ok' ? 'health-pill online' : 'health-pill'}><i />{health?.status ?? 'forbinder'}</span>
       </section>
       {loading ? <LoadingGrid /> : (
@@ -107,6 +119,8 @@ export function Dashboard() {
             </div>
           )}
         </>
+      )}
+      </>
       )}
     </AppShell>
   );

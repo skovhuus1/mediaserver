@@ -33,6 +33,20 @@ Stop applikationen, tag databasebackup og inspicer Prisma-fejlkoden. Brug aldrig
 - `update_not_fast_forward`: historikken divergerer og kræver manuel Git-gennemgang.
 - `update_command_failed`: kontroller Git-remote, netværk og servicebrugerens adgang.
 
+Docker-updateren aktiveres eksplicit:
+
+```bash
+DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+if grep -q '^DOCKER_GID=' .env; then
+  sed -i "s/^DOCKER_GID=.*/DOCKER_GID=$DOCKER_GID/" .env
+else
+  printf '\nDOCKER_GID=%s\n' "$DOCKER_GID" >> .env
+fi
+docker compose -f docker-compose.yml -f docker-compose.updater.yml up -d --build
+```
+
+Branch vælges i adminpanelet. Kun branches, som findes på den konfigurerede Git-remote, accepteres. En opdatering må kun bevæge den kørende commit fremad; rollback og divergeret historik afvises.
+
 ## Streamslot frigives ikke
 
 Kontroller workerloggen og `lease_expires_at`. Workerens recurring `playback.expire-leases` job frigiver udløbne reservationsrækker. Heartbeat kan ikke forlænge en afsluttet session.

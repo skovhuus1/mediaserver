@@ -19,7 +19,8 @@ import {
   Users,
 } from 'lucide-react';
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { Brand } from './brand';
 import { t } from '@/lib/messages';
 
@@ -39,19 +40,35 @@ const admin = [
 
 export function AppShell({ children, rail }: { children: ReactNode; rail: ReactNode }) {
   return (
+    <Suspense fallback={<div className="app-shell" aria-busy="true" />}>
+      <AppShellContent rail={rail}>{children}</AppShellContent>
+    </Suspense>
+  );
+}
+
+function AppShellContent({ children, rail }: { children: ReactNode; rail: ReactNode }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const currentQuery = searchParams.toString();
+  const isActive = (href: string) => {
+    const [targetPath, targetQuery = ''] = href.split('?');
+    return pathname === targetPath && targetQuery === currentQuery;
+  };
+
+  return (
     <div className="app-shell">
       <aside className="sidebar">
         <Brand />
         <nav>
           <span className="nav-label">{t.library}</span>
-          {primary.map(({ label, icon: Icon, href }, index) => (
-            <Link className={index === 0 ? 'nav-item active' : 'nav-item'} href={href} key={label}>
+          {primary.map(({ label, icon: Icon, href }) => (
+            <Link className={isActive(href) ? 'nav-item active' : 'nav-item'} href={href} key={label}>
               <Icon size={17} /> <span>{label}</span>
             </Link>
           ))}
           <span className="nav-label">{t.administration}</span>
           {admin.map(({ label, icon: Icon, href }) => (
-            <Link className="nav-item" href={href} key={label}>
+            <Link className={isActive(href) ? 'nav-item active' : 'nav-item'} href={href} key={label}>
               <Icon size={17} /> <span>{label}</span>
             </Link>
           ))}
@@ -59,9 +76,11 @@ export function AppShell({ children, rail }: { children: ReactNode; rail: ReactN
         <div className="server-chip"><Gauge size={16} /><span>BoltBytes Server<small><b />v0.1.0</small></span></div>
       </aside>
       <header className="topbar">
-        <label className="search-box"><Search size={17} /><input placeholder={t.search} /><kbd>Ctrl K</kbd></label>
+        <form className="search-box" action="/">
+          <Search size={17} /><input name="q" defaultValue={searchParams.get('q') ?? ''} placeholder={t.search} /><kbd>Enter</kbd>
+        </form>
         <div className="top-actions">
-          <Link className="settings-button" href="/update"><Settings size={15} />{t.settings}</Link>
+          <Link className="settings-button" href="/?admin=settings"><Settings size={15} />{t.settings}</Link>
           <MonitorPlay size={18} /><Bell size={18} />
           <span className="avatar">A</span><span>Admin</span><ChevronDown size={14} />
         </div>

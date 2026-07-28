@@ -1,13 +1,60 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { Prisma } from '@prisma/client';
+import { readdir, realpath } from 'node:fs/promises';
+import { posix } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateLibraryDto, CreateMediaDto } from './catalog.dto';
+import { resolveStorageBrowsePath } from '../setup/storage-path';
+import { BrowseLibraryDirectoriesDto, CreateLibraryDto, CreateMediaDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
 
 @Injectable()
 export class CatalogService {
   constructor(private readonly prisma: PrismaService) {}
+
+  listStorageRoots(actor: AuthenticatedUser) {
+    return this.prisma.storageRoot.findMany({
+      where: { accountId: actor.accountId },
+      select: { id: true, label: true, mountPath: true, isReadOnly: true },
+      orderBy: { label: 'asc' },
+    });
+  }
+
+  async browseDirectories(actor: AuthenticatedUser, dto: BrowseLibraryDirectoriesDto) {
+    const root = await this.prisma.storageRoot.findFirst({
+      where: { id: dto.storageRootId, accountId: actor.accountId },
+    });
+    if (!root) throw new NotFoundException({ code: 'storage_root_missing', message: 'Storage root does not exist in this account' });
+    const requested = resolveStorageBrowsePath(root.mountPath, dto.path ?? root.mountPath);
+    if (!requested) throw new BadRequestException({ code: 'path_outside_root', message: 'Directory must stay within its storage root' });
+    try {
+      const [rootRealPath, selectedRealPath] = await Promise.all([realpath(root.mountPath), realpath(requested)]);
+      if (!resolveStorageBrowsePath(rootRealPath, selectedRealPath)) {
+        throw new ForbiddenException({ code: 'path_outside_root', message: 'Resolved directory escapes its storage root' });
+      }
+      const relativePath = posix.relative(rootRealPath, selectedRealPath);
+      const currentPath = relativePath ? posix.join(root.mountPath, relativePath) : root.mountPath;
+      const entries = await readdir(selectedRealPath, { withFileTypes: true });
+      return {
+        currentPath,
+        parentPath: currentPath === root.mountPath ? null : posix.dirname(currentPath),
+        directories: entries
+          .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+          .sort((left, right) => left.name.localeCompare(right.name, 'da'))
+          .map((entry) => ({ name: entry.name, path: posix.join(currentPath, entry.name) })),
+      };
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        throw new NotFoundException({ code: 'media_directory_missing', message: 'Media directory does not exist' });
+      }
+      if (code === 'EACCES' || code === 'EPERM') {
+        throw new ForbiddenException({ code: 'media_directory_unreadable', message: 'Media directory cannot be read by BoltBytes' });
+      }
+      throw error;
+    }
+  }
 
   listLibraries(actor: AuthenticatedUser) {
     return this.prisma.library.findMany({
