@@ -6,7 +6,7 @@ import { FolderOpen, RefreshCw, Server, ShieldCheck, Users } from 'lucide-react'
 import { api, type ApiFailure } from '@/lib/api';
 
 type Root = { id: string; label: string; mountPath: string; isReadOnly: boolean };
-type Scan = { id: string; status: string; filesSeen: number; filesCreated: number; errors: number };
+type Scan = { id: string; status: string; filesSeen: number; filesCreated: number; errors: number; error: string | null };
 type Library = { id: string; name: string; type: string; paths: Array<{ path: string }>; scans: Scan[] };
 type DirectoryListing = { currentPath: string; parentPath: string | null; directories: Array<{ name: string; path: string }> };
 type User = { id: string; email: string; displayName: string; status: string; profiles: Array<{ id: string; name: string }>; roles: Array<{ role: { code: string } }> };
@@ -50,7 +50,8 @@ function LibrariesView() {
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setBusy(true);
     setMessage('');
     try {
@@ -66,7 +67,7 @@ function LibrariesView() {
       });
       setMessage('Biblioteket er oprettet.');
       await refresh();
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -106,7 +107,7 @@ function LibrariesView() {
         <div className="management-card">
           <h2><RefreshCw size={18} /> Eksisterende biblioteker</h2>
           {!libraries.length && <p>Ingen biblioteker er oprettet endnu.</p>}
-          {libraries.map((library) => <div className="data-row" key={library.id}><div><strong>{library.name}</strong><small>{library.type} · {library.paths[0]?.path}</small><small>Scan: {library.scans[0]?.status ?? 'aldrig kørt'}</small></div><button disabled={busy} onClick={() => void scan(library.id)}>Scan nu</button></div>)}
+          {libraries.map((library) => <div className="data-row" key={library.id}><div><strong>{library.name}</strong><small>{library.type} · {library.paths[0]?.path}</small><small>Scan: {library.scans[0]?.status ?? 'aldrig kørt'}</small>{library.scans[0]?.error && <small className="scan-error">{library.scans[0].error}</small>}</div><button disabled={busy} onClick={() => void scan(library.id)}>Scan nu</button></div>)}
         </div>
       </div>
       {message && <div className="update-message">{message}</div>}

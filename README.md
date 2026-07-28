@@ -77,12 +77,14 @@ docker compose up --detach --build
 - Direkte medielevering med HTTP `HEAD`, single-range `GET`, `206 Partial Content`, suffix ranges og hash-valideret session-token; query strings udelades fra API-logs, og stream-access logs er deaktiveret i nginx.
 - Scanstatus og manuel scan-trigger i admin-dashboardet.
 - Funktionel adminnavigation med live film-/seriefiltrering, søgning, bibliotek-oprettelse, sikker mappevælger, scanning, brugerliste, planliste og driftsindstillinger.
+- Biblioteksformularer bevarer deres DOM-reference gennem async API-kald, og scannerens lagrede workerfejl vises direkte i bibliotek- og statusvisningen.
 - Next.js adminskal inspireret af den godkendte BoltBytes-reference med rigtige API-data og tomme tilstande uden mock-film.
 - Docker Compose med PostgreSQL, Redis, API, admin, worker og nginx reverse proxy.
 - Prisma-klienten genereres under Docker-buildet og kopieres med de nødvendige engines til API- og worker-runtime-images; OpenSSL er eksplicit installeret i begge images.
 - Direkte Linux/systemd-installation uden Docker.
 - Sikker updater med fast-forward-krav og eksplicit Docker opt-in.
 - Docker-updater med valideret GitHub branchvalg, database-gemt valg, forward-only checkout, synlige blocker-årsager og bevaret updater-overlay efter genstart.
+- Updaterens Git-processer accepterer kun det eksakte konfigurerede repo som `safe.directory`, så host-mountet virker med den ikke-root API-bruger uden en usikker global wildcard-undtagelse.
 - CI-gates på Node.js 22 for migration, lint, typecheck, unit/integration tests, builds, dependency audit, Docker builds og rigtig Compose-opstart; workflow-actions bruger Node-24-kompatible v5-runtimes.
 
 ## Valideringsstatus
