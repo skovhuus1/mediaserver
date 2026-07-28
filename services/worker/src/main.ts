@@ -2,7 +2,7 @@ import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
-import { basename, extname, isAbsolute, relative, sep } from 'node:path';
+import { basename, extname, isAbsolute, posix, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const prisma = new PrismaClient();
@@ -10,6 +10,48 @@ const execFileAsync = promisify(execFile);
 const workerId = `worker-${randomUUID()}`;
 const pollIntervalMs = 2_000;
 const leaseMs = 60_000;
+
+function legacyLibraryPathCandidate(rootPath: string, configuredPath: string): string | null {
+  const root = posix.resolve('/', rootPath);
+  const configured = posix.resolve('/', configuredPath);
+  if (root === '/') return null;
+  const duplicatedRoot = `${root}${root}`;
+  if (configured !== duplicatedRoot && !configured.startsWith(`${duplicatedRoot}/`)) return null;
+  const candidate = configured.slice(root.length);
+  return candidate === root || candidate.startsWith(`${root}/`) ? candidate : null;
+}
+
+async function resolveConfiguredLibraryPath(
+  rootPath: string,
+  configuredPath: { id: string; path: string },
+): Promise<string> {
+  try {
+    return await realpath(configuredPath.path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const candidate = legacyLibraryPathCandidate(rootPath, configuredPath.path);
+    if (!candidate) throw error;
+    const repairedPath = await realpath(candidate);
+    if (!isWithin(rootPath, repairedPath)) {
+      throw new Error(`Repaired library path escapes storage root: ${configuredPath.path}`);
+    }
+    await prisma.libraryPath.update({
+      where: { id: configuredPath.id },
+      data: { path: candidate },
+    });
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        component: 'worker',
+        message: 'Repaired legacy duplicated library path',
+        libraryPathId: configuredPath.id,
+        previousPath: configuredPath.path,
+        repairedPath: candidate,
+      }),
+    );
+    return repairedPath;
+  }
+}
 let stopping = false;
 
 type ClaimedJob = SystemJob & { attemptNumber: number };
@@ -129,7 +171,7 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
   try {
     const rootPath = await realpath(library.storageRoot.mountPath);
     for (const configuredPath of library.paths) {
-      const libraryPath = await realpath(configuredPath.path);
+      const libraryPath = await resolveConfiguredLibraryPath(rootPath, configuredPath);
       if (!isWithin(rootPath, libraryPath)) throw new Error(`Library path escapes storage root: ${configuredPath.path}`);
       await walkMediaFiles(
         libraryPath,
