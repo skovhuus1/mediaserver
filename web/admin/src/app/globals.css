@@ -204,6 +204,16 @@ a { color: inherit; text-decoration: none; }
 .session-row > i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
 .session-poster { width: 34px; height: 44px; display: grid; place-items: center; border-radius: 4px; background: linear-gradient(145deg, #57268e, #1c2128); }
 .storage-card p, .rail-card > p { color: var(--muted); font-size: 10px; line-height: 1.6; }
+.storage-card button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(177,104,255,.2);
+  border-radius: 6px;
+  color: #e5d7f7;
+  background: rgba(142,77,232,.12);
+  cursor: pointer;
+}
+.storage-card button:disabled, .empty-library button:disabled { opacity: .45; cursor: not-allowed; }
 
 .player-bar {
   grid-area: player;

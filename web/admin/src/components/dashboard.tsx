@@ -17,22 +17,41 @@ type Session = {
   user: { displayName: string };
 };
 type Health = { status: string; version: string };
+type LibraryScan = {
+  id: string;
+  status: string;
+  filesSeen: number;
+  filesCreated: number;
+  filesUpdated: number;
+  filesMissing: number;
+  errors: number;
+};
+type Library = {
+  id: string;
+  name: string;
+  scans: LibraryScan[];
+};
 
 export function Dashboard() {
   const router = useRouter();
   const [media, setMedia] = useState<Media[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [libraries, setLibraries] = useState<Library[]>([]);
   const [loading, setLoading] = useState(true);
+  const [scanPending, setScanPending] = useState(false);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
       api<unknown>('/auth/me'),
       api<Media[]>('/media'),
+      api<Library[]>('/libraries'),
       api<Session[]>('/playback/sessions'),
       api<Health>('/system/health', {}, false),
-    ]).then(([, mediaItems, activeSessions, status]) => {
+    ]).then(([, mediaItems, libraryItems, activeSessions, status]) => {
       setMedia(mediaItems);
+      setLibraries(libraryItems);
       setSessions(activeSessions);
       setHealth(status);
     }).catch(() => {
@@ -41,11 +60,33 @@ export function Dashboard() {
     }).finally(() => setLoading(false));
   }, [router]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void api<Library[]>('/libraries').then(setLibraries).catch(() => undefined);
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const movies = media.filter((item) => item.type === 'movie');
   const series = media.filter((item) => item.type === 'series');
+  const queueScan = async () => {
+    const library = libraries[0];
+    if (!library || scanPending) return;
+    setScanPending(true);
+    setScanMessage(null);
+    try {
+      const scan = await api<LibraryScan>(`/libraries/${library.id}/scans`, { method: 'POST' });
+      setLibraries((current) => current.map((item) => item.id === library.id ? { ...item, scans: [scan] } : item));
+      setScanMessage('Scanning er sat i kø.');
+    } catch (error) {
+      setScanMessage(errorMessage(error));
+    } finally {
+      setScanPending(false);
+    }
+  };
 
   return (
-    <AppShell rail={<StatusRail health={health} sessions={sessions} mediaCount={media.length} />}>
+    <AppShell rail={<StatusRail health={health} sessions={sessions} mediaCount={media.length} libraries={libraries} scanPending={scanPending} scanMessage={scanMessage} onScan={queueScan} />}>
       <section className="hero-line">
         <div><span className="eyebrow">CONTROL PLANE</span><h1>Dit mediebibliotek</h1><p>Rigtig server-state, ingen demodata.</p></div>
         <span className={health?.status === 'ok' ? 'health-pill online' : 'health-pill'}><i />{health?.status ?? 'forbinder'}</span>
@@ -60,7 +101,9 @@ export function Dashboard() {
               <span className="empty-orbit"><Database size={28} /></span>
               <h2>{t.noMedia}</h2>
               <p>{t.noMediaDescription}</p>
-              <button onClick={() => router.push('/?admin=libraries')}>Opret bibliotek</button>
+              {libraries.length
+                ? <button disabled={scanPending} onClick={() => void queueScan()}>{scanPending ? 'Scanner sættes i kø...' : `Scan ${libraries[0]?.name}`}</button>
+                : <button onClick={() => router.push('/?admin=libraries')}>Opret bibliotek</button>}
             </div>
           )}
         </>
@@ -95,7 +138,24 @@ function MediaSection({ title, items, emptyLabel, wide = false }: { title: strin
   );
 }
 
-function StatusRail({ health, sessions, mediaCount }: { health: Health | null; sessions: Session[]; mediaCount: number }) {
+function StatusRail({
+  health,
+  sessions,
+  mediaCount,
+  libraries,
+  scanPending,
+  scanMessage,
+  onScan,
+}: {
+  health: Health | null;
+  sessions: Session[];
+  mediaCount: number;
+  libraries: Library[];
+  scanPending: boolean;
+  scanMessage: string | null;
+  onScan: () => Promise<void>;
+}) {
+  const latestScan = libraries[0]?.scans[0];
   return (
     <>
       <section className="rail-card">
@@ -118,8 +178,14 @@ function StatusRail({ health, sessions, mediaCount }: { health: Health | null; s
         ))}
       </section>
       <section className="rail-card storage-card">
-        <div className="rail-title"><h3>Lager</h3><HardDrive size={17} /></div>
-        <p>Lagertelemetri tilsluttes scanner-workeren i næste fase.</p>
+        <div className="rail-title"><h3>Biblioteksscanner</h3><HardDrive size={17} /></div>
+        {latestScan
+          ? <p>Status: <strong>{latestScan.status}</strong><br />Set {latestScan.filesSeen} · Nye {latestScan.filesCreated} · Fejl {latestScan.errors}</p>
+          : <p>Ingen scanninger er kørt endnu.</p>}
+        {scanMessage ? <p>{scanMessage}</p> : null}
+        <button disabled={!libraries.length || scanPending || ['queued', 'running'].includes(latestScan?.status ?? '')} onClick={() => void onScan()}>
+          {scanPending ? 'Sætter i kø...' : 'Scan nu'}
+        </button>
       </section>
     </>
   );
@@ -127,4 +193,9 @@ function StatusRail({ health, sessions, mediaCount }: { health: Health | null; s
 
 function LoadingGrid() {
   return <div className="loading-grid">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</div>;
+}
+
+function errorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
+  return 'Scanning kunne ikke startes.';
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
@@ -19,6 +19,17 @@ export class CatalogController {
   @Roles('admin', 'operator')
   createLibrary(@CurrentUser() actor: AuthenticatedUser, @Body() dto: CreateLibraryDto) {
     return this.catalog.createLibrary(actor, dto);
+  }
+
+  @Post('libraries/:id/scans')
+  @Roles('admin', 'operator')
+  scanLibrary(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.catalog.queueScan(actor, id);
+  }
+
+  @Get('libraries/:id/scans')
+  scans(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.catalog.listScans(actor, id);
   }
 
   @Get('media')

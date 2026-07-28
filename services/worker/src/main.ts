@@ -1,13 +1,30 @@
-import { Prisma, PrismaClient, SystemJob } from '@prisma/client';
+import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readdir, realpath, stat } from 'node:fs/promises';
+import { basename, extname, isAbsolute, relative, sep } from 'node:path';
+import { promisify } from 'node:util';
 
 const prisma = new PrismaClient();
+const execFileAsync = promisify(execFile);
 const workerId = `worker-${randomUUID()}`;
 const pollIntervalMs = 2_000;
 const leaseMs = 60_000;
 let stopping = false;
 
 type ClaimedJob = SystemJob & { attemptNumber: number };
+type ProbeMetadata = {
+  raw: Prisma.InputJsonValue;
+  container: string | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  bitrate: number | null;
+};
+
+const mediaExtensions = new Set(['.avi', '.m2ts', '.m4v', '.mkv', '.mov', '.mp4', '.mpeg', '.mpg', '.ts', '.webm']);
 
 async function claimNextJob(): Promise<ClaimedJob | null> {
   return prisma.$transaction(async (tx) => {
@@ -63,12 +80,291 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
 
 async function processJob(job: ClaimedJob): Promise<void> {
   switch (job.type) {
+    case 'library.scan':
+      await scanLibrary(job);
+      return;
     case 'playback.expire-leases':
       await expirePlaybackLeases();
       return;
     default:
       throw new Error(`Unsupported job type: ${job.type}`);
   }
+}
+
+async function scanLibrary(job: ClaimedJob): Promise<void> {
+  const payload = asJsonObject(job.payload);
+  const libraryId = typeof payload.libraryId === 'string' ? payload.libraryId : null;
+  const scanId = typeof payload.scanId === 'string' ? payload.scanId : null;
+  if (!libraryId || !scanId) throw new Error('library.scan payload requires libraryId and scanId');
+  const scan = await prisma.libraryScan.findFirst({ where: { id: scanId, libraryId, accountId: job.accountId } });
+  if (!scan) throw new Error('Library scan ledger row was not found');
+  const library = await prisma.library.findFirst({
+    where: { id: libraryId, accountId: job.accountId },
+    include: { paths: true, storageRoot: true },
+  });
+  if (!library) throw new Error('Library was not found for scan job');
+
+  await prisma.libraryScan.update({
+    where: { id: scan.id },
+    data: {
+      status: 'running',
+      startedAt: new Date(),
+      finishedAt: null,
+      error: null,
+      filesSeen: 0,
+      filesCreated: 0,
+      filesUpdated: 0,
+      filesMissing: 0,
+      errors: 0,
+    },
+  });
+
+  let filesSeen = 0;
+  let filesCreated = 0;
+  let filesUpdated = 0;
+  let errors = 0;
+  let lastLeaseRenewal = 0;
+  const discovered = new Set<string>();
+
+  try {
+    const rootPath = await realpath(library.storageRoot.mountPath);
+    for (const configuredPath of library.paths) {
+      const libraryPath = await realpath(configuredPath.path);
+      if (!isWithin(rootPath, libraryPath)) throw new Error(`Library path escapes storage root: ${configuredPath.path}`);
+      await walkMediaFiles(
+        libraryPath,
+        configuredPath.recursive,
+        async (absolutePath) => {
+          if (Date.now() - lastLeaseRenewal > 20_000) {
+            await renewJobLease(job.id);
+            lastLeaseRenewal = Date.now();
+          }
+          const resolvedPath = await realpath(absolutePath);
+          if (!isWithin(rootPath, resolvedPath)) {
+            errors += 1;
+            return;
+          }
+          const relativePath = relative(rootPath, resolvedPath).split(sep).join('/');
+          if (discovered.has(relativePath)) return;
+          discovered.add(relativePath);
+          filesSeen += 1;
+          const fileStat = await stat(resolvedPath);
+          let probe: ProbeMetadata | null = null;
+          try {
+            probe = await probeFile(resolvedPath);
+          } catch {
+            errors += 1;
+          }
+          const created = await upsertScannedFile({
+            accountId: job.accountId,
+            libraryId: library.id,
+            storageRootId: library.storageRootId,
+            libraryType: library.type,
+            scanId: scan.id,
+            absolutePath: resolvedPath,
+            relativePath,
+            sizeBytes: fileStat.size,
+            modifiedAt: fileStat.mtime,
+            probe,
+          });
+          if (created) filesCreated += 1;
+          else filesUpdated += 1;
+          await prisma.libraryScan.update({
+            where: { id: scan.id },
+            data: { filesSeen, filesCreated, filesUpdated, errors },
+          });
+        },
+        () => { errors += 1; },
+      );
+    }
+
+    const missing = await prisma.mediaFile.updateMany({
+      where: {
+        libraryId: library.id,
+        status: { not: 'missing' },
+        OR: [
+          { lastSeenScanId: null },
+          { lastSeenScanId: { not: scan.id } },
+        ],
+      },
+      data: { status: 'missing' },
+    });
+    await prisma.libraryScan.update({
+      where: { id: scan.id },
+      data: {
+        status: 'completed',
+        filesSeen,
+        filesCreated,
+        filesUpdated,
+        filesMissing: missing.count,
+        errors,
+        finishedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown library scan failure';
+    await prisma.libraryScan.update({
+      where: { id: scan.id },
+      data: { status: 'failed', error: message.slice(0, 2_000), errors: errors + 1, finishedAt: new Date() },
+    });
+    throw error;
+  }
+}
+
+async function upsertScannedFile(input: {
+  accountId: string;
+  libraryId: string;
+  storageRootId: string;
+  libraryType: 'movie' | 'series' | 'mixed';
+  scanId: string;
+  absolutePath: string;
+  relativePath: string;
+  sizeBytes: number;
+  modifiedAt: Date;
+  probe: ProbeMetadata | null;
+}): Promise<boolean> {
+  const existing = await prisma.mediaFile.findUnique({
+    where: { libraryId_relativePath: { libraryId: input.libraryId, relativePath: input.relativePath } },
+  });
+  const title = basename(input.absolutePath, extname(input.absolutePath)).replace(/[._]+/g, ' ').trim();
+  const mediaType: MediaType = input.libraryType === 'series' ? 'episode' : 'movie';
+  const fileData = {
+    accountId: input.accountId,
+    libraryId: input.libraryId,
+    storageRootId: input.storageRootId,
+    relativePath: input.relativePath,
+    sizeBytes: BigInt(input.sizeBytes),
+    modifiedAt: input.modifiedAt,
+    status: input.probe ? 'ready' as const : 'unreadable' as const,
+    container: input.probe?.container ?? null,
+    videoCodec: input.probe?.videoCodec ?? null,
+    audioCodec: input.probe?.audioCodec ?? null,
+    width: input.probe?.width ?? null,
+    height: input.probe?.height ?? null,
+    durationMs: input.probe?.durationMs ?? null,
+    bitrate: input.probe?.bitrate ?? null,
+    probe: input.probe?.raw ?? Prisma.JsonNull,
+    lastSeenScanId: input.scanId,
+  };
+  const mediaData = {
+    title: title || 'Untitled media',
+    type: mediaType,
+    codec: input.probe?.videoCodec ?? null,
+    container: input.probe?.container ?? null,
+    bitrate: input.probe?.bitrate ?? null,
+    width: input.probe?.width ?? null,
+    height: input.probe?.height ?? null,
+  };
+  if (existing) {
+    await prisma.$transaction([
+      prisma.mediaItem.update({ where: { id: existing.mediaItemId }, data: mediaData }),
+      prisma.mediaFile.update({ where: { id: existing.id }, data: fileData }),
+    ]);
+    return false;
+  }
+  await prisma.mediaItem.create({
+    data: {
+      accountId: input.accountId,
+      libraryId: input.libraryId,
+      ...mediaData,
+      file: { create: fileData },
+    },
+  });
+  return true;
+}
+
+async function probeFile(path: string): Promise<ProbeMetadata> {
+  const { stdout } = await execFileAsync('ffprobe', [
+    '-v', 'error',
+    '-print_format', 'json',
+    '-show_format',
+    '-show_streams',
+    path,
+  ], { encoding: 'utf8', timeout: 30_000, maxBuffer: 2 * 1024 * 1024 });
+  const raw = JSON.parse(stdout) as unknown;
+  const root = asJsonObject(raw);
+  const format = asJsonObject(root.format);
+  const streams = Array.isArray(root.streams) ? root.streams.map(asJsonObject) : [];
+  const video = streams.find((stream) => stream.codec_type === 'video');
+  const audio = streams.find((stream) => stream.codec_type === 'audio');
+  const durationSeconds = finiteNumber(format.duration);
+  return {
+    raw: raw as Prisma.InputJsonValue,
+    container: typeof format.format_name === 'string' ? format.format_name.split(',')[0] ?? null : null,
+    videoCodec: typeof video?.codec_name === 'string' ? video.codec_name : null,
+    audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : null,
+    width: finiteInteger(video?.width),
+    height: finiteInteger(video?.height),
+    durationMs: durationSeconds === null ? null : clampInteger(durationSeconds * 1000),
+    bitrate: finiteInteger(format.bit_rate),
+  };
+}
+
+async function walkMediaFiles(
+  startPath: string,
+  recursive: boolean,
+  onFile: (path: string) => Promise<void>,
+  onError: (error: unknown) => void,
+): Promise<void> {
+  const pending = [startPath];
+  while (pending.length) {
+    const directory = pending.shift();
+    if (!directory) continue;
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      onError(error);
+      continue;
+    }
+    for (const entry of entries) {
+      const path = `${directory}${sep}${entry.name}`;
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        if (recursive) pending.push(path);
+        continue;
+      }
+      if (!entry.isFile() || !mediaExtensions.has(extname(entry.name).toLowerCase())) continue;
+      try {
+        await onFile(path);
+      } catch (error) {
+        onError(error);
+      }
+    }
+  }
+}
+
+async function renewJobLease(jobId: string): Promise<void> {
+  const result = await prisma.systemJob.updateMany({
+    where: { id: jobId, workerId, status: 'running' },
+    data: { leaseExpiresAt: new Date(Date.now() + leaseMs) },
+  });
+  if (result.count !== 1) throw new Error('Worker lost the library scan job lease');
+}
+
+function asJsonObject(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function finiteNumber(value: unknown): number | null {
+  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number.parseFloat(value) : Number.NaN;
+  return Number.isFinite(number) ? number : null;
+}
+
+function finiteInteger(value: unknown): number | null {
+  const number = finiteNumber(value);
+  return number === null ? null : clampInteger(number);
+}
+
+function clampInteger(value: number): number {
+  return Math.max(0, Math.min(2_147_483_647, Math.round(value)));
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const path = relative(root, candidate);
+  return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path));
 }
 
 async function expirePlaybackLeases(): Promise<number> {

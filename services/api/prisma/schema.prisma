@@ -56,6 +56,19 @@ enum LibraryType {
   mixed
 }
 
+enum MediaFileStatus {
+  ready
+  unreadable
+  missing
+}
+
+enum LibraryScanStatus {
+  queued
+  running
+  completed
+  failed
+}
+
 model SystemBootstrap {
   id          String   @id @default("singleton")
   accountId   String   @unique @map("account_id")
@@ -66,54 +79,56 @@ model SystemBootstrap {
 }
 
 model Account {
-  id           String        @id @default(uuid())
-  name         String
-  serverName   String        @default("BoltBytes Media") @map("server_name")
-  externalUrl  String?       @map("external_url")
-  language     String        @default("da")
-  timezone     String        @default("Europe/Copenhagen")
-  status       AccountStatus @default(active)
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-  bootstrap    SystemBootstrap?
-  users        User[]
-  profiles     Profile[]
-  devices      Device[]
-  refreshTokens RefreshToken[]
-  plans        Plan[]
-  subscriptions Subscription[]
+  id                   String                @id @default(uuid())
+  name                 String
+  serverName           String                @default("BoltBytes Media") @map("server_name")
+  externalUrl          String?               @map("external_url")
+  language             String                @default("da")
+  timezone             String                @default("Europe/Copenhagen")
+  status               AccountStatus         @default(active)
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
+  bootstrap            SystemBootstrap?
+  users                User[]
+  profiles             Profile[]
+  devices              Device[]
+  refreshTokens        RefreshToken[]
+  plans                Plan[]
+  subscriptions        Subscription[]
   entitlementOverrides EntitlementOverride[]
-  storageRoots StorageRoot[]
-  libraries    Library[]
-  mediaItems   MediaItem[]
-  playbackSessions PlaybackSession[]
-  playbackHistory PlaybackHistory[]
-  auditLogs    AuditLog[]
-  settings     SystemSetting[]
-  jobs         SystemJob[]
+  storageRoots         StorageRoot[]
+  libraries            Library[]
+  mediaItems           MediaItem[]
+  mediaFiles           MediaFile[]
+  libraryScans         LibraryScan[]
+  playbackSessions     PlaybackSession[]
+  playbackHistory      PlaybackHistory[]
+  auditLogs            AuditLog[]
+  settings             SystemSetting[]
+  jobs                 SystemJob[]
 
   @@map("accounts")
 }
 
 model User {
-  id           String     @id @default(uuid())
-  accountId    String     @map("account_id")
-  email        String
-  passwordHash String     @map("password_hash")
-  displayName  String     @map("display_name")
-  status       UserStatus @default(active)
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
-  account      Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  profiles     Profile[]
-  roles        UserRole[]
-  devices      Device[]
-  refreshTokens RefreshToken[]
-  subscriptions Subscription[]
+  id                   String                @id @default(uuid())
+  accountId            String                @map("account_id")
+  email                String
+  passwordHash         String                @map("password_hash")
+  displayName          String                @map("display_name")
+  status               UserStatus            @default(active)
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
+  account              Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profiles             Profile[]
+  roles                UserRole[]
+  devices              Device[]
+  refreshTokens        RefreshToken[]
+  subscriptions        Subscription[]
   entitlementOverrides EntitlementOverride[]
-  playbackSessions PlaybackSession[]
-  playbackHistory PlaybackHistory[]
-  auditLogs    AuditLog[]
+  playbackSessions     PlaybackSession[]
+  playbackHistory      PlaybackHistory[]
+  auditLogs            AuditLog[]
 
   @@unique([accountId, email])
   @@index([accountId, status])
@@ -121,31 +136,31 @@ model User {
 }
 
 model Profile {
-  id             String   @id @default(uuid())
-  accountId      String   @map("account_id")
-  userId         String   @map("user_id")
-  name           String
-  isChildProfile Boolean  @default(false) @map("is_child_profile")
-  pinHash        String?  @map("pin_hash")
-  language       String   @default("da")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                   String                @id @default(uuid())
+  accountId            String                @map("account_id")
+  userId               String                @map("user_id")
+  name                 String
+  isChildProfile       Boolean               @default(false) @map("is_child_profile")
+  pinHash              String?               @map("pin_hash")
+  language             String                @default("da")
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
+  account              Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   entitlementOverrides EntitlementOverride[]
-  playbackSessions PlaybackSession[]
-  playbackHistory PlaybackHistory[]
-  auditLogs      AuditLog[]
+  playbackSessions     PlaybackSession[]
+  playbackHistory      PlaybackHistory[]
+  auditLogs            AuditLog[]
 
   @@index([accountId, userId])
   @@map("profiles")
 }
 
 model Role {
-  id          String   @id @default(uuid())
-  code        String   @unique
+  id          String           @id @default(uuid())
+  code        String           @unique
   description String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
   users       UserRole[]
   permissions RolePermission[]
 
@@ -153,10 +168,10 @@ model Role {
 }
 
 model Permission {
-  id          String   @id @default(uuid())
-  code        String   @unique
+  id          String           @id @default(uuid())
+  code        String           @unique
   description String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
   roles       RolePermission[]
 
   @@map("permissions")
@@ -184,21 +199,21 @@ model RolePermission {
 }
 
 model Device {
-  id           String   @id @default(uuid())
-  accountId    String   @map("account_id")
-  userId       String   @map("user_id")
-  fingerprint  String
-  name         String
-  type         String
-  platform     String?
-  appVersion   String?  @map("app_version")
-  capabilities Json     @default("{}")
-  isRevoked    Boolean  @default(false) @map("is_revoked")
-  firstSeenAt  DateTime @default(now()) @map("first_seen_at")
-  lastSeenAt   DateTime @default(now()) @map("last_seen_at")
-  account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refreshTokens RefreshToken[]
+  id               String            @id @default(uuid())
+  accountId        String            @map("account_id")
+  userId           String            @map("user_id")
+  fingerprint      String
+  name             String
+  type             String
+  platform         String?
+  appVersion       String?           @map("app_version")
+  capabilities     Json              @default("{}")
+  isRevoked        Boolean           @default(false) @map("is_revoked")
+  firstSeenAt      DateTime          @default(now()) @map("first_seen_at")
+  lastSeenAt       DateTime          @default(now()) @map("last_seen_at")
+  account          Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens    RefreshToken[]
   playbackSessions PlaybackSession[]
 
   @@unique([userId, fingerprint])
@@ -207,19 +222,19 @@ model Device {
 }
 
 model RefreshToken {
-  id           String   @id @default(uuid())
-  tokenHash    String   @unique @map("token_hash")
-  familyId     String   @map("family_id")
-  accountId    String   @map("account_id")
-  userId       String   @map("user_id")
-  deviceId     String   @map("device_id")
-  expiresAt    DateTime @map("expires_at")
-  revokedAt    DateTime? @map("revoked_at")
-  lastUsedAt   DateTime? @map("last_used_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-  account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  device       Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid())
+  tokenHash  String    @unique @map("token_hash")
+  familyId   String    @map("family_id")
+  accountId  String    @map("account_id")
+  userId     String    @map("user_id")
+  deviceId   String    @map("device_id")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  account    Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device     Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([familyId])
   @@index([userId, deviceId])
@@ -227,44 +242,44 @@ model RefreshToken {
 }
 
 model Plan {
-  id          String   @id @default(uuid())
-  accountId   String   @map("account_id")
-  name        String
-  internalCode String  @map("internal_code")
-  description String?
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  versions    PlanVersion[]
+  id           String        @id @default(uuid())
+  accountId    String        @map("account_id")
+  name         String
+  internalCode String        @map("internal_code")
+  description  String?
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  versions     PlanVersion[]
 
   @@unique([accountId, internalCode])
   @@map("plans")
 }
 
 model PlanVersion {
-  id                    String   @id @default(uuid())
-  planId                String   @map("plan_id")
-  version               Int
-  isActive              Boolean  @default(false) @map("is_active")
-  effectiveAt           DateTime @default(now()) @map("effective_at")
-  maxConcurrentStreams  Int      @default(1) @map("max_concurrent_streams")
-  maxRegisteredDevices  Int      @default(1) @map("max_registered_devices")
-  maxVideoResolution    Int      @default(1080) @map("max_video_resolution")
-  maxVideoBitrate       Int      @default(4000) @map("max_video_bitrate")
-  allowDirectPlay       Boolean  @default(true) @map("allow_direct_play")
-  allowDirectStream     Boolean  @default(false) @map("allow_direct_stream")
-  allowVideoTranscode   Boolean  @default(false) @map("allow_video_transcode")
-  allowAudioTranscode   Boolean  @default(false) @map("allow_audio_transcode")
-  allowSubtitleBurnIn   Boolean  @default(false) @map("allow_subtitle_burn_in")
-  allowChromecast       Boolean  @default(false) @map("allow_chromecast")
-  allowOfflineDownload  Boolean  @default(false) @map("allow_offline_download")
-  releaseDelayMonths    Int      @default(0) @map("release_delay_months")
-  releaseDelayDays      Int      @default(0) @map("release_delay_days")
-  snapshot              Json
-  plan                  Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
-  entitlement           PlanEntitlement?
-  subscriptions         Subscription[]
+  id                   String           @id @default(uuid())
+  planId               String           @map("plan_id")
+  version              Int
+  isActive             Boolean          @default(false) @map("is_active")
+  effectiveAt          DateTime         @default(now()) @map("effective_at")
+  maxConcurrentStreams Int              @default(1) @map("max_concurrent_streams")
+  maxRegisteredDevices Int              @default(1) @map("max_registered_devices")
+  maxVideoResolution   Int              @default(1080) @map("max_video_resolution")
+  maxVideoBitrate      Int              @default(4000) @map("max_video_bitrate")
+  allowDirectPlay      Boolean          @default(true) @map("allow_direct_play")
+  allowDirectStream    Boolean          @default(false) @map("allow_direct_stream")
+  allowVideoTranscode  Boolean          @default(false) @map("allow_video_transcode")
+  allowAudioTranscode  Boolean          @default(false) @map("allow_audio_transcode")
+  allowSubtitleBurnIn  Boolean          @default(false) @map("allow_subtitle_burn_in")
+  allowChromecast      Boolean          @default(false) @map("allow_chromecast")
+  allowOfflineDownload Boolean          @default(false) @map("allow_offline_download")
+  releaseDelayMonths   Int              @default(0) @map("release_delay_months")
+  releaseDelayDays     Int              @default(0) @map("release_delay_days")
+  snapshot             Json
+  plan                 Plan             @relation(fields: [planId], references: [id], onDelete: Cascade)
+  entitlement          PlanEntitlement?
+  subscriptions        Subscription[]
 
   @@unique([planId, version])
   @@map("plan_versions")
@@ -281,18 +296,18 @@ model PlanEntitlement {
 }
 
 model Subscription {
-  id            String             @id @default(uuid())
-  accountId     String             @map("account_id")
-  userId        String             @map("user_id")
-  planVersionId String             @map("plan_version_id")
-  status        SubscriptionStatus @default(pending)
-  startsAt      DateTime           @default(now()) @map("starts_at")
-  endsAt        DateTime?          @map("ends_at")
-  createdAt     DateTime           @default(now()) @map("created_at")
-  updatedAt     DateTime           @updatedAt @map("updated_at")
-  account       Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  planVersion   PlanVersion        @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  id            String                @id @default(uuid())
+  accountId     String                @map("account_id")
+  userId        String                @map("user_id")
+  planVersionId String                @map("plan_version_id")
+  status        SubscriptionStatus    @default(pending)
+  startsAt      DateTime              @default(now()) @map("starts_at")
+  endsAt        DateTime?             @map("ends_at")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+  account       Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planVersion   PlanVersion           @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
   events        SubscriptionEvent[]
   snapshot      SubscriptionSnapshot?
 
@@ -323,49 +338,52 @@ model SubscriptionSnapshot {
 }
 
 model EntitlementOverride {
-  id         String   @id @default(uuid())
-  accountId  String   @map("account_id")
-  userId     String   @map("user_id")
-  profileId  String?  @map("profile_id")
-  values     Json
-  reason     String
-  expiresAt  DateTime? @map("expires_at")
-  createdAt  DateTime @default(now()) @map("created_at")
-  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  profile    Profile? @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid())
+  accountId String    @map("account_id")
+  userId    String    @map("user_id")
+  profileId String?   @map("profile_id")
+  values    Json
+  reason    String
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile   Profile?  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([accountId, userId, profileId])
   @@map("user_entitlement_overrides")
 }
 
 model StorageRoot {
-  id         String   @id @default(uuid())
-  accountId  String   @map("account_id")
+  id         String      @id @default(uuid())
+  accountId  String      @map("account_id")
   label      String
-  mountPath  String   @map("mount_path")
-  type       String   @default("local")
-  isReadOnly Boolean  @default(true) @map("is_read_only")
-  createdAt  DateTime @default(now()) @map("created_at")
-  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  mountPath  String      @map("mount_path")
+  type       String      @default("local")
+  isReadOnly Boolean     @default(true) @map("is_read_only")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  account    Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
   libraries  Library[]
+  mediaFiles MediaFile[]
 
   @@unique([accountId, label])
   @@map("storage_roots")
 }
 
 model Library {
-  id            String      @id @default(uuid())
-  accountId     String      @map("account_id")
-  storageRootId String      @map("storage_root_id")
+  id            String        @id @default(uuid())
+  accountId     String        @map("account_id")
+  storageRootId String        @map("storage_root_id")
   name          String
   type          LibraryType
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
-  account       Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  storageRoot   StorageRoot @relation(fields: [storageRootId], references: [id], onDelete: Restrict)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  account       Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  storageRoot   StorageRoot   @relation(fields: [storageRootId], references: [id], onDelete: Restrict)
   paths         LibraryPath[]
   mediaItems    MediaItem[]
+  mediaFiles    MediaFile[]
+  scans         LibraryScan[]
 
   @@index([accountId])
   @@map("libraries")
@@ -383,50 +401,106 @@ model LibraryPath {
 }
 
 model MediaItem {
-  id                    String    @id @default(uuid())
-  accountId             String    @map("account_id")
-  libraryId             String    @map("library_id")
-  title                 String
-  type                  MediaType
-  codec                 String?
-  container             String?
-  bitrate               Int?
-  width                 Int?
-  height                Int?
-  releaseDate           DateTime? @map("release_date")
-  availabilityOverride  DateTime? @map("availability_override")
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
-  account               Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  library               Library   @relation(fields: [libraryId], references: [id], onDelete: Cascade)
-  playbackSessions      PlaybackSession[]
-  playbackHistory       PlaybackHistory[]
+  id                   String            @id @default(uuid())
+  accountId            String            @map("account_id")
+  libraryId            String            @map("library_id")
+  title                String
+  type                 MediaType
+  codec                String?
+  container            String?
+  bitrate              Int?
+  width                Int?
+  height               Int?
+  releaseDate          DateTime?         @map("release_date")
+  availabilityOverride DateTime?         @map("availability_override")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  updatedAt            DateTime          @updatedAt @map("updated_at")
+  account              Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  library              Library           @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  file                 MediaFile?
+  playbackSessions     PlaybackSession[]
+  playbackHistory      PlaybackHistory[]
 
   @@index([accountId, type])
   @@map("media_items")
 }
 
+model MediaFile {
+  id             String          @id @default(uuid())
+  accountId      String          @map("account_id")
+  libraryId      String          @map("library_id")
+  storageRootId  String          @map("storage_root_id")
+  mediaItemId    String          @unique @map("media_item_id")
+  relativePath   String          @map("relative_path")
+  sizeBytes      BigInt          @map("size_bytes")
+  modifiedAt     DateTime        @map("modified_at")
+  status         MediaFileStatus @default(ready)
+  container      String?
+  videoCodec     String?         @map("video_codec")
+  audioCodec     String?         @map("audio_codec")
+  width          Int?
+  height         Int?
+  durationMs     Int?            @map("duration_ms")
+  bitrate        Int?
+  probe          Json?
+  lastSeenScanId String?         @map("last_seen_scan_id")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  account        Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  library        Library         @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+  storageRoot    StorageRoot     @relation(fields: [storageRootId], references: [id], onDelete: Restrict)
+  mediaItem      MediaItem       @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+
+  @@unique([libraryId, relativePath])
+  @@index([libraryId, status])
+  @@index([lastSeenScanId])
+  @@map("media_files")
+}
+
+model LibraryScan {
+  id           String            @id @default(uuid())
+  accountId    String            @map("account_id")
+  libraryId    String            @map("library_id")
+  jobId        String?           @unique @map("job_id")
+  status       LibraryScanStatus @default(queued)
+  filesSeen    Int               @default(0) @map("files_seen")
+  filesCreated Int               @default(0) @map("files_created")
+  filesUpdated Int               @default(0) @map("files_updated")
+  filesMissing Int               @default(0) @map("files_missing")
+  errors       Int               @default(0)
+  error        String?
+  startedAt    DateTime?         @map("started_at")
+  finishedAt   DateTime?         @map("finished_at")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  account      Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  library      Library           @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+
+  @@index([libraryId, createdAt])
+  @@index([accountId, status])
+  @@map("library_scans")
+}
+
 model PlaybackSession {
-  id               String         @id @default(uuid())
-  accountId        String         @map("account_id")
-  userId           String         @map("user_id")
-  profileId        String         @map("profile_id")
-  deviceId         String         @map("device_id")
-  mediaId          String         @map("media_id")
-  logicalSessionId String         @map("logical_session_id")
+  id               String             @id @default(uuid())
+  accountId        String             @map("account_id")
+  userId           String             @map("user_id")
+  profileId        String             @map("profile_id")
+  deviceId         String             @map("device_id")
+  mediaId          String             @map("media_id")
+  logicalSessionId String             @map("logical_session_id")
   method           String
-  status           PlaybackStatus @default(reserving)
-  streamTokenHash  String         @unique @map("stream_token_hash")
-  isCastSession    Boolean        @default(false) @map("is_cast_session")
-  leaseExpiresAt   DateTime       @map("lease_expires_at")
-  lastHeartbeatAt  DateTime       @default(now()) @map("last_heartbeat_at")
-  startedAt        DateTime       @default(now()) @map("started_at")
-  endedAt          DateTime?      @map("ended_at")
-  account          Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  user             User           @relation(fields: [userId], references: [id], onDelete: Restrict)
-  profile          Profile        @relation(fields: [profileId], references: [id], onDelete: Restrict)
-  device           Device         @relation(fields: [deviceId], references: [id], onDelete: Restrict)
-  media            MediaItem      @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  status           PlaybackStatus     @default(reserving)
+  streamTokenHash  String             @unique @map("stream_token_hash")
+  isCastSession    Boolean            @default(false) @map("is_cast_session")
+  leaseExpiresAt   DateTime           @map("lease_expires_at")
+  lastHeartbeatAt  DateTime           @default(now()) @map("last_heartbeat_at")
+  startedAt        DateTime           @default(now()) @map("started_at")
+  endedAt          DateTime?          @map("ended_at")
+  account          Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user             User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  profile          Profile            @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  device           Device             @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  media            MediaItem          @relation(fields: [mediaId], references: [id], onDelete: Restrict)
   reservation      StreamReservation?
   history          PlaybackHistory[]
 
@@ -470,16 +544,16 @@ model PlaybackHistory {
 }
 
 model BillingWebhookEvent {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   provider    String
-  eventId     String   @map("event_id")
+  eventId     String    @map("event_id")
   type        String
   payload     Json
-  signatureOk Boolean  @default(false) @map("signature_ok")
+  signatureOk Boolean   @default(false) @map("signature_ok")
   processedAt DateTime? @map("processed_at")
-  attempts    Int      @default(0)
-  lastError   String?  @map("last_error")
-  createdAt   DateTime @default(now()) @map("created_at")
+  attempts    Int       @default(0)
+  lastError   String?   @map("last_error")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
   @@unique([provider, eventId])
   @@map("billing_webhook_events")
@@ -518,21 +592,21 @@ model SystemSetting {
 }
 
 model SystemJob {
-  id          String   @id @default(uuid())
-  accountId   String   @map("account_id")
-  type        String
-  status      String
-  payload     Json
-  availableAt DateTime @default(now()) @map("available_at")
-  lockedAt    DateTime? @map("locked_at")
-  leaseExpiresAt DateTime? @map("lease_expires_at")
-  workerId    String?  @map("worker_id")
-  attemptCount Int     @default(0) @map("attempt_count")
-  maxAttempts Int      @default(5) @map("max_attempts")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  attempts    JobAttempt[]
+  id             String       @id @default(uuid())
+  accountId      String       @map("account_id")
+  type           String
+  status         String
+  payload        Json
+  availableAt    DateTime     @default(now()) @map("available_at")
+  lockedAt       DateTime?    @map("locked_at")
+  leaseExpiresAt DateTime?    @map("lease_expires_at")
+  workerId       String?      @map("worker_id")
+  attemptCount   Int          @default(0) @map("attempt_count")
+  maxAttempts    Int          @default(5) @map("max_attempts")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  account        Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  attempts       JobAttempt[]
 
   @@index([status, availableAt, leaseExpiresAt])
   @@map("system_jobs")

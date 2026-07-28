@@ -36,3 +36,22 @@ Stop applikationen, tag databasebackup og inspicer Prisma-fejlkoden. Brug aldrig
 ## Streamslot frigives ikke
 
 Kontroller workerloggen og `lease_expires_at`. Workerens recurring `playback.expire-leases` job frigiver udløbne reservationsrækker. Heartbeat kan ikke forlænge en afsluttet session.
+
+## Biblioteksscan fejler
+
+Kontroller den seneste række via `GET /api/v1/libraries/{id}/scans` og workerloggen. Bekræft derefter:
+
+- `ffprobe -version` virker for workerbrugeren.
+- Storage root og bibliotekspath findes i samme mount namespace.
+- Workerbrugeren har læseadgang.
+- Den virkelige bibliotekspath ligger under storage root.
+
+Symlinks følges aldrig. Enkeltfiler, som `ffprobe` ikke kan læse, registreres som `unreadable`; scan-jobbet fortsætter og tæller fejlen.
+
+## Direct stream returnerer 401, 410 eller 416
+
+- `401`: token mangler eller matcher ikke sessionens hash.
+- `410`: sessionens lease er udløbet eller afsluttet.
+- `416`: klienten sendte en ugyldig eller multi-range request.
+
+Klienten skal sende heartbeat separat. Range-requests forlænger ikke sessionens lease.

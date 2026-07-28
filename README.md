@@ -24,7 +24,7 @@ http://SERVERENS-IP:5555
 
 ## Direkte installation uden Docker
 
-Direkte installation fungerer Plex-lignende som tre systemd-services bag nginx. Serveren skal have Node.js 22, npm 10+, PostgreSQL 16, Redis 7, nginx, Git og sudo.
+Direkte installation fungerer Plex-lignende som tre systemd-services bag nginx. Serveren skal have Node.js 22, npm 10+, PostgreSQL 16, Redis 7, FFmpeg/ffprobe, nginx, Git og sudo.
 
 1. Opret PostgreSQL-databasen og brugeren, som er angivet i `.env.direct.example`.
 2. Kør `sudo bash scripts/install-direct.sh`.
@@ -65,6 +65,9 @@ docker compose up --detach --build
 - Playback-metodevalg uden silent transcode fallback.
 - Atomisk stream reservation med Prisma-kompatibel, namespaced PostgreSQL advisory lock, frisk `READ COMMITTED`-visning efter låseventet, lease/heartbeat og kryptografisk stream-token.
 - Vedvarende worker-kø med `FOR UPDATE SKIP LOCKED`, jobforsøg, retry/backoff og lease-cleanup.
+- Manuel biblioteksscanning via durable `library.scan` jobs med sikker realpath-kontrol, symlink-afvisning, `ffprobe`-metadata og markering af manglende filer uden automatisk sletning.
+- Direkte medielevering med HTTP `HEAD`, single-range `GET`, `206 Partial Content`, suffix ranges og hash-valideret session-token; query strings udelades fra API-logs, og stream-access logs er deaktiveret i nginx.
+- Scanstatus og manuel scan-trigger i admin-dashboardet.
 - Next.js adminskal inspireret af den godkendte BoltBytes-reference med rigtige API-data og tomme tilstande uden mock-film.
 - Docker Compose med PostgreSQL, Redis, API, admin, worker og nginx reverse proxy.
 - Direkte Linux/systemd-installation uden Docker.
@@ -78,7 +81,7 @@ Lokalt valideret med Node.js 22 og npm 10:
 - Prisma client generation og schema validation.
 - ESLint.
 - TypeScript typecheck for shared contracts, API, worker og admin.
-- Syv unit tests.
+- Tolv unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
 - Produktionsbuild af shared contracts, NestJS API, worker og Next.js admin.
 
 PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres lokalt på den aktuelle Windows-maskine uden lokal PostgreSQL-testdatabase og Docker. De er verificeret i [GitHub Actions-run 30304933724](https://github.com/skovhuus1/mediaserver/actions/runs/30304933724), hvor følgende gates passerede:
@@ -89,10 +92,20 @@ PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres 
 - Produktionsaudit med 0 kendte sårbarheder på high-niveau eller højere.
 - Docker Compose-konfiguration og container-build af API, admin og worker.
 
+Fase-2 mediepipelinen er verificeret i [GitHub Actions-run 30315230245](https://github.com/skovhuus1/mediaserver/actions/runs/30315230245):
+
+- Migration `0002_media_pipeline` anvendes efter fase-1-migrationen på en frisk PostgreSQL 16-database.
+- Unit-steppet kører 12 tests uden databasefiler; integrationssteppet kører separat 2/2 tests.
+- To samtidige scan-triggers opretter præcis én scan-ledger og ét durable worker-job.
+- Stream reservation ved limit 1 accepterer fortsat præcis én af to samtidige requests.
+- API, admin og worker bygges, produktion-audit er grøn, Compose valideres, og worker-imaget med FFmpeg-laget bygges.
+
+CI har ikke kørt en fuld scanning af en rigtig mediefil eller afspillet en stor fil gennem nginx. Det kræver en staging-server med et faktisk read-only media mount og indgår i den næste smoke-test.
+
 ## Ikke implementeret endnu
 
-- Filscanner, ffprobe, metadataudbydere og poster-download.
-- Faktisk HTTP Range/HLS streaming og signed segment URLs.
+- Metadataudbydere, titelmatchning og poster-download.
+- HLS-packaging og signed segment URLs.
 - FFmpeg transcoding workers, scheduler og hardwareacceleration.
 - Chromecast sender/receiver og handoff-token.
 - Sonarr, Radarr og qBittorrent integration.
@@ -100,7 +113,7 @@ PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres 
 - Android, Android TV og øvrige native klienter.
 - Backup/restore-automatisering og release artifacts.
 
-Disse punkter må ikke betragtes som implementeret, selv om database- og jobfundamentet er forberedt.
+Scannerens titel er i denne fase afledt af filnavnet. Scanning startes manuelt fra API/admin; automatisk filesystem watching og planlagte scanninger er endnu ikke implementeret. De øvrige punkter må ikke betragtes som implementeret, selv om fundamentet er forberedt.
 
 ## Udvikling
 

@@ -41,7 +41,7 @@ export class CorrelationInterceptor implements NestInterceptor {
               component: 'http',
               correlationId: id,
               method: request.method,
-              path: request.originalUrl,
+              path: request.path,
               statusCode: response.statusCode,
               durationMs: Math.round(performance.now() - startedAt),
             }));
@@ -53,7 +53,7 @@ export class CorrelationInterceptor implements NestInterceptor {
               component: 'http',
               correlationId: id,
               method: request.method,
-              path: request.originalUrl,
+              path: request.path,
               statusCode: response.statusCode,
               durationMs: Math.round(performance.now() - startedAt),
             }));

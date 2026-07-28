@@ -1,7 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Head, Headers, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
-import { CurrentUser } from '../common/auth';
+import type { Response } from 'express';
+import { CurrentUser, Public } from '../common/auth';
+import { DirectStreamService } from './direct-stream.service';
 import { AuthorizePlaybackDto } from './playback.dto';
 import { PlaybackService } from './playback.service';
 import { StreamReservationService } from './stream-reservation.service';
@@ -12,6 +14,7 @@ export class PlaybackController {
   constructor(
     private readonly playback: PlaybackService,
     private readonly reservations: StreamReservationService,
+    private readonly directStream: DirectStreamService,
   ) {}
 
   @Post('authorize')
@@ -32,5 +35,27 @@ export class PlaybackController {
   @Delete('sessions/:id')
   stop(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.reservations.release(actor, id);
+  }
+
+  @Get('sessions/:id/stream')
+  @Public()
+  stream(
+    @Param('id') id: string,
+    @Query('token') token: string | undefined,
+    @Headers('range') range: string | undefined,
+    @Res() response: Response,
+  ) {
+    return this.directStream.send(id, token, range, response, false);
+  }
+
+  @Head('sessions/:id/stream')
+  @Public()
+  streamHead(
+    @Param('id') id: string,
+    @Query('token') token: string | undefined,
+    @Headers('range') range: string | undefined,
+    @Res() response: Response,
+  ) {
+    return this.directStream.send(id, token, range, response, true);
   }
 }
