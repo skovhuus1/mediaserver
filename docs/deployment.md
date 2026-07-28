@@ -7,10 +7,10 @@ Kør secret-bootstrap før første start. PostgreSQL- og Redis-data ligger i nam
 Miljøspecifikke host paths kan sættes før start:
 
 ```bash
-MEDIA_PATH=/mnt/media DOWNLOADS_PATH=/mnt/downloads docker compose up -d --build
+MEDIA_PATH=/home/seeds/Media/Films/user/google/google/external/Media DOWNLOADS_PATH=/mnt/downloads docker compose up -d --build
 ```
 
-Eksponeret port er `5555`. Databasen og Redis publiceres ikke på hosten.
+`MEDIA_PATH` monteres read-only som `/media` i API og worker. Setup-guiden kan browse alle undermapper under denne rod, men kan ikke gå uden for mountet. Eksponeret port er `5555`. Databasen og Redis publiceres ikke på hosten.
 
 ## Direkte Linux
 

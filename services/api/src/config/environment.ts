@@ -9,6 +9,8 @@ export type Environment = {
   jwtRefreshTtlDays: number;
   encryptionKey: string;
   sessionLeaseSeconds: number;
+  mediaMountPath: string;
+  mediaHostPath: string;
 };
 
 function required(name: string): string {
@@ -48,5 +50,7 @@ export function readEnvironment(): Environment {
     jwtRefreshTtlDays: boundedInteger('JWT_REFRESH_TTL_DAYS', 30, 1, 365),
     encryptionKey,
     sessionLeaseSeconds: boundedInteger('SESSION_LEASE_SECONDS', 90, 15, 300),
+    mediaMountPath: process.env.MEDIA_MOUNT_PATH?.trim() || process.env.MEDIA_PATH?.trim() || '/media',
+    mediaHostPath: process.env.MEDIA_PATH?.trim() || '/media',
   };
 }

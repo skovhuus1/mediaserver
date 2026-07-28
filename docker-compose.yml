@@ -38,6 +38,7 @@ services:
       API_PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       REDIS_URL: redis://redis:6379
+      MEDIA_MOUNT_PATH: /media
       BB_MEDIA_UPDATE_REPO_PATH: /workspace
     volumes:
       - .:/workspace

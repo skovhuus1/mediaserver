@@ -42,3 +42,11 @@ export class SetupRequestDto {
   @Matches(/^\/(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*[\u0000\r\n]).*$/)
   mountPath?: string;
 }
+
+export class BrowseDirectoriesDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 4096)
+  @Matches(/^\/(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*[\u0000\r\n]).*$/)
+  path?: string;
+}

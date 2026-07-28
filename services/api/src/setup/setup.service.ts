@@ -1,8 +1,12 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { hash } from 'bcryptjs';
+import { readdir, realpath } from 'node:fs/promises';
+import { posix } from 'node:path';
+import { readEnvironment } from '../config/environment';
 import { PrismaService } from '../prisma/prisma.service';
 import { SetupRequestDto } from './setup.dto';
+import { hostDisplayPath, resolveStorageBrowsePath } from './storage-path';
 
 const DEFAULT_ENTITLEMENTS = {
   maxConcurrentStreams: 1,
@@ -22,13 +26,55 @@ const DEFAULT_ENTITLEMENTS = {
 
 @Injectable()
 export class SetupService {
+  private readonly environment = readEnvironment();
+
   constructor(private readonly prisma: PrismaService) {}
 
   async status(): Promise<{ configured: boolean }> {
     return { configured: Boolean(await this.prisma.systemBootstrap.findUnique({ where: { id: 'singleton' } })) };
   }
 
+  async browseDirectories(requestedPath?: string) {
+    if ((await this.status()).configured) {
+      throw new ConflictException({ code: 'already_configured', message: 'Directory browsing is only available before setup' });
+    }
+
+    const selected = await this.resolveDirectory(requestedPath);
+    let entries;
+    try {
+      entries = await readdir(selected.realPath, { withFileTypes: true });
+    } catch (error) {
+      this.throwFilesystemError(error);
+    }
+
+    const directories = entries
+      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+      .sort((left, right) => left.name.localeCompare(right.name, 'da'))
+      .map((entry) => {
+        const path = posix.join(selected.path, entry.name);
+        return {
+          name: entry.name,
+          path,
+          hostPath: hostDisplayPath(this.environment.mediaHostPath, this.environment.mediaMountPath, path),
+        };
+      });
+
+    return {
+      mountRoot: this.environment.mediaMountPath,
+      hostRoot: this.environment.mediaHostPath,
+      currentPath: selected.path,
+      currentHostPath: hostDisplayPath(
+        this.environment.mediaHostPath,
+        this.environment.mediaMountPath,
+        selected.path,
+      ),
+      parentPath: selected.path === this.environment.mediaMountPath ? null : posix.dirname(selected.path),
+      directories,
+    };
+  }
+
   async configure(dto: SetupRequestDto): Promise<{ configured: true; accountId: string; adminUserId: string }> {
+    const selectedDirectory = await this.resolveDirectory(dto.mountPath);
     const passwordHash = await hash(dto.adminPassword, 12);
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -80,7 +126,7 @@ export class SetupService {
           data: {
             accountId: account.id,
             label: 'media',
-            mountPath: (dto.mountPath ?? '/media').replace(/\/+$/, '') || '/',
+            mountPath: selectedDirectory.path,
             isReadOnly: true,
           },
         });
@@ -135,5 +181,60 @@ export class SetupService {
       }
       throw error;
     }
+  }
+
+  private async resolveDirectory(requestedPath?: string): Promise<{ path: string; realPath: string }> {
+    const requested = resolveStorageBrowsePath(
+      this.environment.mediaMountPath,
+      requestedPath ?? this.environment.mediaMountPath,
+    );
+    if (!requested) {
+      throw new BadRequestException({
+        code: 'path_outside_media_mount',
+        message: 'The selected directory must stay inside the configured media mount',
+      });
+    }
+
+    try {
+      const [rootRealPath, selectedRealPath] = await Promise.all([
+        realpath(this.environment.mediaMountPath),
+        realpath(requested),
+      ]);
+      const resolvedInsideRoot = resolveStorageBrowsePath(rootRealPath, selectedRealPath);
+      if (!resolvedInsideRoot) {
+        throw new ForbiddenException({
+          code: 'path_outside_media_mount',
+          message: 'The selected directory resolves outside the configured media mount',
+        });
+      }
+
+      const relativePath = posix.relative(rootRealPath, selectedRealPath);
+      return {
+        path: relativePath
+          ? posix.join(this.environment.mediaMountPath, relativePath)
+          : this.environment.mediaMountPath,
+        realPath: selectedRealPath,
+      };
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
+      this.throwFilesystemError(error);
+    }
+  }
+
+  private throwFilesystemError(error: unknown): never {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      throw new NotFoundException({
+        code: 'media_directory_missing',
+        message: 'The selected media directory does not exist',
+      });
+    }
+    if (code === 'EACCES' || code === 'EPERM') {
+      throw new ForbiddenException({
+        code: 'media_directory_unreadable',
+        message: 'The selected media directory cannot be read by BoltBytes',
+      });
+    }
+    throw error;
   }
 }

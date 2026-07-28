@@ -14,6 +14,12 @@ node scripts/bootstrap-env.mjs
 docker compose up --detach --build
 ```
 
+Sæt `MEDIA_PATH` i `.env` til den host-mappe, som BoltBytes må læse. Docker monterer den read-only som `/media`, og setup-guiden viser dens undermapper med både containersti og rigtig host-sti. Eksempel:
+
+```dotenv
+MEDIA_PATH=/home/seeds/Media/Films/user/google/google/external/Media
+```
+
 Åbn derefter:
 
 ```text
@@ -59,6 +65,7 @@ docker compose up --detach --build
 - NestJS API med `/api/v1`, OpenAPI på `/api/docs`, strukturerede fejl og correlation IDs.
 - PostgreSQL-schema og initial migration for accounts, users, profiles, roles, permissions, devices, refresh tokens, plans, plan versions, entitlements, subscriptions, media, playback, audit, jobs og billing webhook-ledger.
 - Atomisk førstegangsopsætning med singleton-guard, administrator, profil, storage root, standardplan og abonnement.
+- Sikker setup-mappebrowser begrænset til det read-only `MEDIA_PATH`-mount med realpath-kontrol, symlink-filtrering og visning af den tilsvarende host-sti.
 - Login, kortlivede JWT access tokens, hash-lagrede refresh tokens, atomisk tokenrotation, reuse-detection, logout og device revocation.
 - Browserens device fingerprint bruger native `crypto.randomUUID()` med en RFC 4122 v4-fallback baseret på `crypto.getRandomValues()`, så den første opsætning også fungerer via en almindelig HTTP-serveradresse.
 - Konto- og ejerskabskontrol på profiler, enheder, medier, biblioteker, abonnementer og playback sessions.

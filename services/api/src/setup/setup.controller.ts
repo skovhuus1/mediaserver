@@ -1,7 +1,7 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/auth';
-import { SetupRequestDto } from './setup.dto';
+import { BrowseDirectoriesDto, SetupRequestDto } from './setup.dto';
 import { SetupService } from './setup.service';
 
 @ApiTags('setup')
@@ -13,6 +13,12 @@ export class SetupController {
   @Get('status')
   status() {
     return this.setup.status();
+  }
+
+  @Public()
+  @Get('directories')
+  directories(@Query() query: BrowseDirectoriesDto) {
+    return this.setup.browseDirectories(query.path);
   }
 
   @Public()
