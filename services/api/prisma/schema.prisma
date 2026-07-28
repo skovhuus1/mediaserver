@@ -416,6 +416,13 @@ model MediaItem {
   seasonNumber         Int?              @map("season_number")
   episodeNumber        Int?              @map("episode_number")
   releaseYear          Int?              @map("release_year")
+  overview             String?
+  rating               Float?
+  metadataProvider     String?           @map("metadata_provider")
+  metadataProviderId   String?           @map("metadata_provider_id")
+  posterPath           String?           @map("poster_path")
+  backdropPath         String?           @map("backdrop_path")
+  metadataUpdatedAt    DateTime?         @map("metadata_updated_at")
   releaseDate          DateTime?         @map("release_date")
   availabilityOverride DateTime?         @map("availability_override")
   createdAt            DateTime          @default(now()) @map("created_at")
@@ -429,6 +436,7 @@ model MediaItem {
   @@index([accountId, type])
   @@index([accountId, category])
   @@index([accountId, seriesTitle, seasonNumber])
+  @@index([accountId, metadataProvider, metadataProviderId])
   @@map("media_items")
 }
 

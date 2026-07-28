@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { extname, isAbsolute, posix, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { enrichLibraryMetadata } from './metadata.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -126,6 +127,9 @@ async function processJob(job: ClaimedJob): Promise<void> {
     case 'library.scan':
       await scanLibrary(job);
       return;
+    case 'media.metadata':
+      await enrichMetadata(job);
+      return;
     case 'playback.expire-leases':
       await expirePlaybackLeases();
       return;
@@ -246,6 +250,27 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
         finishedAt: new Date(),
       },
     });
+    if (process.env.TMDB_API_TOKEN?.trim()) {
+      const activeJobs = await prisma.systemJob.findMany({
+        where: { accountId: job.accountId, type: 'media.metadata', status: { in: ['queued', 'running'] } },
+        select: { payload: true },
+      });
+      const alreadyQueued = activeJobs.some(({ payload }) => {
+        const activePayload = asJsonObject(payload);
+        return activePayload.libraryId === library.id || typeof activePayload.libraryId !== 'string';
+      });
+      if (!alreadyQueued) {
+        await prisma.systemJob.create({
+          data: {
+            accountId: job.accountId,
+            type: 'media.metadata',
+            status: 'queued',
+            payload: { libraryId: library.id, onlyMissing: true, requestedBy: 'library.scan' },
+            maxAttempts: 3,
+          },
+        });
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown library scan failure';
     await prisma.libraryScan.update({
@@ -254,6 +279,16 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
     });
     throw error;
   }
+}
+
+async function enrichMetadata(job: ClaimedJob): Promise<void> {
+  const payload = asJsonObject(job.payload);
+  await enrichLibraryMetadata(prisma, {
+    accountId: job.accountId,
+    ...(typeof payload.libraryId === 'string' ? { libraryId: payload.libraryId } : {}),
+    onlyMissing: payload.onlyMissing === true,
+    onProgress: () => renewJobLease(job.id),
+  });
 }
 
 async function upsertScannedFile(input: {
@@ -390,7 +425,7 @@ async function renewJobLease(jobId: string): Promise<void> {
     where: { id: jobId, workerId, status: 'running' },
     data: { leaseExpiresAt: new Date(Date.now() + leaseMs) },
   });
-  if (result.count !== 1) throw new Error('Worker lost the library scan job lease');
+  if (result.count !== 1) throw new Error('Worker lost the job lease');
 }
 
 function asJsonObject(value: unknown): Record<string, unknown> {

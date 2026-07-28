@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { FolderOpen, RefreshCw, Server, ShieldCheck, Users } from 'lucide-react';
+import { Database, FolderOpen, RefreshCw, Server, ShieldCheck, Users } from 'lucide-react';
 import { api, type ApiFailure } from '@/lib/api';
 
 type Root = { id: string; label: string; mountPath: string; isReadOnly: boolean };
@@ -13,6 +13,7 @@ type User = { id: string; email: string; displayName: string; status: string; pr
 type Plan = { id: string; name: string; internalCode: string; description: string | null; versions: Array<{ version: number; isActive: boolean; maxConcurrentStreams: number; maxVideoResolution: number }> };
 type UpdateStatus = { enabled: boolean; configured: boolean; branch: string; restartMode: string; hasUpdate: boolean };
 type ErrorEntry = { id: string; severity: string; source: string; code: string; message: string; timestamp: string; details: Record<string, unknown> };
+type MetadataStatus = { enabled: boolean; provider: string; language: string; latestJob: { id: string; status: string; updatedAt: string } | null };
 
 export function ManagementView({ view }: { view: string }) {
   if (view === 'libraries') return <LibrariesView />;
@@ -175,8 +176,11 @@ function PlansView() {
 
 function SettingsView() {
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [metadata, setMetadata] = useState<MetadataStatus | null>(null);
   const [errors, setErrors] = useState<ErrorEntry[]>([]);
   const [loadingErrors, setLoadingErrors] = useState(false);
+  const [metadataBusy, setMetadataBusy] = useState(false);
+  const [metadataMessage, setMetadataMessage] = useState('');
   async function loadErrors() {
     setLoadingErrors(true);
     try {
@@ -187,14 +191,34 @@ function SettingsView() {
   }
   useEffect(() => {
     void api<UpdateStatus>('/system/update/status').then(setUpdate).catch(() => undefined);
+    void api<MetadataStatus>('/media/metadata/status').then(setMetadata).catch(() => undefined);
     void loadErrors();
   }, []);
+  async function queueMetadata() {
+    setMetadataBusy(true);
+    setMetadataMessage('');
+    try {
+      await api('/media/metadata/jobs', { method: 'POST' });
+      setMetadataMessage('Metadataopdatering er sat i kø.');
+      setMetadata(await api<MetadataStatus>('/media/metadata/status'));
+    } catch (error) {
+      setMetadataMessage(errorMessage(error));
+    } finally {
+      setMetadataBusy(false);
+    }
+  }
   return (
     <section className="management-page">
       <span className="eyebrow">SERVER CONTROL</span><h1>Indstillinger</h1><p>Driftsstatus, vedligeholdelse og durable fejl fra serveren.</p>
       <div className="management-card">
         <h2><Server size={18} /> Serveropdatering</h2>
         <div className="data-row"><div><strong>{update?.enabled ? 'Updater aktiveret' : 'Updater deaktiveret'}</strong><small>Branch: {update?.branch ?? '...'}</small><small>Genstart: {update?.restartMode ?? '...'}</small></div><Link className="inline-action" href="/update">Åbn updater</Link></div>
+      </div>
+      <div className="management-card">
+        <h2><Database size={18} /> Metadata</h2>
+        <div className="data-row"><div><strong>{metadata?.enabled ? 'TMDB aktiveret' : 'TMDB deaktiveret'}</strong><small>Sprog: {metadata?.language ?? 'da-DK'}</small><small>Seneste job: {metadata?.latestJob?.status ?? 'aldrig kørt'}</small></div><button disabled={!metadata?.enabled || metadataBusy || ['queued', 'running'].includes(metadata?.latestJob?.status ?? '')} onClick={() => void queueMetadata()}>{metadataBusy ? 'Sætter i kø...' : 'Opdater metadata'}</button></div>
+        {!metadata?.enabled && <p>Sæt <code>TMDB_API_TOKEN</code> i serverens <code>.env</code> og genstart API/worker for at aktivere automatiske beskrivelser og billeder.</p>}
+        {metadataMessage && <div className="update-message">{metadataMessage}</div>}
       </div>
       <div className="management-card">
         <div className="management-heading"><h2><ShieldCheck size={18} /> Fejllog</h2><button onClick={() => void loadErrors()} disabled={loadingErrors}>{loadingErrors ? 'Henter...' : 'Opdater'}</button></div>

@@ -298,6 +298,57 @@ export class CatalogService {
     return this.serializeMedia(item);
   }
 
+  async metadataStatus(actor: AuthenticatedUser) {
+    const latestJob = await this.prisma.systemJob.findFirst({
+      where: { accountId: actor.accountId, type: 'media.metadata' },
+      select: { id: true, status: true, attemptCount: true, maxAttempts: true, createdAt: true, updatedAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return {
+      enabled: Boolean(process.env.TMDB_API_TOKEN?.trim()),
+      provider: 'tmdb',
+      language: process.env.TMDB_LANGUAGE?.trim() || 'da-DK',
+      latestJob,
+    };
+  }
+
+  async queueMetadata(actor: AuthenticatedUser) {
+    if (!process.env.TMDB_API_TOKEN?.trim()) {
+      throw new ConflictException({
+        code: 'metadata_provider_disabled',
+        message: 'TMDB_API_TOKEN is not configured on the server',
+      });
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:media-metadata'),
+          hashtext(CAST(${actor.accountId} AS text))
+        )::text AS lock_result
+      `;
+      const active = await tx.systemJob.findFirst({
+        where: { accountId: actor.accountId, type: 'media.metadata', status: { in: ['queued', 'running'] } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (active) {
+        throw new ConflictException({
+          code: 'metadata_job_active',
+          message: 'A metadata job is already queued or running',
+          details: { jobId: active.id, status: active.status },
+        });
+      }
+      return tx.systemJob.create({
+        data: {
+          accountId: actor.accountId,
+          type: 'media.metadata',
+          status: 'queued',
+          payload: { onlyMissing: false, requestedBy: actor.sub },
+          maxAttempts: 3,
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
   listScans(actor: AuthenticatedUser, libraryId: string) {
     return this.prisma.libraryScan.findMany({
       where: { accountId: actor.accountId, libraryId },
