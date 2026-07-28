@@ -70,9 +70,10 @@ docker compose up --detach --build
 - Scanstatus og manuel scan-trigger i admin-dashboardet.
 - Next.js adminskal inspireret af den godkendte BoltBytes-reference med rigtige API-data og tomme tilstande uden mock-film.
 - Docker Compose med PostgreSQL, Redis, API, admin, worker og nginx reverse proxy.
+- Prisma-klienten genereres under Docker-buildet og kopieres med de nødvendige engines til API- og worker-runtime-images; OpenSSL er eksplicit installeret i begge images.
 - Direkte Linux/systemd-installation uden Docker.
 - Sikker updater med fast-forward-krav og eksplicit Docker opt-in.
-- CI-gates på Node.js 22 for migration, lint, typecheck, unit/integration tests, builds, dependency audit og Docker builds; workflow-actions bruger Node-24-kompatible v5-runtimes.
+- CI-gates på Node.js 22 for migration, lint, typecheck, unit/integration tests, builds, dependency audit, Docker builds og rigtig Compose-opstart; workflow-actions bruger Node-24-kompatible v5-runtimes.
 
 ## Valideringsstatus
 
@@ -101,6 +102,8 @@ Fase-2 mediepipelinen er verificeret i [GitHub Actions-run 30315230245](https://
 - API, admin og worker bygges, produktion-audit er grøn, Compose valideres, og worker-imaget med FFmpeg-laget bygges.
 
 CI har ikke kørt en fuld scanning af en rigtig mediefil eller afspillet en stor fil gennem nginx. Det kræver en staging-server med et faktisk read-only media mount og indgår i den næste smoke-test.
+
+Container-gaten starter desuden hele Compose-stakken efter image-build, venter på API-health, kontrollerer at worker-processen forbliver kørende og kalder health-endpointet gennem nginx. Det beskytter mod runtime-fejl, som et isoleret `docker compose build` ikke kan opdage, herunder en manglende genereret Prisma-klient.
 
 ## Ikke implementeret endnu
 

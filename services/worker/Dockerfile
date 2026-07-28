@@ -1,5 +1,6 @@
 FROM node:22-alpine AS dependencies
 WORKDIR /app
+RUN apk add --no-cache openssl
 COPY package.json package-lock.json ./
 COPY services/api/package.json services/api/package.json
 COPY services/worker/package.json services/worker/package.json
@@ -17,8 +18,8 @@ RUN npm run build --workspace=@boltbytes/worker
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN apk add --no-cache ffmpeg
-COPY --from=dependencies /app/node_modules ./node_modules
+RUN apk add --no-cache ffmpeg openssl
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/services/worker/dist ./services/worker/dist
 COPY --from=build /app/services/worker/package.json ./services/worker/package.json
 USER node
