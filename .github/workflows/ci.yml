@@ -79,3 +79,27 @@ jobs:
           docker compose config --quiet
       - name: Build containers
         run: docker compose build
+      - name: Smoke test container startup
+        run: |
+          set -Eeuo pipefail
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              docker compose ps
+              docker compose logs --no-color --tail=200
+            fi
+            docker compose down --volumes
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          docker compose up --detach --wait --wait-timeout 180
+          sleep 5
+
+          api_id="$(docker compose ps --quiet api)"
+          worker_id="$(docker compose ps --quiet worker)"
+          test -n "$api_id"
+          test -n "$worker_id"
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$api_id")" = "healthy"
+          test "$(docker inspect --format '{{.State.Status}}' "$worker_id")" = "running"
+          curl --fail --silent --show-error http://127.0.0.1:5555/api/v1/system/health

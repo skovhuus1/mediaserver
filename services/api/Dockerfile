@@ -1,5 +1,6 @@
 FROM node:22-alpine AS dependencies
 WORKDIR /app
+RUN apk add --no-cache openssl
 COPY package.json package-lock.json ./
 COPY services/api/package.json services/api/package.json
 COPY services/worker/package.json services/worker/package.json
@@ -18,8 +19,8 @@ RUN npm run build --workspace=@boltbytes/api
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN apk add --no-cache git
-COPY --from=dependencies /app/node_modules ./node_modules
+RUN apk add --no-cache git openssl
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/services/api/dist ./services/api/dist
 COPY --from=build /app/services/api/prisma ./services/api/prisma
 COPY --from=build /app/services/api/package.json ./services/api/package.json
