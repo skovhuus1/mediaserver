@@ -2,6 +2,7 @@
   "name": "@boltbytes/worker",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
@@ -9,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@boltbytes/contracts": "file:../../shared/contracts",
     "@prisma/client": "5.22.0"
   },
   "devDependencies": {
