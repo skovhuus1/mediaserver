@@ -15,6 +15,11 @@ type CatalogItem = {
   seasonNumber: number | null;
   episodeNumber: number | null;
   episodeCount?: number;
+  overview?: string | null;
+  rating?: number | null;
+  metadataProvider?: string | null;
+  posterPath?: string | null;
+  backdropPath?: string | null;
   codec?: string | null;
   container?: string | null;
   library?: { id: string; name: string; type: string };
@@ -158,7 +163,7 @@ export function CatalogView() {
         <section className="catalog-grid">
           {catalog.items.map((item, index) => (
             <button className="catalog-card" onClick={() => void openItem(item)} key={`${item.type}-${item.id}`}>
-              <span className={`poster poster-${index % 6}`}>
+              <span className={`poster poster-${index % 6}${imageUrl(item.posterPath, 'w500') ? ' has-image' : ''}`} style={imageStyle(item.posterPath, 'w500')}>
                 {item.type === 'movie' ? <Film /> : <Tv />}
                 <span>{item.category ?? (item.type === 'series' ? 'Serie' : 'Ukategoriseret')}</span>
               </span>
@@ -190,10 +195,12 @@ function DetailContent({ detail }: { detail: DetailState }) {
   const item = detail.item;
   return (
     <>
-      <span className="detail-art">{item.type === 'movie' ? <Film size={38} /> : <Tv size={38} />}</span>
+      <span className={`detail-art${imageUrl(item.backdropPath, 'w780') ? ' has-image' : ''}`} style={imageStyle(item.backdropPath, 'w780')}>{item.type === 'movie' ? <Film size={38} /> : <Tv size={38} />}</span>
       <span className="eyebrow">{item.category ?? item.type}</span>
       <h2>{item.title}</h2>
       <p>{item.releaseYear ? `${item.releaseYear} · ` : ''}{item.library?.name ?? 'BoltBytes bibliotek'}</p>
+      {item.overview && <p className="media-overview">{item.overview}</p>}
+      {item.rating !== null && item.rating !== undefined && <p className="metadata-credit">TMDB rating {item.rating.toFixed(1)}/10 · Metadata via TMDB</p>}
       {detail.kind === 'series' ? (
         <div className="episode-list">
           {detail.episodes.map((episode) => (
@@ -224,6 +231,16 @@ function durationLabel(durationMs?: number | null): string {
   if (!durationMs) return 'Ukendt';
   const totalMinutes = Math.round(durationMs / 60_000);
   return `${Math.floor(totalMinutes / 60)} t ${totalMinutes % 60} min`;
+}
+
+function imageUrl(path: string | null | undefined, size: 'w500' | 'w780'): string | null {
+  if (!path || !/^\/[A-Za-z0-9._-]+$/.test(path)) return null;
+  return `https://image.tmdb.org/t/p/${size}${path}`;
+}
+
+function imageStyle(path: string | null | undefined, size: 'w500' | 'w780') {
+  const url = imageUrl(path, size);
+  return url ? { backgroundImage: `linear-gradient(155deg, transparent 48%, rgba(0,0,0,.62)), url("${url}")` } : undefined;
 }
 
 function errorMessage(error: unknown): string {

@@ -106,4 +106,35 @@ describe('library scan queue concurrency', () => {
     const detail = await catalog.getMedia(actor, movies.items[0]!.id);
     expect(detail).toMatchObject({ title: 'Arrival', library: { id: library.id, name: 'Catalog' } });
   });
+
+  it('queues exactly one account metadata job for simultaneous requests', async () => {
+    const account = await prisma.account.create({ data: { name: `metadata-test-${Date.now()}` } });
+    accountId = account.id;
+    const user = await prisma.user.create({
+      data: {
+        accountId,
+        email: `metadata-${Date.now()}@example.test`,
+        displayName: 'Metadata',
+        passwordHash: 'unused',
+      },
+    });
+    const actor: AuthenticatedUser = {
+      sub: user.id,
+      accountId,
+      profileId: null,
+      deviceId: null,
+      roles: ['admin'],
+    };
+    const previousToken = process.env.TMDB_API_TOKEN;
+    process.env.TMDB_API_TOKEN = 'integration-test-token';
+    try {
+      const outcomes = await Promise.allSettled([catalog.queueMetadata(actor), catalog.queueMetadata(actor)]);
+      expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+      expect(outcomes.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+      expect(await prisma.systemJob.count({ where: { accountId, type: 'media.metadata' } })).toBe(1);
+    } finally {
+      if (previousToken === undefined) delete process.env.TMDB_API_TOKEN;
+      else process.env.TMDB_API_TOKEN = previousToken;
+    }
+  });
 });

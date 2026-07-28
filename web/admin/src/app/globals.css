@@ -173,6 +173,8 @@ a { color: inherit; text-decoration: none; }
 .detail-art { height: 180px; margin-bottom: 25px; display: grid; place-items: center; border-radius: 9px; color: rgba(255,255,255,.8); background: radial-gradient(circle at 68% 28%, #8e4de8, transparent 22%), linear-gradient(145deg, #2b1c3f, #111820); }
 .media-detail h2 { margin: 7px 0 5px; font: 650 28px var(--font-display), sans-serif; }
 .media-detail > p { color: var(--muted); }
+.media-detail .media-overview { color: #c7cad1; font-size: 11px; line-height: 1.7; }
+.metadata-credit { color: var(--accent-bright) !important; font-size: 9px; }
 .detail-facts { margin-top: 24px; }
 .detail-facts div { display: grid; grid-template-columns: 90px 1fr; gap: 10px; padding: 11px 0; border-top: 1px solid var(--line); }
 .detail-facts dt { color: var(--muted); font-size: 9px; text-transform: uppercase; }
@@ -197,6 +199,8 @@ a { color: inherit; text-decoration: none; }
 .poster svg { width: 27px; height: 27px; }
 .poster span { position: absolute; left: 8px; bottom: 7px; font-size: 8px; color: rgba(255,255,255,.68); text-transform: uppercase; }
 .poster::after { content: ""; position: absolute; inset: 0; background: linear-gradient(155deg, transparent 40%, rgba(0,0,0,.58)); }
+.poster.has-image, .detail-art.has-image { background-size: cover; background-position: center; background-repeat: no-repeat; }
+.poster.has-image > svg, .detail-art.has-image > svg { opacity: 0; }
 .poster-0 { background: radial-gradient(circle at 68% 23%, #e6a353, transparent 22%), linear-gradient(150deg, #6b371e, #141b22); }
 .poster-1 { background: radial-gradient(circle at 30% 55%, #557665, transparent 26%), linear-gradient(130deg, #222f2c, #101419); }
 .poster-2 { background: radial-gradient(circle at 63% 40%, #db5f27, transparent 18%), linear-gradient(140deg, #4a1410, #171317); }

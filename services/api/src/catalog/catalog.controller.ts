@@ -65,6 +65,17 @@ export class CatalogController {
     return this.catalog.listCatalog(actor, query);
   }
 
+  @Get('media/metadata/status')
+  metadataStatus(@CurrentUser() actor: AuthenticatedUser) {
+    return this.catalog.metadataStatus(actor);
+  }
+
+  @Post('media/metadata/jobs')
+  @Roles('admin', 'operator')
+  queueMetadata(@CurrentUser() actor: AuthenticatedUser) {
+    return this.catalog.queueMetadata(actor);
+  }
+
   @Get('media/:id')
   mediaDetails(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.catalog.getMedia(actor, id);
