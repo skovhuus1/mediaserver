@@ -105,6 +105,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Konto-, bruger- og profilafgrænset playback-historik med idempotent upsert, positions-clamping, automatisk afslutning ved 90 procent og en live `Fortsæt med at se`-sektion, der genoptager fra den gemte position.
 - Klikbare `Afspil`-handlinger på film og enkelte serieepisoder. Inkompatible filer køres gennem en separat durable `playback.transcode`-kø og FFmpeg-container, så scanning og metadataarbejde ikke blokeres af en lang film.
 - Tokenbeskyttet HLS med atomisk manifest-publicering, firesekunders MPEG-TS-segmenter, H.264/AAC-output, planens opløsnings-/bitrategrænser og `hls.js`-fallback i browsere uden native HLS. HLS-tokenet skrives ikke til nginx-accessloggen.
+- Compose klargør det navngivne transcode-volume med en afgrænset engangs-init-container; API, worker og transcoder kører fortsat som ikke-root og starter først efter migrationer/API-health.
 - Chromecast Web Sender via Google Cast Default Media Receiver og et servervalideret handoff på den eksisterende logical session. Cast-knappen aktiveres kun, når browserens Cast Framework er tilgængeligt; controllerfanen skal fortsat være åben for heartbeat i denne første senderimplementation.
 - Scanstatus og manuel scan-trigger i admin-dashboardet.
 - Funktionel adminnavigation med live film-/seriefiltrering, søgning, bibliotek-oprettelse, sikker mappevælger, scanning, brugerliste, planliste og driftsindstillinger.

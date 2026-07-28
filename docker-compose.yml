@@ -28,6 +28,14 @@ services:
       timeout: 5s
       retries: 10
 
+  transcode-init:
+    image: alpine:3.20
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 1000:1000 /transcode"]
+    volumes:
+      - transcode_data:/transcode
+
   api:
     build:
       context: .
@@ -88,6 +96,8 @@ services:
       - transcode_data:/transcode
       - application_data:/app/data
     depends_on:
+      api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -108,6 +118,10 @@ services:
       - ${MEDIA_PATH:-./media}:/media:ro
       - transcode_data:/transcode
     depends_on:
+      transcode-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
