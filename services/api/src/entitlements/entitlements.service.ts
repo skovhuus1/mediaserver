@@ -2,7 +2,7 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import type { AuthenticatedUser, EffectiveEntitlements, EntitlementDecision } from '@boltbytes/contracts';
 import { isPrivileged } from '../common/auth';
 import { PrismaService } from '../prisma/prisma.service';
-import { applyEntitlementOverrides, decideEntitlement } from './entitlement-engine';
+import { applyEntitlementOverrides, decideEntitlement, releaseDateForEntitlement } from './entitlement-engine';
 import { EvaluateEntitlementDto } from './entitlements.dto';
 
 @Injectable()
@@ -86,7 +86,7 @@ export class EntitlementsService {
     return decideEntitlement({
       action: dto.action,
       entitlements: effective,
-      releaseDate: media.releaseDate,
+      releaseDate: releaseDateForEntitlement(media.releaseDate, media.releaseYear),
       availabilityOverride: media.availabilityOverride,
       now: new Date(),
     });

@@ -134,3 +134,9 @@ export class CreateMediaDto {
   @IsDateString()
   availabilityOverride?: string;
 }
+
+export class QueueMetadataDto {
+  @IsOptional()
+  @IsIn(['all', 'movie', 'series'])
+  mediaType: 'all' | 'movie' | 'series' = 'all';
+}

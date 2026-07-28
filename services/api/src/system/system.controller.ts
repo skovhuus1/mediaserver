@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Post } from '@nestjs/common';
+import { Body, Controller, Get, Header, Post, Put } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
@@ -6,6 +6,8 @@ import { RedisService } from '../infra/redis.service';
 import { CurrentUser, Public, Roles } from '../common/auth';
 import { UpdaterService } from './updater.service';
 import { SetUpdateBranchDto } from './system.dto';
+import { SaveMetadataSettingsDto } from './metadata-settings.dto';
+import { metadataSettingsStatus, saveMetadataSettings } from './metadata-settings';
 import { collectDefaultMetrics, register } from 'prom-client';
 
 let metricsInitialized = false;
@@ -98,6 +100,18 @@ export class SystemController {
         },
       })),
     ].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp)).slice(0, 75);
+  }
+
+  @Get('metadata/settings')
+  @Roles('admin')
+  metadataSettings(@CurrentUser() actor: AuthenticatedUser) {
+    return metadataSettingsStatus(this.prisma, actor.accountId);
+  }
+
+  @Put('metadata/settings')
+  @Roles('admin')
+  saveMetadataSettings(@CurrentUser() actor: AuthenticatedUser, @Body() dto: SaveMetadataSettingsDto) {
+    return saveMetadataSettings(this.prisma, actor.accountId, dto.token, dto.language);
   }
 
   @Get('update/status')

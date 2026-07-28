@@ -23,6 +23,7 @@ import { Suspense, type ReactNode } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Brand } from './brand';
 import { t } from '@/lib/messages';
+import { WebPlayer } from './web-player';
 
 const primary = [
   { label: t.home, icon: Home, href: '/' },
@@ -95,6 +96,7 @@ function AppShellContent({ children, rail }: { children: ReactNode; rail: ReactN
         <div className="player-controls"><Activity size={17} /><button aria-label="Afspil">▶</button><Library size={17} /></div>
         <div className="player-track"><span /></div>
       </footer>
+      <WebPlayer />
     </div>
   );
 }

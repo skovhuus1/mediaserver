@@ -171,6 +171,41 @@ jobs:
           test "$(jq -r '.[0].type' <<<"$media")" = "movie"
           test "$(jq -r '.[0].category' <<<"$media")" = "Action"
           test "$(jq -r '.[0].releaseYear' <<<"$media")" -eq 2026
+          media_id="$(jq -er '.[0].id' <<<"$media")"
+          playback_context="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/playback/context")"
+          profile_id="$(jq -er '.profileId' <<<"$playback_context")"
+          device_id="$(jq -er '.deviceId' <<<"$playback_context")"
+          authorization="$(curl --fail --silent --show-error \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d "{\"profileId\":\"$profile_id\",\"mediaId\":\"$media_id\",\"deviceId\":\"$device_id\",\"capabilities\":{\"supportedCodecs\":[\"h264\",\"aac\"],\"supportedContainers\":[\"mov\",\"mp4\"]}}" \
+            "$api_base/playback/authorize")"
+          session_id="$(jq -er '.sessionId' <<<"$authorization")"
+          stream_url="$(jq -er '.streamUrl' <<<"$authorization")"
+          test "$(jq -r '.method' <<<"$authorization")" = "direct_play"
+          curl --fail --silent --show-error \
+            -H 'range: bytes=0-31' \
+            -D /tmp/bb-media-stream-headers \
+            -o /tmp/bb-media-stream-body \
+            "http://127.0.0.1:5555$stream_url"
+          grep -Eq '^HTTP/[0-9.]+ 206' /tmp/bb-media-stream-headers
+          test "$(wc -c < /tmp/bb-media-stream-body)" -eq 32
+          curl --fail --silent --show-error \
+            -X PATCH \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d '{"positionMs":250,"durationMs":1000}' \
+            "$api_base/playback/sessions/$session_id/progress" >/dev/null
+          continue_items="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/playback/history/continue")"
+          test "$(jq 'length' <<<"$continue_items")" -eq 1
+          test "$(jq -r '.[0].progress.positionMs' <<<"$continue_items")" -eq 250
+          curl --fail --silent --show-error \
+            -X PATCH \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d '{"positionMs":950,"durationMs":1000}' \
+            "$api_base/playback/sessions/$session_id/progress" >/dev/null
+          test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/playback/history/continue" | jq 'length')" -eq 0
           test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/libraries" | jq -r --arg id "$library_id" '.[] | select(.id == $id) | .paths[0].path')" = "/media/Film"
           curl --fail --silent --show-error \
             -X DELETE \

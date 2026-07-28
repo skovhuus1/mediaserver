@@ -5,8 +5,9 @@ import { readdir, realpath } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
-import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
+import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
+import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metadata-settings';
 
 @Injectable()
 export class CatalogService {
@@ -139,7 +140,33 @@ export class CatalogService {
     });
     if (!library) throw new NotFoundException({ code: 'library_missing', message: 'Library does not exist in this account' });
     await this.assertLibraryIdle(library.id);
-    await this.prisma.library.delete({ where: { id: library.id } });
+    const mediaIds = (await this.prisma.mediaItem.findMany({
+      where: { libraryId: library.id, accountId: actor.accountId },
+      select: { id: true },
+    })).map(({ id }) => id);
+    if (mediaIds.length) {
+      const activePlayback = await this.prisma.playbackSession.findFirst({
+        where: {
+          mediaId: { in: mediaIds },
+          status: { in: ['reserving', 'active', 'paused'] },
+          leaseExpiresAt: { gt: new Date() },
+        },
+        select: { id: true },
+      });
+      if (activePlayback) {
+        throw new ConflictException({
+          code: 'library_playback_active',
+          message: 'Library cannot be deleted while one of its media items is actively playing',
+          details: { playbackSessionId: activePlayback.id },
+        });
+      }
+    }
+    await this.prisma.$transaction(async (tx) => {
+      if (mediaIds.length) {
+        await tx.playbackSession.deleteMany({ where: { mediaId: { in: mediaIds } } });
+      }
+      await tx.library.delete({ where: { id: library.id } });
+    });
     return { deleted: true, id: library.id };
   }
 
@@ -299,24 +326,29 @@ export class CatalogService {
   }
 
   async metadataStatus(actor: AuthenticatedUser) {
-    const latestJob = await this.prisma.systemJob.findFirst({
-      where: { accountId: actor.accountId, type: 'media.metadata' },
-      select: { id: true, status: true, attemptCount: true, maxAttempts: true, createdAt: true, updatedAt: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [latestJob, settings] = await Promise.all([
+      this.prisma.systemJob.findFirst({
+        where: { accountId: actor.accountId, type: 'media.metadata' },
+        select: { id: true, status: true, attemptCount: true, maxAttempts: true, createdAt: true, updatedAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      metadataSettingsStatus(this.prisma, actor.accountId),
+    ]);
     return {
-      enabled: Boolean(process.env.TMDB_API_TOKEN?.trim()),
+      enabled: settings.enabled,
       provider: 'tmdb',
-      language: process.env.TMDB_LANGUAGE?.trim() || 'da-DK',
+      language: settings.language,
+      source: settings.source,
       latestJob,
     };
   }
 
-  async queueMetadata(actor: AuthenticatedUser) {
-    if (!process.env.TMDB_API_TOKEN?.trim()) {
+  async queueMetadata(actor: AuthenticatedUser, dto: QueueMetadataDto = { mediaType: 'all' }) {
+    const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
+    if (!settings.token) {
       throw new ConflictException({
         code: 'metadata_provider_disabled',
-        message: 'TMDB_API_TOKEN is not configured on the server',
+        message: 'TMDB is not configured for this account',
       });
     }
     return this.prisma.$transaction(async (tx) => {
@@ -342,7 +374,7 @@ export class CatalogService {
           accountId: actor.accountId,
           type: 'media.metadata',
           status: 'queued',
-          payload: { onlyMissing: false, requestedBy: actor.sub },
+          payload: { onlyMissing: false, requestedBy: actor.sub, mediaType: dto.mediaType },
           maxAttempts: 3,
         },
       });

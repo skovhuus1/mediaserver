@@ -1,9 +1,11 @@
 'use client';
 
-import { ChevronLeft, ChevronRight, Film, FolderOpen, SearchX, Tv, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Film, FolderOpen, Play, SearchX, Tv, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { requestPlayback } from './web-player';
+import playerStyles from './playback.module.css';
 
 type CatalogItem = {
   id: string;
@@ -201,10 +203,11 @@ function DetailContent({ detail }: { detail: DetailState }) {
       <p>{item.releaseYear ? `${item.releaseYear} · ` : ''}{item.library?.name ?? 'BoltBytes bibliotek'}</p>
       {item.overview && <p className="media-overview">{item.overview}</p>}
       {item.rating !== null && item.rating !== undefined && <p className="metadata-credit">TMDB rating {item.rating.toFixed(1)}/10 · Metadata via TMDB</p>}
+      {detail.kind !== 'series' && <button className={playerStyles.playButton} onClick={() => requestPlayback(item)}><Play size={16} /> Afspil</button>}
       {detail.kind === 'series' ? (
         <div className="episode-list">
           {detail.episodes.map((episode) => (
-            <div key={episode.id}><strong>{episodeLabel(episode)}</strong><span>{episode.title}</span><small>{durationLabel(episode.file?.durationMs)}</small></div>
+            <button className={playerStyles.episodeButton} onClick={() => requestPlayback(episode)} key={episode.id}><strong>{episodeLabel(episode)}</strong><span>{episode.title}</span><small>{durationLabel(episode.file?.durationMs)}</small></button>
           ))}
         </div>
       ) : (

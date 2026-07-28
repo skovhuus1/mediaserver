@@ -74,6 +74,12 @@ export function addCalendarDelay(date: Date, months: number, days: number): Date
   return result;
 }
 
+export function releaseDateForEntitlement(releaseDate: Date | null, releaseYear: number | null): Date | null {
+  if (releaseDate) return releaseDate;
+  if (releaseYear === null || !Number.isInteger(releaseYear) || releaseYear < 1888 || releaseYear > 9999) return null;
+  return new Date(Date.UTC(releaseYear, 0, 1));
+}
+
 export function decideEntitlement(input: {
   action: EntitlementAction;
   entitlements: EffectiveEntitlements;

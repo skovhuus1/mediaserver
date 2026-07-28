@@ -1,5 +1,6 @@
 import { selectMetadataCandidate, type MetadataCandidate } from '@boltbytes/contracts';
 import type { PrismaClient } from '@prisma/client';
+import { decryptSecret } from './secret-value.js';
 
 type TmdbCandidate = MetadataCandidate & {
   overview: string | null;
@@ -21,17 +22,25 @@ export async function enrichLibraryMetadata(
     accountId: string;
     libraryId?: string;
     onlyMissing: boolean;
+    mediaType?: 'all' | 'movie' | 'series';
     onProgress: () => Promise<void>;
   },
 ): Promise<MetadataStats> {
-  const token = process.env.TMDB_API_TOKEN?.trim();
+  const settings = await resolveTmdbSettings(prisma, input.accountId);
+  const token = settings.token;
   if (!token) throw new Error('metadata_provider_disabled: TMDB_API_TOKEN is not configured');
-  const language = process.env.TMDB_LANGUAGE?.trim() || 'da-DK';
+  const language = settings.language;
   const items = await prisma.mediaItem.findMany({
     where: {
       accountId: input.accountId,
       ...(input.libraryId ? { libraryId: input.libraryId } : {}),
-      type: { in: ['movie', 'episode'] },
+      type: {
+        in: input.mediaType === 'movie'
+          ? ['movie']
+          : input.mediaType === 'series'
+            ? ['episode']
+            : ['movie', 'episode'],
+      },
       ...(input.onlyMissing ? { metadataUpdatedAt: null } : {}),
     },
     orderBy: { updatedAt: 'asc' },
@@ -76,6 +85,33 @@ export async function enrichLibraryMetadata(
     await input.onProgress();
   }
   return { inspected: items.length, matched, unmatched };
+}
+
+export async function hasTmdbConfiguration(prisma: PrismaClient, accountId: string): Promise<boolean> {
+  return Boolean((await resolveTmdbSettings(prisma, accountId)).token);
+}
+
+async function resolveTmdbSettings(prisma: PrismaClient, accountId: string) {
+  const [tokenSetting, languageSetting] = await Promise.all([
+    prisma.systemSetting.findUnique({
+      where: { accountId_key: { accountId, key: 'metadata.tmdb.token' } },
+    }),
+    prisma.systemSetting.findUnique({
+      where: { accountId_key: { accountId, key: 'metadata.tmdb.language' } },
+    }),
+  ]);
+  const languageValue = languageSetting?.value;
+  const storedLanguage = languageValue && typeof languageValue === 'object' && !Array.isArray(languageValue)
+    ? (languageValue as { value?: unknown }).value
+    : null;
+  return {
+    token: tokenSetting
+      ? decryptSecret(tokenSetting.value)
+      : process.env.TMDB_API_TOKEN?.trim() || null,
+    language: typeof storedLanguage === 'string'
+      ? storedLanguage
+      : process.env.TMDB_LANGUAGE?.trim() || 'da-DK',
+  };
 }
 
 async function searchTmdb(
