@@ -9,6 +9,7 @@ import { t } from '@/lib/messages';
 import { AppShell } from './app-shell';
 import { CatalogView } from './catalog-view';
 import { ManagementView } from './management-view';
+import { ContinueWatching } from './continue-watching';
 
 type Media = { id: string; title: string; type: string; codec: string | null; container: string | null };
 type Session = {
@@ -115,7 +116,7 @@ export function Dashboard() {
       </section>
       {loading ? <LoadingGrid /> : (
         <>
-          <MediaSection title={t.continueWatching} items={[]} emptyLabel={t.noSessions} wide />
+          <ContinueWatching />
           <MediaSection title="Nyeste film" items={movies} emptyLabel={t.noMedia} onSeeAll={() => router.push('/?type=movie')} />
           <MediaSection title="Nyeste serier" items={series} emptyLabel={t.noMedia} onSeeAll={() => router.push('/?type=series')} />
           {!media.length && (

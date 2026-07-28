@@ -13,7 +13,7 @@ type User = { id: string; email: string; displayName: string; status: string; pr
 type Plan = { id: string; name: string; internalCode: string; description: string | null; versions: Array<{ version: number; isActive: boolean; maxConcurrentStreams: number; maxVideoResolution: number }> };
 type UpdateStatus = { enabled: boolean; configured: boolean; branch: string; restartMode: string; hasUpdate: boolean };
 type ErrorEntry = { id: string; severity: string; source: string; code: string; message: string; timestamp: string; details: Record<string, unknown> };
-type MetadataStatus = { enabled: boolean; provider: string; language: string; latestJob: { id: string; status: string; updatedAt: string } | null };
+type MetadataStatus = { enabled: boolean; provider: string; language: string; source?: string; latestJob: { id: string; status: string; updatedAt: string } | null };
 
 export function ManagementView({ view }: { view: string }) {
   if (view === 'libraries') return <LibrariesView />;
@@ -181,6 +181,8 @@ function SettingsView() {
   const [loadingErrors, setLoadingErrors] = useState(false);
   const [metadataBusy, setMetadataBusy] = useState(false);
   const [metadataMessage, setMetadataMessage] = useState('');
+  const [metadataToken, setMetadataToken] = useState('');
+  const [metadataLanguage, setMetadataLanguage] = useState('da-DK');
   async function loadErrors() {
     setLoadingErrors(true);
     try {
@@ -191,7 +193,10 @@ function SettingsView() {
   }
   useEffect(() => {
     void api<UpdateStatus>('/system/update/status').then(setUpdate).catch(() => undefined);
-    void api<MetadataStatus>('/media/metadata/status').then(setMetadata).catch(() => undefined);
+    void api<MetadataStatus>('/media/metadata/status').then((status) => {
+      setMetadata(status);
+      setMetadataLanguage(status.language);
+    }).catch(() => undefined);
     void loadErrors();
   }, []);
   async function queueMetadata() {
@@ -207,6 +212,25 @@ function SettingsView() {
       setMetadataBusy(false);
     }
   }
+  async function saveMetadata(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMetadataBusy(true);
+    setMetadataMessage('');
+    try {
+      await api('/system/metadata/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ token: metadataToken, language: metadataLanguage }),
+      });
+      setMetadataToken('');
+      const next = await api<MetadataStatus>('/media/metadata/status');
+      setMetadata(next);
+      setMetadataMessage('TMDB-nøglen er testet og gemt krypteret.');
+    } catch (error) {
+      setMetadataMessage(errorMessage(error));
+    } finally {
+      setMetadataBusy(false);
+    }
+  }
   return (
     <section className="management-page">
       <span className="eyebrow">SERVER CONTROL</span><h1>Indstillinger</h1><p>Driftsstatus, vedligeholdelse og durable fejl fra serveren.</p>
@@ -216,8 +240,13 @@ function SettingsView() {
       </div>
       <div className="management-card">
         <h2><Database size={18} /> Metadata</h2>
-        <div className="data-row"><div><strong>{metadata?.enabled ? 'TMDB aktiveret' : 'TMDB deaktiveret'}</strong><small>Sprog: {metadata?.language ?? 'da-DK'}</small><small>Seneste job: {metadata?.latestJob?.status ?? 'aldrig kørt'}</small></div><button disabled={!metadata?.enabled || metadataBusy || ['queued', 'running'].includes(metadata?.latestJob?.status ?? '')} onClick={() => void queueMetadata()}>{metadataBusy ? 'Sætter i kø...' : 'Opdater metadata'}</button></div>
-        {!metadata?.enabled && <p>Sæt <code>TMDB_API_TOKEN</code> i serverens <code>.env</code> og genstart API/worker for at aktivere automatiske beskrivelser og billeder.</p>}
+        <div className="data-row"><div><strong>{metadata?.enabled ? 'TMDB aktiveret' : 'TMDB deaktiveret'}</strong><small>Sprog: {metadata?.language ?? 'da-DK'} · Kilde: {metadata?.source ?? 'ukendt'}</small><small>Seneste job: {metadata?.latestJob?.status ?? 'aldrig kørt'}</small></div><button disabled={!metadata?.enabled || metadataBusy || ['queued', 'running'].includes(metadata?.latestJob?.status ?? '')} onClick={() => void queueMetadata()}>{metadataBusy ? 'Arbejder...' : 'Opdater metadata'}</button></div>
+        <form className="management-form" onSubmit={saveMetadata}>
+          <label>TMDB API Read Access Token<input type="password" autoComplete="off" value={metadataToken} onChange={(event) => setMetadataToken(event.target.value)} minLength={20} required placeholder={metadata?.enabled ? 'Indtast kun for at erstatte den gemte nøgle' : 'eyJ...'} /></label>
+          <label>Metadata-sprog<input value={metadataLanguage} onChange={(event) => setMetadataLanguage(event.target.value)} pattern="[a-z]{2}(-[A-Z]{2})?" required /></label>
+          <button className="primary-action" disabled={metadataBusy || metadataToken.length < 20}>{metadataBusy ? 'Tester...' : 'Test og gem nøgle'}</button>
+        </form>
+        <p>Nøglen valideres mod TMDB før lagring, krypteres med serverens <code>ENCRYPTION_KEY</code> og sendes aldrig tilbage til browseren. TMDB dækker både film og serier; TVDB er derfor ikke påkrævet.</p>
         {metadataMessage && <div className="update-message">{metadataMessage}</div>}
       </div>
       <div className="management-card">

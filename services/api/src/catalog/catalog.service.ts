@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
 import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
+import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metadata-settings';
 
 @Injectable()
 export class CatalogService {
@@ -299,24 +300,29 @@ export class CatalogService {
   }
 
   async metadataStatus(actor: AuthenticatedUser) {
-    const latestJob = await this.prisma.systemJob.findFirst({
-      where: { accountId: actor.accountId, type: 'media.metadata' },
-      select: { id: true, status: true, attemptCount: true, maxAttempts: true, createdAt: true, updatedAt: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [latestJob, settings] = await Promise.all([
+      this.prisma.systemJob.findFirst({
+        where: { accountId: actor.accountId, type: 'media.metadata' },
+        select: { id: true, status: true, attemptCount: true, maxAttempts: true, createdAt: true, updatedAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      metadataSettingsStatus(this.prisma, actor.accountId),
+    ]);
     return {
-      enabled: Boolean(process.env.TMDB_API_TOKEN?.trim()),
+      enabled: settings.enabled,
       provider: 'tmdb',
-      language: process.env.TMDB_LANGUAGE?.trim() || 'da-DK',
+      language: settings.language,
+      source: settings.source,
       latestJob,
     };
   }
 
   async queueMetadata(actor: AuthenticatedUser) {
-    if (!process.env.TMDB_API_TOKEN?.trim()) {
+    const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
+    if (!settings.token) {
       throw new ConflictException({
         code: 'metadata_provider_disabled',
-        message: 'TMDB_API_TOKEN is not configured on the server',
+        message: 'TMDB is not configured for this account',
       });
     }
     return this.prisma.$transaction(async (tx) => {

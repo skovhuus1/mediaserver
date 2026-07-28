@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { extname, isAbsolute, posix, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { enrichLibraryMetadata } from './metadata.js';
+import { enrichLibraryMetadata, hasTmdbConfiguration } from './metadata.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -250,7 +250,7 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
         finishedAt: new Date(),
       },
     });
-    if (process.env.TMDB_API_TOKEN?.trim()) {
+    if (await hasTmdbConfiguration(prisma, job.accountId)) {
       const activeJobs = await prisma.systemJob.findMany({
         where: { accountId: job.accountId, type: 'media.metadata', status: { in: ['queued', 'running'] } },
         select: { payload: true },

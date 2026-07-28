@@ -28,14 +28,14 @@ http://SERVERENS-IP:5555
 
 `JWT_SECRET` og `ENCRYPTION_KEY` genereres automatisk af `scripts/bootstrap-env.mjs`. Eksisterende secrets overskrives ikke, og værdierne skrives aldrig til terminalen.
 
-Valgfri film-/seriemetadata aktiveres med en TMDB API Read Access Token:
+Valgfri film-/seriemetadata kan aktiveres direkte under `Indstillinger > Metadata` med en TMDB API Read Access Token. Nøglen testes før lagring, krypteres med serverens `ENCRYPTION_KEY` og sendes aldrig tilbage til browseren. Miljøvariablen bevares som fallback:
 
 ```dotenv
 TMDB_API_TOKEN=
 TMDB_LANGUAGE=da-DK
 ```
 
-Tokenet bruges kun af API/worker og sendes aldrig til adminbrowseren.
+Tokenet bruges kun af API/worker. TMDB dækker både film og serier i den nuværende pipeline, så en TVDB-nøgle er ikke påkrævet. TVDB kan senere tilføjes som en separat provider, hvis der opstår et konkret behov for TVDB-specifikke ids eller metadata.
 
 ## Direkte installation uden Docker
 
@@ -100,10 +100,14 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Vedvarende worker-kø med `FOR UPDATE SKIP LOCKED`, jobforsøg, retry/backoff og lease-cleanup.
 - Manuel biblioteksscanning via durable `library.scan` jobs med sikker realpath-kontrol, symlink-afvisning, `ffprobe`-metadata og markering af manglende filer uden automatisk sletning.
 - Direkte medielevering med HTTP `HEAD`, single-range `GET`, `206 Partial Content`, suffix ranges og hash-valideret session-token; query strings udelades fra API-logs, og stream-access logs er deaktiveret i nginx.
+- Integreret HTML5-webafspiller med server-side authorize, browser-capabilities, kortlivet stream-token, 30-sekunders lease-heartbeat, fremdriftslagring hvert 10. sekund og sikker frigivelse af stream-plads ved stop.
+- Konto-, bruger- og profilafgrænset playback-historik med idempotent upsert, positions-clamping, automatisk afslutning ved 90 procent og en live `Fortsæt med at se`-sektion, der genoptager fra den gemte position.
+- Klikbare `Afspil`-handlinger på film og enkelte serieepisoder; filer der kræver den endnu ikke implementerede transcoder afvises med en konkret fejl i stedet for skjult fallback.
 - Scanstatus og manuel scan-trigger i admin-dashboardet.
 - Funktionel adminnavigation med live film-/seriefiltrering, søgning, bibliotek-oprettelse, sikker mappevælger, scanning, brugerliste, planliste og driftsindstillinger.
 - Server-side mediekatalog med paginering, tekstsøgning, bibliotek-/kategori-/typefiltre, stabil sortering, seriegruppering og kontoafgrænsede mediedetaljer. Adminpanelet har klikbare katalogkort, episodeoversigt, filterchips og fungerende sidekontroller.
 - Valgfri TMDB-metadata gennem durable, deduplikerede `media.metadata` jobs. En vellykket scan køer kun manglende metadata, mens admin kan gennemtvinge en opdatering. Overview, rating, udgivelsesdato, provider-id, plakat og backdrop gemmes server-side; API-tokenet eksponeres aldrig.
+- TMDB-token og metadata-sprog kan ændres uden container-genstart fra indstillingspanelet. Tokenet valideres mod TMDB, lagres AES-256-GCM-krypteret i `system_settings`, og API/worker bruger miljøvariablen som bagudkompatibel fallback.
 - Biblioteksformularer bevarer deres DOM-reference gennem async API-kald, og scannerens lagrede workerfejl vises direkte i bibliotek- og statusvisningen.
 - Indstillinger indeholder en durable fejllog med fejlede og delvist fejlede scanninger, worker-jobforsøg, tidsstempler og diagnostiske detaljer; updaterfejl viser også den konkrete kommandofejl.
 - Next.js adminskal inspireret af den godkendte BoltBytes-reference med rigtige API-data og tomme tilstande uden mock-film.
@@ -122,7 +126,7 @@ Lokalt valideret med Node.js 22 og npm 10:
 - Prisma client generation og schema validation.
 - ESLint.
 - TypeScript typecheck for shared contracts, API, worker og admin.
-- 26 unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
+- 32 unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
 - Produktionsbuild af shared contracts, NestJS API, worker og Next.js admin.
 
 PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres lokalt på den aktuelle Windows-maskine uden lokal PostgreSQL-testdatabase og Docker. De er verificeret i [GitHub Actions-run 30304933724](https://github.com/skovhuus1/mediaserver/actions/runs/30304933724), hvor følgende gates passerede:
@@ -136,13 +140,14 @@ PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres 
 Fase-2 mediepipelinen er verificeret i [GitHub Actions-run 30315230245](https://github.com/skovhuus1/mediaserver/actions/runs/30315230245):
 
 - Migration `0002_media_pipeline` anvendes efter fase-1-migrationen på en frisk PostgreSQL 16-database.
-- Unit-steppet kører 26 tests uden databasefiler; integrationssteppet kører separat 4/4 tests.
+- Unit-steppet kører 32 tests uden databasefiler; integrationssteppet kører separat 5/5 tests.
 - To samtidige scan-triggers opretter præcis én scan-ledger og ét durable worker-job.
 - Stream reservation ved limit 1 accepterer fortsat præcis én af to samtidige requests.
 - API, admin og worker bygges, produktion-audit er grøn, Compose valideres, og worker-imaget med FFmpeg-laget bygges.
 - CI genererer en rigtig MP4, opretter server/admin/bibliotek gennem API’et, sætter en scan i kø og kræver, at worker/ffprobe registrerer mindst ét afspilleligt medie.
+- CI autoriserer derefter den importerede MP4 til Direct Play, kræver en tokenbeskyttet `206 Partial Content` Range-response gennem nginx, gemmer 25 procent fremdrift, finder mediet i `Fortsæt med at se` og kræver, at 95 procent markerer det afsluttet.
 
-CI afspiller endnu ikke en stor fil gennem nginx eller tester host-specifikke mountrettigheder. Det kræver fortsat en staging-server med det faktiske read-only media mount.
+CI tester en lille rigtig MP4 gennem nginx, men afspiller endnu ikke en stor fil eller host-specifikke mountrettigheder. Det kræver fortsat en staging-server med det faktiske read-only media mount og en rigtig browser.
 
 Container-gaten starter desuden hele Compose-stakken efter image-build, venter på API-health, kontrollerer at worker-processen forbliver kørende og kalder health-endpointet gennem nginx. Det beskytter mod runtime-fejl, som et isoleret `docker compose build` ikke kan opdage, herunder en manglende genereret Prisma-klient.
 
@@ -162,6 +167,9 @@ Biblioteksscanneren klassificerer filer deterministisk før ekstern metadataopsl
 - Lokal caching/proxying af TMDB-billeder; den nuværende implementation gemmer validerede billedstier og henter billeder direkte fra TMDBs faste image-host.
 - HLS-packaging og signed segment URLs.
 - FFmpeg transcoding workers, scheduler og hardwareacceleration.
+- Container-remux/HLS for browserinkompatible codecs og containere; webafspilleren kan derfor kun afspille formater, som browseren selv understøtter.
+- Automatisk næste episode, intro-skip og undertekstvalg i webafspilleren.
+- TVDB-provider; TMDB er den aktive provider for både film og serier.
 - Chromecast sender/receiver og handoff-token.
 - Sonarr, Radarr og qBittorrent integration.
 - Billing-provider og webhook-signaturverifikation.
