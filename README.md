@@ -95,6 +95,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Browserens device fingerprint bruger native `crypto.randomUUID()` med en RFC 4122 v4-fallback baseret på `crypto.getRandomValues()`, så den første opsætning også fungerer via en almindelig HTTP-serveradresse.
 - Konto- og ejerskabskontrol på profiler, enheder, medier, biblioteker, abonnementer og playback sessions.
 - Entitlement-evaluering med user/profile overrides, deterministiske kalendermåneder og tydelige afvisningsårsager.
+- Entitlement-releasevinduer bruger en eksakt provider-dato, når den findes, og falder ellers tilbage til 1. januar i scannerens validerede udgivelsesår. Medier uden dato eller troværdigt år forbliver blokeret til administratorgennemgang.
 - Playback-metodevalg uden silent transcode fallback.
 - Atomisk stream reservation med Prisma-kompatibel, namespaced PostgreSQL advisory lock, frisk `READ COMMITTED`-visning efter låseventet, lease/heartbeat og kryptografisk stream-token.
 - Vedvarende worker-kø med `FOR UPDATE SKIP LOCKED`, jobforsøg, retry/backoff og lease-cleanup.
@@ -126,7 +127,7 @@ Lokalt valideret med Node.js 22 og npm 10:
 - Prisma client generation og schema validation.
 - ESLint.
 - TypeScript typecheck for shared contracts, API, worker og admin.
-- 32 unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
+- 35 unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
 - Produktionsbuild af shared contracts, NestJS API, worker og Next.js admin.
 
 PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres lokalt på den aktuelle Windows-maskine uden lokal PostgreSQL-testdatabase og Docker. De er verificeret i [GitHub Actions-run 30304933724](https://github.com/skovhuus1/mediaserver/actions/runs/30304933724), hvor følgende gates passerede:
@@ -140,7 +141,7 @@ PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres 
 Fase-2 mediepipelinen er verificeret i [GitHub Actions-run 30315230245](https://github.com/skovhuus1/mediaserver/actions/runs/30315230245):
 
 - Migration `0002_media_pipeline` anvendes efter fase-1-migrationen på en frisk PostgreSQL 16-database.
-- Unit-steppet kører 32 tests uden databasefiler; integrationssteppet kører separat 5/5 tests.
+- Unit-steppet kører 35 tests uden databasefiler; integrationssteppet kører separat 5/5 tests.
 - To samtidige scan-triggers opretter præcis én scan-ledger og ét durable worker-job.
 - Stream reservation ved limit 1 accepterer fortsat præcis én af to samtidige requests.
 - API, admin og worker bygges, produktion-audit er grøn, Compose valideres, og worker-imaget med FFmpeg-laget bygges.
