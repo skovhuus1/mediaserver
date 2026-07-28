@@ -121,6 +121,8 @@ Container-gaten starter desuden hele Compose-stakken efter image-build, venter p
 
 Eksisterende biblioteker fra den tidligere path-policy repareres automatisk ved scanning, når en gemt sti har det kendte dobbelte storage-root-mønster (for eksempel `/media/media/Film`). Reparationen udføres kun, hvis den oprindelige sti mangler, den korrigerede sti findes, og dens `realpath` fortsat er under det konfigurerede storage root. CI fremprovokerer legacy-formatet og kræver både vellykket import og permanent databaseheling.
 
+Docker-opdateringer genstartes af en ekstern engangs-runner med navnet `boltbytes-media-updater-runner`. Runneren oprettes fra det kørende API-image, overlever at API-containeren bliver erstattet og udfører Compose-build/genstart fra det mountede repository. Den venter på healthy services og genstarter derefter nginx-proxyen, så dens DNS-cache ikke peger på en udskiftet API- eller admin-container. Seneste updater-log kan altid læses med `docker logs boltbytes-media-updater-runner`; næste opdatering erstatter den tidligere runner.
+
 ## Ikke implementeret endnu
 
 - Automatisk oprettelse og klassifikation af film-/seriebiblioteker samt mappebaserede kategorier som Action og Drama.
