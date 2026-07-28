@@ -1,10 +1,13 @@
 import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { execFile, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { PrismaService } from '../prisma/prisma.service';
 import { classifyUpdateTransition, type UpdateTransition } from './update-transition';
+import { idleUpdateProgress, parseRunnerProgress, readUpdateProgress, type UpdateProgress } from './updater-progress';
 
 const execFileAsync = promisify(execFile);
 type RestartMode = 'none' | 'systemd' | 'docker-compose';
@@ -17,6 +20,7 @@ type CommandResult = {
 @Injectable()
 export class UpdaterService {
   private updateInProgress = false;
+  private readonly startedAt = Date.now();
   private readonly enabled = parseBoolean(process.env.BB_MEDIA_UPDATE_ENABLED, false);
   private readonly repositoryPath = resolve(process.env.BB_MEDIA_UPDATE_REPO_PATH || process.cwd());
   private readonly remote = validateGitName(process.env.BB_MEDIA_UPDATE_REMOTE ?? 'origin', 'remote');
@@ -28,6 +32,7 @@ export class UpdaterService {
 
   async status(accountId: string) {
     const branch = await this.selectedBranch(accountId);
+    const progress = await this.progress(accountId);
     const base = {
       enabled: this.enabled,
       configured: this.isConfigured(),
@@ -35,7 +40,8 @@ export class UpdaterService {
       remote: this.remote,
       branch,
       restartMode: this.restartMode,
-      updateInProgress: this.updateInProgress,
+      updateInProgress: this.updateInProgress || progress.state === 'running',
+      progress,
     };
     if (!base.enabled || !base.configured) {
       return {
@@ -85,7 +91,7 @@ export class UpdaterService {
       currentBranch: currentBranchResult.exitCode === 0 ? currentBranchResult.stdout.trim() : 'detached',
       dirty,
       hasUpdate: Boolean(remoteCommit && remoteCommit !== localCommit),
-      canApply: blockers.length === 0 && !this.updateInProgress,
+      canApply: blockers.length === 0 && !base.updateInProgress,
       transitionMode: transition.mode,
       transitionReason: transition.reason,
       blockers,
@@ -125,21 +131,43 @@ export class UpdaterService {
   async apply(accountId: string) {
     if (!this.enabled) throw new BadRequestException({ code: 'updater_disabled', message: 'Updater is disabled by configuration' });
     if (!this.isConfigured()) throw new BadRequestException({ code: 'updater_not_configured', message: 'Updater repository path is not a Git checkout' });
-    if (this.updateInProgress) throw new ConflictException({ code: 'update_in_progress', message: 'Another update is already running' });
+    const existingProgress = await this.progress(accountId);
+    if (this.updateInProgress || existingProgress.state === 'running') {
+      throw new ConflictException({ code: 'update_in_progress', message: 'Another update is already running' });
+    }
 
     this.updateInProgress = true;
+    const runId = randomUUID();
+    const startedAt = new Date().toISOString();
+    let before: string | null = null;
+    let targetCommit: string | null = null;
+    await this.writeProgress(accountId, {
+      runId,
+      state: 'running',
+      phase: 'checking',
+      percent: 5,
+      message: 'Kontrollerer repository og valgt branch.',
+      startedAt,
+      updatedAt: startedAt,
+      previousCommit: null,
+      targetCommit: null,
+      error: null,
+    });
     try {
       const branch = await this.selectedBranch(accountId);
-      const before = (await this.run('git', ['rev-parse', 'HEAD'])).stdout.trim();
+      before = (await this.run('git', ['rev-parse', 'HEAD'])).stdout.trim();
+      await this.advanceProgress(accountId, runId, 12, 'worktree', 'Kontrollerer lokale ændringer.', { previousCommit: before });
       const dirty = (await this.run('git', ['status', '--porcelain', '--untracked-files=no'])).stdout.trim();
       if (dirty) throw new ConflictException({ code: 'update_dirty_worktree', message: 'Tracked files contain local changes; update was refused' });
 
+      await this.advanceProgress(accountId, runId, 20, 'fetching', `Henter ${this.remote}/${branch}.`);
       const available = await this.run('git', ['ls-remote', this.remote, `refs/heads/${branch}`]);
       if (!available.stdout.trim()) {
         throw new BadRequestException({ code: 'update_branch_missing', message: 'Selected branch does not exist on the configured remote' });
       }
       await this.run('git', ['fetch', '--prune', this.remote, branch], 60_000);
-      const targetCommit = (await this.run('git', ['rev-parse', 'FETCH_HEAD'])).stdout.trim();
+      targetCommit = (await this.run('git', ['rev-parse', 'FETCH_HEAD'])).stdout.trim();
+      await this.advanceProgress(accountId, runId, 35, 'validating', 'Validerer fast-forward eller squash-equivalent overgang.', { targetCommit });
       const transition = await this.inspectTransition(before, targetCommit);
       if (transition.mode === 'blocked' || !transition.checkoutTarget && transition.mode !== 'up-to-date') {
         throw new ConflictException({
@@ -153,11 +181,28 @@ export class UpdaterService {
         });
       }
       if (transition.checkoutTarget) {
+        await this.advanceProgress(accountId, runId, 48, 'checkout', `Skifter sikkert til ${targetCommit.slice(0, 12)}.`);
         await this.run('git', ['switch', '--detach', transition.checkoutTarget], 120_000);
       }
       const after = (await this.run('git', ['rev-parse', 'HEAD'])).stdout.trim();
       const changed = before !== after;
-      const restartScheduled = changed ? await this.scheduleRestart() : false;
+      await this.advanceProgress(
+        accountId,
+        runId,
+        changed ? 55 : 100,
+        changed ? 'scheduled' : 'completed',
+        changed ? 'Koden er hentet. Genstart planlægges.' : 'Serveren kører allerede den valgte version.',
+      );
+      const restartScheduled = changed ? await this.scheduleRestart(accountId, runId) : false;
+      if (!changed || !restartScheduled) {
+        await this.advanceProgress(
+          accountId,
+          runId,
+          100,
+          'completed',
+          changed ? 'Koden er opdateret; genstart skal udføres manuelt.' : 'Serveren er allerede opdateret.',
+        );
+      }
       return {
         updated: changed,
         previousCommit: before,
@@ -166,22 +211,94 @@ export class UpdaterService {
         restartMode: this.restartMode,
         restartScheduled,
       };
+    } catch (error) {
+      const message = updaterErrorMessage(error);
+      const failedAt = await this.progress(accountId).catch(() => idleUpdateProgress());
+      await this.writeProgress(accountId, {
+        runId,
+        state: 'failed',
+        phase: 'failed',
+        percent: failedAt.runId === runId ? failedAt.percent : 0,
+        message,
+        startedAt,
+        updatedAt: new Date().toISOString(),
+        previousCommit: before,
+        targetCommit,
+        error: message,
+      }).catch(() => undefined);
+      throw error;
     } finally {
       this.updateInProgress = false;
     }
+  }
+
+  async progress(accountId: string): Promise<UpdateProgress> {
+    const setting = await this.prisma.systemSetting.findUnique({
+      where: { accountId_key: { accountId, key: 'updater.last-run' } },
+      select: { value: true },
+    });
+    const stored = setting ? readUpdateProgress(setting.value) : idleUpdateProgress();
+    if (this.restartMode === 'docker-compose') {
+      const runner = await this.dockerRunnerProgress();
+      if (!runner || !runner.runId || runner.runId !== stored.runId) {
+        if (
+          stored.state === 'running' &&
+          stored.updatedAt &&
+          Date.now() - Date.parse(stored.updatedAt) > 10 * 60_000
+        ) {
+          const failed: UpdateProgress = {
+            ...stored,
+            state: 'failed',
+            phase: 'failed',
+            message: 'Updater-runneren blev ikke fundet, og opdateringen udløb.',
+            updatedAt: new Date().toISOString(),
+            error: 'Ingen aktiv updater-runner blev fundet efter ti minutter.',
+          };
+          await this.writeProgress(accountId, failed);
+          return failed;
+        }
+        return stored;
+      }
+      const merged = { ...stored, ...runner };
+      if (stored.state !== merged.state || stored.phase !== merged.phase || stored.percent !== merged.percent) {
+        await this.writeProgress(accountId, merged).catch(() => undefined);
+      }
+      return merged;
+    }
+    if (
+      this.restartMode === 'systemd' &&
+      stored.state === 'running' &&
+      stored.phase === 'restarting' &&
+      stored.updatedAt &&
+      this.startedAt > Date.parse(stored.updatedAt)
+    ) {
+      const completed: UpdateProgress = {
+        ...stored,
+        state: 'completed',
+        phase: 'completed',
+        percent: 100,
+        message: 'Systemd-services er genstartet med den nye version.',
+        updatedAt: new Date().toISOString(),
+        error: null,
+      };
+      await this.writeProgress(accountId, completed);
+      return completed;
+    }
+    return stored;
   }
 
   private isConfigured(): boolean {
     return existsSync(this.repositoryPath) && existsSync(join(this.repositoryPath, '.git'));
   }
 
-  private async scheduleRestart(): Promise<boolean> {
+  private async scheduleRestart(accountId: string, runId: string): Promise<boolean> {
     if (this.restartMode === 'none') return false;
     const systemdService = process.env.BB_MEDIA_SYSTEMD_SERVICE ?? 'bb-media.target';
     if (this.restartMode === 'docker-compose') {
-      await this.scheduleDockerComposeRestart();
+      await this.scheduleDockerComposeRestart(runId);
       return true;
     }
+    await this.advanceProgress(accountId, runId, 90, 'restarting', `Genstarter ${systemdService}.`);
     const command = this.useSudo ? 'sudo' : 'systemctl';
     const args = this.useSudo ? ['-n', 'systemctl', 'restart', systemdService] : ['restart', systemdService];
     setTimeout(() => {
@@ -196,7 +313,7 @@ export class UpdaterService {
     return true;
   }
 
-  private async scheduleDockerComposeRestart(): Promise<void> {
+  private async scheduleDockerComposeRestart(runId: string): Promise<void> {
     const containerId = process.env.HOSTNAME;
     if (!containerId) {
       throw new ServiceUnavailableException({
@@ -218,6 +335,10 @@ export class UpdaterService {
       '--detach',
       '--name',
       runnerName,
+      '--label',
+      `bb.media.update.run-id=${runId}`,
+      '--env',
+      `BB_UPDATE_RUN_ID=${runId}`,
       '--user',
       '0:0',
       '--volume',
@@ -230,8 +351,65 @@ export class UpdaterService {
       'sh',
       image,
       '-lc',
-      'sleep 2; docker compose -f docker-compose.yml -f docker-compose.updater.yml up --detach --build --remove-orphans --wait --wait-timeout 300 && docker compose -f docker-compose.yml -f docker-compose.updater.yml restart proxy',
+      'sh scripts/run-update.sh',
     ], 60_000);
+  }
+
+  private async dockerRunnerProgress(): Promise<Partial<UpdateProgress> | null> {
+    const runnerName = 'boltbytes-media-updater-runner';
+    const inspect = await this.runWithExitCode('docker', [
+      'inspect',
+      '--format={{.State.Status}}|{{.State.ExitCode}}|{{index .Config.Labels "bb.media.update.run-id"}}',
+      runnerName,
+    ], 5_000);
+    if (inspect.exitCode !== 0) return null;
+    const logs = await this.runWithExitCode('docker', ['logs', '--tail', '80', runnerName], 5_000);
+    const combinedLogs = [logs.stdout, logs.stderr].filter(Boolean).join('\n');
+    const parsed = parseRunnerProgress(combinedLogs);
+    const [containerState, exitCodeText, runId] = inspect.stdout.trim().split('|');
+    const logTail = combinedLogs
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('BB_UPDATE_PROGRESS|'))
+      .slice(-24)
+      .map((line) => line.slice(0, 500));
+    if (parsed) return { ...parsed, runId: runId || null, logTail };
+    if (containerState === 'exited') {
+      const message = `Updater-runneren stoppede uden statusmarkør (exit ${exitCodeText || 'ukendt'}).`;
+      return { runId: runId || null, state: 'failed', phase: 'failed', message, error: message, updatedAt: new Date().toISOString(), logTail };
+    }
+    return logTail.length ? { runId: runId || null, logTail } : null;
+  }
+
+  private async advanceProgress(
+    accountId: string,
+    runId: string,
+    percent: number,
+    phase: string,
+    message: string,
+    values: Partial<Pick<UpdateProgress, 'previousCommit' | 'targetCommit'>> = {},
+  ): Promise<void> {
+    const current = await this.progress(accountId);
+    await this.writeProgress(accountId, {
+      ...current,
+      ...values,
+      runId,
+      state: phase === 'completed' ? 'completed' : 'running',
+      phase,
+      percent,
+      message,
+      updatedAt: new Date().toISOString(),
+      error: null,
+    });
+  }
+
+  private async writeProgress(accountId: string, progress: UpdateProgress): Promise<void> {
+    const value = progress as unknown as Prisma.InputJsonValue;
+    await this.prisma.systemSetting.upsert({
+      where: { accountId_key: { accountId, key: 'updater.last-run' } },
+      create: { accountId, key: 'updater.last-run', value },
+      update: { value },
+    });
   }
 
   private async selectedBranch(accountId: string): Promise<string> {
@@ -341,4 +519,10 @@ function validateBranch(value: string): string {
 function normalizeRestartMode(value: string | undefined): RestartMode {
   if (value === 'systemd' || value === 'docker-compose') return value;
   return 'none';
+}
+
+function updaterErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error) return String(error.message);
+  return 'Opdateringen fejlede uden en teknisk fejlbesked.';
 }

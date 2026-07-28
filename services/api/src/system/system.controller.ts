@@ -120,6 +120,12 @@ export class SystemController {
     return this.updater.status(actor.accountId);
   }
 
+  @Get('update/progress')
+  @Roles('admin')
+  updateProgress(@CurrentUser() actor: AuthenticatedUser) {
+    return this.updater.progress(actor.accountId);
+  }
+
   @Post('update/check')
   @Roles('admin')
   updateCheck(@CurrentUser() actor: AuthenticatedUser) {

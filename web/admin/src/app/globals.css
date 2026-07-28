@@ -330,6 +330,31 @@ a { color: inherit; text-decoration: none; }
 .update-actions .primary { color: white; background: linear-gradient(135deg, #8e4de8, #6230aa); }
 .update-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .update-message { margin: 12px 0; padding: 11px; border-radius: 6px; color: #c9cbd1; background: rgba(255,255,255,.04); font-size: 11px; }
+.update-progress { margin: 0 0 18px; padding: 18px; border: 1px solid rgba(177,104,255,.2); border-radius: 10px; background: linear-gradient(145deg, rgba(29,22,40,.92), rgba(13,17,22,.96)); }
+.update-progress > header { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.update-progress > header div { display: grid; gap: 5px; }
+.update-progress > header span { color: var(--accent-bright); font-size: 8px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.update-progress > header strong { font-size: 12px; }
+.update-progress > header b { color: #fff; font: 700 24px var(--font-display), sans-serif; }
+.update-progress-track { height: 7px; margin: 16px 0; overflow: hidden; border-radius: 8px; background: #282d35; }
+.update-progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7b36ce, #bc79ff); box-shadow: 0 0 16px rgba(177,104,255,.48); transition: width .45s ease; }
+.update-progress.completed { border-color: rgba(99,221,120,.25); }
+.update-progress.completed .update-progress-track i { background: linear-gradient(90deg, #328c49, #63dd78); }
+.update-progress.failed { border-color: rgba(255,88,88,.28); }
+.update-progress.failed .update-progress-track i { background: linear-gradient(90deg, #9a3030, #ff6868); }
+.update-steps { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.update-steps div { min-width: 0; display: grid; justify-items: center; gap: 6px; color: #5f6670; text-align: center; font-size: 8px; }
+.update-steps svg { width: 15px; height: 15px; }
+.update-steps .complete { color: var(--green); }
+.update-steps .active { color: var(--accent-bright); }
+.update-steps .active svg { animation: update-spin 1.2s linear infinite; }
+@keyframes update-spin { to { transform: rotate(360deg); } }
+.update-progress > footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 11px; border-top: 1px solid var(--line); color: var(--muted); font-size: 8px; }
+.update-progress-error { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px; border-radius: 6px; color: #ffaaaa; background: rgba(128,21,21,.16); font-size: 9px; }
+.update-progress-error svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.update-log { margin-top: 12px; color: #aeb4be; font-size: 9px; }
+.update-log summary { cursor: pointer; }
+.update-log pre { max-height: 220px; overflow: auto; padding: 11px; border-radius: 6px; color: #989faa; background: rgba(0,0,0,.28); font: 8px/1.6 monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .branch-picker { max-width: 420px; display: grid; gap: 7px; margin: 12px 0; color: var(--muted); font-size: 10px; }
 .branch-picker select, .management-form input, .management-form select { min-height: 39px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; color: white; background: #151a20; }
 .management-page { max-width: 1100px; }
@@ -395,5 +420,6 @@ a { color: inherit; text-decoration: none; }
   .directory-list button { grid-template-columns: 42px 1fr; }
   .directory-list button > small { display: none; }
   .update-card dl { grid-template-columns: 1fr; }
+  .update-steps { grid-template-columns: repeat(4, 1fr); row-gap: 12px; }
   .management-grid { grid-template-columns: 1fr; }
 }
