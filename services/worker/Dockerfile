@@ -10,9 +10,11 @@ RUN npm ci
 
 FROM dependencies AS build
 COPY tsconfig.base.json ./
+COPY shared/contracts shared/contracts
 COPY services/api/prisma services/api/prisma
 COPY services/worker services/worker
 RUN npx prisma generate --schema services/api/prisma/schema.prisma
+RUN npm run build --workspace=@boltbytes/contracts
 RUN npm run build --workspace=@boltbytes/worker
 
 FROM node:22-alpine AS runtime
@@ -20,6 +22,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 RUN apk add --no-cache ffmpeg openssl
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/shared/contracts ./shared/contracts
 COPY --from=build /app/services/worker/dist ./services/worker/dist
 COPY --from=build /app/services/worker/package.json ./services/worker/package.json
 USER node
