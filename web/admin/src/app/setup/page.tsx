@@ -6,16 +6,49 @@ import { Brand } from '@/components/brand';
 import { api, type ApiFailure } from '@/lib/api';
 import { t } from '@/lib/messages';
 
+type DirectoryListing = {
+  mountRoot: string;
+  hostRoot: string;
+  currentPath: string;
+  currentHostPath: string;
+  parentPath: string | null;
+  directories: Array<{ name: string; path: string; hostPath: string }>;
+};
+
 export default function SetupPage() {
   const router = useRouter();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [directoryBusy, setDirectoryBusy] = useState(true);
+  const [mountPath, setMountPath] = useState('/media');
+  const [directoryListing, setDirectoryListing] = useState<DirectoryListing | null>(null);
 
   useEffect(() => {
     api<{ configured: boolean }>('/setup/status', {}, false)
-      .then(({ configured }) => { if (configured) router.replace('/login'); })
+      .then(({ configured }) => {
+        if (configured) {
+          router.replace('/login');
+          return;
+        }
+        return loadDirectories();
+      })
       .catch(() => setError('API kan ikke kontaktes'));
   }, [router]);
+
+  async function loadDirectories(path?: string) {
+    setDirectoryBusy(true);
+    setError('');
+    try {
+      const query = path ? `?path=${encodeURIComponent(path)}` : '';
+      const listing = await api<DirectoryListing>(`/setup/directories${query}`, {}, false);
+      setDirectoryListing(listing);
+      setMountPath(listing.currentPath);
+    } catch (failure) {
+      setError((failure as ApiFailure).message ?? 'Mapperne kunne ikke indlæses');
+    } finally {
+      setDirectoryBusy(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -57,7 +90,39 @@ export default function SetupPage() {
           <label>{t.displayName}<input name="adminDisplayName" required /></label>
           <label>{t.email}<input name="adminEmail" type="email" required /></label>
           <label className="full">{t.password}<input name="adminPassword" type="password" minLength={12} required /><small>Minimum 12 tegn</small></label>
-          <label className="full">{t.mountPath}<input name="mountPath" defaultValue="/media" required /></label>
+          <label className="full">
+            {t.mountPath}
+            <input name="mountPath" value={mountPath} readOnly required />
+            <small>
+              Host: {directoryListing?.currentHostPath ?? 'Indlæser det konfigurerede MEDIA_PATH...'}
+            </small>
+          </label>
+          <div className="directory-browser full">
+            <div className="directory-browser-header">
+              <div>
+                <strong>Vælg mediemappe</strong>
+                <small>{directoryListing?.currentHostPath ?? mountPath}</small>
+              </div>
+              <button
+                type="button"
+                disabled={directoryBusy || !directoryListing?.parentPath}
+                onClick={() => directoryListing?.parentPath && loadDirectories(directoryListing.parentPath)}
+              >
+                Et niveau op
+              </button>
+            </div>
+            <div className="directory-list">
+              {directoryBusy && <span>Indlæser mapper...</span>}
+              {!directoryBusy && directoryListing?.directories.length === 0 && <span>Ingen undermapper</span>}
+              {!directoryBusy && directoryListing?.directories.map((directory) => (
+                <button type="button" key={directory.path} onClick={() => loadDirectories(directory.path)}>
+                  <span>MAPPE</span>
+                  <strong>{directory.name}</strong>
+                  <small>{directory.hostPath}</small>
+                </button>
+              ))}
+            </div>
+          </div>
           {error && <div className="form-error full">{error}</div>}
           <button className="full" disabled={busy}>{busy ? 'Opretter...' : t.saveSetup}</button>
         </form>
