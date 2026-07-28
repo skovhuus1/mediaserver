@@ -237,7 +237,7 @@ jobs:
           curl --fail --silent --show-error \
             -o /tmp/bb-media-master.m3u8 \
             "http://127.0.0.1:5555$transcode_stream_url"
-          segment_path="$(grep -E '^segment[0-9]{5}\\.ts\\?token=' /tmp/bb-media-master.m3u8 | head -n1)"
+          segment_path="$(grep -E '^segment[0-9]{5}\.ts\?token=' /tmp/bb-media-master.m3u8 | head -n1)"
           test -n "$segment_path"
           curl --fail --silent --show-error \
             -o /tmp/bb-media-segment.ts \
