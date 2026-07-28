@@ -21,6 +21,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 RUN apk add --no-cache docker-cli docker-cli-compose git openssl
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/shared/contracts ./shared/contracts
 COPY --from=build /app/services/api/dist ./services/api/dist
 COPY --from=build /app/services/api/prisma ./services/api/prisma
 COPY --from=build /app/services/api/package.json ./services/api/package.json
