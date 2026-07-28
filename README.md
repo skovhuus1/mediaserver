@@ -123,6 +123,8 @@ Eksisterende biblioteker fra den tidligere path-policy repareres automatisk ved 
 
 Docker-opdateringer genstartes af en ekstern engangs-runner med navnet `boltbytes-media-updater-runner`. Runneren oprettes fra det kørende API-image, overlever at API-containeren bliver erstattet og udfører Compose-build/genstart fra det mountede repository. Den venter på healthy services og genstarter derefter nginx-proxyen, så dens DNS-cache ikke peger på en udskiftet API- eller admin-container. Seneste updater-log kan altid læses med `docker logs boltbytes-media-updater-runner`; næste opdatering erstatter den tidligere runner.
 
+Admin-klienten roterer automatisk access- og refresh-tokens. Parallelle 401-svar samles om én refresh-request, hvert oprindeligt API-kald gentages højst én gang, og sessionen slettes kun ved et bekræftet ugyldigt refresh-token. Midlertidige netværks- og 5xx-fejl under en opdatering bevarer sessionen, så administratoren kan prøve igen, når serveren er healthy.
+
 ## Ikke implementeret endnu
 
 - Automatisk oprettelse og klassifikation af film-/seriebiblioteker samt mappebaserede kategorier som Action og Drama.
