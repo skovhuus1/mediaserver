@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { PrismaService } from '../prisma/prisma.service';
+import { classifyUpdateTransition, type UpdateTransition } from './update-transition';
 
 const execFileAsync = promisify(execFile);
 type RestartMode = 'none' | 'systemd' | 'docker-compose';
@@ -45,6 +46,8 @@ export class UpdaterService {
         dirty: false,
         hasUpdate: false,
         canApply: false,
+        transitionMode: 'blocked',
+        transitionReason: !base.enabled ? 'Updateren er deaktiveret.' : 'Git-worktree blev ikke fundet.',
         blockers: [!base.enabled ? 'Updateren er deaktiveret i Docker-konfigurationen.' : 'Git-worktree blev ikke fundet.'],
       };
     }
@@ -55,11 +58,25 @@ export class UpdaterService {
       this.run('git', ['status', '--porcelain', '--untracked-files=no']),
     ]);
     const localCommit = local.stdout.trim();
-    const remoteCommit = remote.stdout.trim().split(/\s+/)[0] ?? '';
     const dirty = Boolean(dirtyResult.stdout.trim());
+    const remoteExists = Boolean(remote.stdout.trim().split(/\s+/)[0]);
+    let remoteCommit = '';
+    let transition: UpdateTransition = {
+      mode: 'blocked',
+      reason: `Branchen ${branch} findes ikke på ${this.remote}.`,
+      checkoutTarget: null,
+    };
+    if (remoteExists) {
+      await this.run('git', ['fetch', '--prune', this.remote, branch], 60_000);
+      remoteCommit = (await this.run('git', ['rev-parse', 'FETCH_HEAD'])).stdout.trim();
+      transition = dirty
+        ? { mode: 'blocked', reason: 'Tracked filer indeholder lokale ændringer.', checkoutTarget: null }
+        : await this.inspectTransition(localCommit, remoteCommit);
+    }
     const blockers = [
       ...(dirty ? ['Tracked filer indeholder lokale ændringer.'] : []),
-      ...(!remoteCommit ? [`Branchen ${branch} findes ikke på ${this.remote}.`] : []),
+      ...(!remoteExists ? [`Branchen ${branch} findes ikke på ${this.remote}.`] : []),
+      ...(remoteExists && !dirty && transition.mode === 'blocked' ? [transition.reason] : []),
     ];
     return {
       ...base,
@@ -69,6 +86,8 @@ export class UpdaterService {
       dirty,
       hasUpdate: Boolean(remoteCommit && remoteCommit !== localCommit),
       canApply: blockers.length === 0 && !this.updateInProgress,
+      transitionMode: transition.mode,
+      transitionReason: transition.reason,
       blockers,
     };
   }
@@ -115,16 +134,27 @@ export class UpdaterService {
       const dirty = (await this.run('git', ['status', '--porcelain', '--untracked-files=no'])).stdout.trim();
       if (dirty) throw new ConflictException({ code: 'update_dirty_worktree', message: 'Tracked files contain local changes; update was refused' });
 
+      const available = await this.run('git', ['ls-remote', this.remote, `refs/heads/${branch}`]);
+      if (!available.stdout.trim()) {
+        throw new BadRequestException({ code: 'update_branch_missing', message: 'Selected branch does not exist on the configured remote' });
+      }
       await this.run('git', ['fetch', '--prune', this.remote, branch], 60_000);
-      const remoteRef = `${this.remote}/${branch}`;
-      const ancestor = await this.runWithExitCode('git', ['merge-base', '--is-ancestor', 'HEAD', remoteRef]);
-      if (ancestor.exitCode !== 0) {
+      const targetCommit = (await this.run('git', ['rev-parse', 'FETCH_HEAD'])).stdout.trim();
+      const transition = await this.inspectTransition(before, targetCommit);
+      if (transition.mode === 'blocked' || !transition.checkoutTarget && transition.mode !== 'up-to-date') {
         throw new ConflictException({
           code: 'update_not_fast_forward',
           message: 'Selected branch is not a forward-only update from the running commit',
+          details: {
+            reason: transition.reason,
+            localCommit: before,
+            targetCommit,
+          },
         });
       }
-      await this.run('git', ['switch', '--detach', remoteRef], 120_000);
+      if (transition.checkoutTarget) {
+        await this.run('git', ['switch', '--detach', transition.checkoutTarget], 120_000);
+      }
       const after = (await this.run('git', ['rev-parse', 'HEAD'])).stdout.trim();
       const changed = before !== after;
       const restartScheduled = changed ? await this.scheduleRestart() : false;
@@ -132,6 +162,7 @@ export class UpdaterService {
         updated: changed,
         previousCommit: before,
         currentCommit: after,
+        transitionMode: transition.mode,
         restartMode: this.restartMode,
         restartScheduled,
       };
@@ -209,6 +240,46 @@ export class UpdaterService {
       select: { value: true },
     });
     return typeof setting?.value === 'string' ? validateBranch(setting.value) : this.defaultBranch;
+  }
+
+  private async inspectTransition(localCommit: string, targetCommit: string): Promise<UpdateTransition> {
+    if (localCommit === targetCommit) {
+      return classifyUpdateTransition({
+        localCommit,
+        targetCommit,
+        isAncestor: false,
+        localTree: null,
+        targetHistoryTrees: [],
+      });
+    }
+    const ancestor = await this.runWithExitCode('git', ['merge-base', '--is-ancestor', localCommit, targetCommit]);
+    if (ancestor.exitCode === 0) {
+      return classifyUpdateTransition({
+        localCommit,
+        targetCommit,
+        isAncestor: true,
+        localTree: null,
+        targetHistoryTrees: [],
+      });
+    }
+    if (ancestor.exitCode !== 1) {
+      throw new ServiceUnavailableException({
+        code: 'update_command_failed',
+        message: 'git failed during updater transition inspection',
+        details: ancestor.stderr.slice(0, 2_000),
+      });
+    }
+    const [localTree, targetTrees] = await Promise.all([
+      this.run('git', ['show', '-s', '--format=%T', localCommit]),
+      this.run('git', ['log', '--format=%T', targetCommit], 60_000),
+    ]);
+    return classifyUpdateTransition({
+      localCommit,
+      targetCommit,
+      isAncestor: false,
+      localTree: localTree.stdout.trim() || null,
+      targetHistoryTrees: targetTrees.stdout.split(/\r?\n/).map((tree) => tree.trim()).filter(Boolean),
+    });
   }
 
   private async run(command: string, args: string[], timeout = 20_000): Promise<CommandResult> {
