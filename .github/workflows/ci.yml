@@ -82,6 +82,7 @@ jobs:
         run: docker compose build
       - name: Validate HDR transcoder capabilities
         run: |
+          mkdir -p media/Film/Action
           docker compose run --rm --no-deps --entrypoint sh worker -lc \
             'ffmpeg -hide_banner -encoders 2>&1 | grep -q libx265 && ffmpeg -hide_banner -filters 2>&1 | grep -q zscale'
       - name: Smoke test container startup
