@@ -1,7 +1,7 @@
 const HLS_SEGMENT_PATTERN = /^segment\d{5}\.ts$/;
 
 export function isAllowedHlsAsset(asset: string): boolean {
-  return asset === 'master.m3u8' || HLS_SEGMENT_PATTERN.test(asset);
+  return asset === 'master.m3u8' || asset === 'stream.m3u8' || HLS_SEGMENT_PATTERN.test(asset);
 }
 
 export function rewriteHlsPlaylist(playlist: string, token: string): string {

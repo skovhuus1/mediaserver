@@ -11,6 +11,10 @@ export class PlaybackCapabilitiesDto {
   @ArrayMaxSize(40)
   @IsString({ each: true })
   supportedContainers!: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  supportsHdr = false;
 }
 
 export class AuthorizePlaybackDto {

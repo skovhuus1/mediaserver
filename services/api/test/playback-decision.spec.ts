@@ -19,8 +19,16 @@ const entitlements: EffectiveEntitlements = {
 };
 
 describe('playback decision', () => {
+  const sdr1080Profile = {
+    height: 1080,
+    bitrate: 8_000_000,
+    hdr: null,
+    supportsHdr: false,
+  };
+
   it('chooses direct play only when codec and container are supported', () => {
     expect(choosePlaybackMethod({
+      ...sdr1080Profile,
       codec: 'h264',
       container: 'mp4',
       supportedCodecs: ['h264'],
@@ -31,6 +39,7 @@ describe('playback decision', () => {
 
   it('does not silently select transcode when the plan forbids it', () => {
     expect(choosePlaybackMethod({
+      ...sdr1080Profile,
       codec: 'av1',
       container: 'mkv',
       supportedCodecs: ['h264'],
@@ -41,6 +50,7 @@ describe('playback decision', () => {
 
   it('selects transcode for a browser-incompatible codec when the plan permits it', () => {
     expect(choosePlaybackMethod({
+      ...sdr1080Profile,
       codec: 'hevc',
       container: 'matroska',
       supportedCodecs: ['h264'],
@@ -51,6 +61,7 @@ describe('playback decision', () => {
 
   it('does not claim direct-stream support before a remux pipeline exists', () => {
     expect(choosePlaybackMethod({
+      ...sdr1080Profile,
       codec: 'h264',
       container: 'matroska',
       supportedCodecs: ['h264'],

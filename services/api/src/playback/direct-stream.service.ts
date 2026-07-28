@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { isPathWithin, mediaContentType, parseByteRange, streamTokenMatches } from './direct-stream-policy';
+import { applyMediaCors } from './media-cors';
 
 @Injectable()
 export class DirectStreamService {
@@ -14,9 +15,11 @@ export class DirectStreamService {
     sessionId: string,
     token: string | undefined,
     rangeHeader: string | undefined,
+    origin: string | undefined,
     response: Response,
     headOnly: boolean,
   ): Promise<void> {
+    applyMediaCors(response, origin);
     if (!token) throw new UnauthorizedException({ code: 'stream_token_required', message: 'Stream token is required' });
     const session = await this.prisma.playbackSession.findUnique({
       where: { id: sessionId },

@@ -11,8 +11,8 @@ import { hostDisplayPath, resolveStorageBrowsePath } from './storage-path';
 const DEFAULT_ENTITLEMENTS = {
   maxConcurrentStreams: 1,
   maxRegisteredDevices: 5,
-  maxVideoResolution: 1080,
-  maxVideoBitrate: 12_000,
+  maxVideoResolution: 2160,
+  maxVideoBitrate: 50_000,
   allowDirectPlay: true,
   allowDirectStream: true,
   allowVideoTranscode: true,

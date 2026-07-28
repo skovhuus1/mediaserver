@@ -1,8 +1,8 @@
 import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
-import { classifyMediaPath } from '@boltbytes/contracts';
+import { classifyMediaPath, detectVideoSignalProfile, isHevcCodec } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { enrichLibraryMetadata, hasTmdbConfiguration } from './metadata.js';
@@ -321,6 +321,111 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
 
   const resolution = Math.max(240, Math.min(2160, finiteInteger(payload.maxVideoResolution) ?? 1080));
   const bitrateKbps = Math.max(500, Math.min(50_000, finiteInteger(payload.maxVideoBitrate) ?? 8_000));
+  const sourceVideo = detectVideoSignalProfile(file.probe);
+  const preserveHdrRequested = payload.preserveHdr === true && sourceVideo.hdr !== null;
+  const sourceWithinResolution = file.height === null || file.height <= resolution;
+  const sourceWithinBitrate = file.bitrate === null || file.bitrate <= bitrateKbps * 1_000;
+  const copyHdrVideo = preserveHdrRequested
+    && isHevcCodec(sourceVideo.codec)
+    && sourceWithinResolution
+    && sourceWithinBitrate;
+  const encodeHdrVideo = preserveHdrRequested
+    && !copyHdrVideo
+    && (sourceVideo.hdr === 'hdr10' || sourceVideo.hdr === 'hlg');
+  for (const streamIndex of textSubtitleStreamIndexes(file.probe)) {
+    try {
+      const subtitleCancelled = await runFfmpeg(job.id, session.id, [
+        '-hide_banner',
+        '-loglevel', 'warning',
+        '-nostdin',
+        '-y',
+        '-i', inputPath,
+        '-map', `0:${streamIndex}`,
+        '-c:s', 'webvtt',
+        '-f', 'webvtt',
+        resolve(outputPath, `embedded-${streamIndex}.vtt`),
+      ]);
+      if (subtitleCancelled) {
+        await rm(outputPath, { recursive: true, force: true });
+        return;
+      }
+    } catch (error) {
+      await rm(resolve(outputPath, `embedded-${streamIndex}.vtt`), { force: true });
+      console.warn(JSON.stringify({
+        level: 'warn',
+        component: 'transcoder',
+        message: 'Skipped an embedded subtitle track that FFmpeg could not convert',
+        sessionId,
+        streamIndex,
+        error: error instanceof Error ? error.message : 'Unknown subtitle conversion failure',
+      }));
+    }
+  }
+
+  const outputHeight = evenDimension(Math.min(file.height ?? resolution, resolution));
+  const outputWidth = evenDimension(
+    file.width && file.height
+      ? file.width * (outputHeight / file.height)
+      : outputHeight * (16 / 9),
+  );
+  const peakBandwidth = (bitrateKbps + 160) * 1_000;
+  const averageBandwidth = Math.max(1, Math.round(peakBandwidth * 0.82));
+  const outputCodec = copyHdrVideo || encodeHdrVideo ? 'hvc1.2.4.L153.B0' : 'avc1.640028';
+  const master = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    `#EXT-X-STREAM-INF:BANDWIDTH=${peakBandwidth},AVERAGE-BANDWIDTH=${averageBandwidth},RESOLUTION=${outputWidth}x${outputHeight},CODECS="${outputCodec},mp4a.40.2"`,
+    'stream.m3u8',
+    '',
+  ].join('\n');
+  const temporaryMaster = resolve(outputPath, 'master.m3u8.tmp');
+  await writeFile(temporaryMaster, master, 'utf8');
+  await rename(temporaryMaster, resolve(outputPath, 'master.m3u8'));
+
+  const scaleFilter = `scale=w=-2:h=trunc(min(ih\\,${resolution})/2)*2`;
+  const sdrVideoArguments = sourceVideo.hdr
+    ? [
+        '-vf',
+        `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,${scaleFilter},format=yuv420p`,
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', '20',
+        '-pix_fmt', 'yuv420p',
+        '-maxrate', `${bitrateKbps}k`,
+        '-bufsize', `${bitrateKbps * 2}k`,
+        '-color_primaries', 'bt709',
+        '-color_trc', 'bt709',
+        '-colorspace', 'bt709',
+        '-force_key_frames', 'expr:gte(t,n_forced*4)',
+      ]
+    : [
+        '-vf', scaleFilter,
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', '22',
+        '-pix_fmt', 'yuv420p',
+        '-maxrate', `${bitrateKbps}k`,
+        '-bufsize', `${bitrateKbps * 2}k`,
+        '-force_key_frames', 'expr:gte(t,n_forced*4)',
+      ];
+  const hdrVideoArguments = [
+    '-vf', scaleFilter,
+    '-c:v', 'libx265',
+    '-preset', 'fast',
+    '-pix_fmt', 'yuv420p10le',
+    '-maxrate', `${bitrateKbps}k`,
+    '-bufsize', `${bitrateKbps * 2}k`,
+    '-x265-params', 'hdr-opt=1:repeat-headers=1',
+    '-color_primaries', 'bt2020',
+    '-color_trc', sourceVideo.hdr === 'hlg' ? 'arib-std-b67' : 'smpte2084',
+    '-colorspace', 'bt2020nc',
+    '-force_key_frames', 'expr:gte(t,n_forced*4)',
+  ];
+  const videoArguments = copyHdrVideo
+    ? ['-c:v', 'copy']
+    : encodeHdrVideo
+      ? hdrVideoArguments
+      : sdrVideoArguments;
   const cancelled = await runFfmpeg(job.id, session.id, [
     '-hide_banner',
     '-loglevel', 'warning',
@@ -329,26 +434,35 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-i', inputPath,
     '-map', '0:v:0',
     '-map', '0:a:0?',
-    '-vf', `scale=w=-2:h=trunc(min(ih\\,${resolution})/2)*2`,
-    '-c:v', 'libx264',
-    '-preset', 'veryfast',
-    '-crf', '22',
-    '-pix_fmt', 'yuv420p',
-    '-maxrate', `${bitrateKbps}k`,
-    '-bufsize', `${bitrateKbps * 2}k`,
+    ...videoArguments,
     '-c:a', 'aac',
     '-b:a', '160k',
     '-ac', '2',
-    '-force_key_frames', 'expr:gte(t,n_forced*4)',
     '-f', 'hls',
     '-hls_time', '4',
     '-hls_list_size', '0',
     '-hls_playlist_type', 'event',
     '-hls_flags', 'independent_segments+temp_file',
     '-hls_segment_filename', resolve(outputPath, 'segment%05d.ts'),
-    resolve(outputPath, 'master.m3u8'),
+    resolve(outputPath, 'stream.m3u8'),
   ]);
   if (cancelled) await rm(outputPath, { recursive: true, force: true });
+}
+
+function textSubtitleStreamIndexes(probe: Prisma.JsonValue | null): number[] {
+  const root = asJsonObject(probe);
+  const streams = Array.isArray(root.streams) ? root.streams.map(asJsonObject) : [];
+  const codecs = new Set(['ass', 'mov_text', 'ssa', 'srt', 'subrip', 'webvtt']);
+  return streams.flatMap((stream) => {
+    if (stream.codec_type !== 'subtitle' || typeof stream.codec_name !== 'string') return [];
+    if (!codecs.has(stream.codec_name.toLowerCase())) return [];
+    const index = finiteInteger(stream.index);
+    return index === null ? [] : [index];
+  });
+}
+
+function evenDimension(value: number): number {
+  return Math.max(2, Math.floor(value / 2) * 2);
 }
 
 async function runFfmpeg(jobId: string, sessionId: string, args: string[]): Promise<boolean> {

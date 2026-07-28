@@ -1,12 +1,14 @@
-import { Body, Controller, Delete, Get, Head, Headers, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Head, Headers, Options, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import type { Response } from 'express';
 import { CurrentUser, Public } from '../common/auth';
 import { DirectStreamService } from './direct-stream.service';
+import { applyMediaCors } from './media-cors';
 import { AuthorizePlaybackDto } from './playback.dto';
 import { PlaybackService } from './playback.service';
 import { StreamReservationService } from './stream-reservation.service';
+import { SubtitleStreamService } from './subtitle-stream.service';
 import { TranscodeStreamService } from './transcode-stream.service';
 
 @ApiTags('playback')
@@ -17,6 +19,7 @@ export class PlaybackController {
     private readonly reservations: StreamReservationService,
     private readonly directStream: DirectStreamService,
     private readonly transcodeStream: TranscodeStreamService,
+    private readonly subtitleStream: SubtitleStreamService,
   ) {}
 
   @Post('authorize')
@@ -56,9 +59,22 @@ export class PlaybackController {
     @Param('id') id: string,
     @Param('asset') asset: string,
     @Query('token') token: string | undefined,
+    @Headers('origin') origin: string | undefined,
     @Res() response: Response,
   ) {
-    return this.transcodeStream.sendAsset(id, asset, token, response);
+    return this.transcodeStream.sendAsset(id, asset, token, origin, response);
+  }
+
+  @Get('sessions/:id/subtitles/:asset')
+  @Public()
+  subtitleAsset(
+    @Param('id') id: string,
+    @Param('asset') asset: string,
+    @Query('token') token: string | undefined,
+    @Headers('origin') origin: string | undefined,
+    @Res() response: Response,
+  ) {
+    return this.subtitleStream.send(id, asset, token, origin, response);
   }
 
   @Get('sessions/:id/stream')
@@ -67,9 +83,10 @@ export class PlaybackController {
     @Param('id') id: string,
     @Query('token') token: string | undefined,
     @Headers('range') range: string | undefined,
+    @Headers('origin') origin: string | undefined,
     @Res() response: Response,
   ) {
-    return this.directStream.send(id, token, range, response, false);
+    return this.directStream.send(id, token, range, origin, response, false);
   }
 
   @Head('sessions/:id/stream')
@@ -78,8 +95,16 @@ export class PlaybackController {
     @Param('id') id: string,
     @Query('token') token: string | undefined,
     @Headers('range') range: string | undefined,
+    @Headers('origin') origin: string | undefined,
     @Res() response: Response,
   ) {
-    return this.directStream.send(id, token, range, response, true);
+    return this.directStream.send(id, token, range, origin, response, true);
+  }
+
+  @Options(['sessions/:id/stream', 'sessions/:id/hls/:asset', 'sessions/:id/subtitles/:asset'])
+  @Public()
+  mediaPreflight(@Headers('origin') origin: string | undefined, @Res() response: Response) {
+    applyMediaCors(response, origin);
+    response.status(204).end();
   }
 }

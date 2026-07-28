@@ -47,17 +47,40 @@ type Authorization = {
   streamUrl: string;
   contentType: string;
   transcodeStatusUrl?: string;
+  subtitleTracks: SubtitleTrack[];
+  videoProfile: {
+    source: {
+      width: number | null;
+      height: number | null;
+      bitrate: number | null;
+      codec: string | null;
+      hdr: 'hdr10' | 'hlg' | 'dolby_vision' | null;
+      bitDepth: number | null;
+    };
+    output: { height: number | null; hdr: 'hdr10' | 'hlg' | 'dolby_vision' | null };
+  };
   leaseExpiresAt: string;
 };
 type TranscodeStatus = { state: 'queued' | 'running' | 'ready' | 'failed'; message: string };
 type PlayerMenu = 'playlist' | 'speed' | 'subtitles' | 'audio' | 'quality' | 'info' | null;
 type AudioTrack = { index: number; name: string; language: string };
 type QualityLevel = { index: number; label: string };
+type SubtitleTrack = { id: string; label: string; language: string; src: string; contentType: 'text/vtt' };
 
 type CastMediaInfo = {
   metadata?: { title?: string; subtitle?: string };
+  tracks?: CastTrack[];
+  streamType?: string;
+  duration?: number;
 };
-type CastLoadRequest = { currentTime?: number };
+type CastTrack = {
+  trackContentId?: string;
+  trackContentType?: string;
+  subtype?: string;
+  name?: string;
+  language?: string;
+};
+type CastLoadRequest = { currentTime?: number; activeTrackIds?: number[] };
 type CastSession = { loadMedia(request: CastLoadRequest): Promise<void> };
 type CastContext = {
   setOptions(options: { receiverApplicationId: string; autoJoinPolicy: string }): void;
@@ -79,6 +102,10 @@ type CastWindow = Window & {
         MediaInfo: new (url: string, contentType: string) => CastMediaInfo;
         GenericMediaMetadata: new () => { title?: string; subtitle?: string };
         LoadRequest: new (mediaInfo: CastMediaInfo) => CastLoadRequest;
+        Track: new (trackId: number, trackType: string) => CastTrack;
+        TrackType: { TEXT: string };
+        TextTrackType: { SUBTITLES: string };
+        StreamType: { BUFFERED: string };
       };
     };
   };
@@ -102,6 +129,7 @@ export function WebPlayer() {
   const mediaRef = useRef<PlayableMedia | null>(null);
   const resumeRef = useRef(0);
   const castingRef = useRef(false);
+  const activeSubtitleRef = useRef<string | null>(null);
   const lastProgressAt = useRef(0);
   const requestNumber = useRef(0);
   const [media, setMedia] = useState<PlayableMedia | null>(null);
@@ -119,7 +147,9 @@ export function WebPlayer() {
   const [activeAudioTrack, setActiveAudioTrack] = useState(0);
   const [qualities, setQualities] = useState<QualityLevel[]>([]);
   const [activeQuality, setActiveQuality] = useState(-1);
+  const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
   const [castAvailable, setCastAvailable] = useState(false);
+  const [castReason, setCastReason] = useState('Google Cast Framework indlæses...');
   const [casting, setCasting] = useState(false);
 
   const saveProgress = useCallback(async (completed = false) => {
@@ -163,6 +193,8 @@ export function WebPlayer() {
     setStatus('');
     setError('');
     setCasting(false);
+    activeSubtitleRef.current = null;
+    setActiveSubtitle(null);
   }, [saveProgress]);
 
   const togglePlay = useCallback(() => {
@@ -208,15 +240,18 @@ export function WebPlayer() {
             return;
           }
           sessionRef.current = next.sessionId;
+          const defaultSubtitle = next.subtitleTracks.find((track) => track.language === 'da')?.id ?? null;
+          activeSubtitleRef.current = defaultSubtitle;
+          setActiveSubtitle(defaultSubtitle);
           setAuthorization(next);
           if (next.method === 'transcode') {
             if (!next.transcodeStatusUrl) throw new Error('Transcode-status mangler i serverens svar.');
             setStatus('FFmpeg forbereder streamen...');
             const ready = await waitForTranscode(next.transcodeStatusUrl, () => currentRequest === requestNumber.current);
             if (!ready) return;
-            setStatus('Transcoding · HLS');
+            setStatus(`Transcoding · HLS${formatVideoProfile(next) ? ` · ${formatVideoProfile(next)}` : ''}`);
           } else {
-            setStatus(next.method === 'direct_play' ? 'Direkte afspilning' : 'Direct Stream');
+            setStatus(`${next.method === 'direct_play' ? 'Direkte afspilning' : 'Direct Stream'}${formatVideoProfile(next) ? ` · ${formatVideoProfile(next)}` : ''}`);
           }
           setSourceReady(true);
         } catch (caught) {
@@ -257,9 +292,13 @@ export function WebPlayer() {
       hls.loadSource(authorization.streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setQualities(hls.levels.map((level, index) => ({
+      setQualities(hls.levels.map((level, index) => ({
           index,
-          label: level.height ? `${level.height}p` : `${Math.round(level.bitrate / 1000)} Kbps`,
+          label: level.height
+            ? `${level.height}p${level.bitrate > 0 ? ` · ${(level.bitrate / 1_000_000).toFixed(1)} Mbps` : ''}`
+            : level.bitrate > 0
+              ? `${Math.round(level.bitrate / 1000)} Kbps`
+              : 'Transcoded',
         })));
         setAudioTracks(hls.audioTracks.map((track, index) => ({
           index,
@@ -299,7 +338,10 @@ export function WebPlayer() {
   }, [authorization]);
 
   useEffect(() => {
-    void loadCastFramework().then(setCastAvailable);
+    void loadCastFramework().then((result) => {
+      setCastAvailable(result.available);
+      setCastReason(result.reason);
+    });
   }, []);
 
   useEffect(() => {
@@ -346,6 +388,10 @@ export function WebPlayer() {
     setCasting(true);
     setError('');
     try {
+      if (!window.isSecureContext) {
+        throw new Error('Chromecast fra webpanelet kræver HTTPS. Åbn serveren via en HTTPS-adresse og prøv igen.');
+      }
+      if (!castAvailable) throw new Error(castReason);
       const castWindow = window as CastWindow;
       const framework = castWindow.cast?.framework;
       const mediaApi = castWindow.chrome?.cast?.media;
@@ -363,8 +409,21 @@ export function WebPlayer() {
       metadata.title = media.seriesTitle ?? media.title;
       metadata.subtitle = media.seriesTitle ? episodeLabel(media) : status;
       mediaInfo.metadata = metadata;
+      mediaInfo.streamType = mediaApi.StreamType.BUFFERED;
+      if (media.file?.durationMs) mediaInfo.duration = media.file.durationMs / 1000;
+      mediaInfo.tracks = authorization.subtitleTracks.map((subtitle, index) => {
+        const track = new mediaApi.Track(index + 1, mediaApi.TrackType.TEXT);
+        track.trackContentId = new URL(subtitle.src, window.location.href).href;
+        track.trackContentType = subtitle.contentType;
+        track.subtype = mediaApi.TextTrackType.SUBTITLES;
+        track.name = subtitle.label;
+        if (subtitle.language !== 'und') track.language = subtitle.language;
+        return track;
+      });
       const request = new mediaApi.LoadRequest(mediaInfo);
       request.currentTime = videoRef.current?.currentTime ?? 0;
+      const selectedTrackIndex = authorization.subtitleTracks.findIndex((track) => track.id === activeSubtitleRef.current);
+      if (selectedTrackIndex >= 0) request.activeTrackIds = [selectedTrackIndex + 1];
       await castSession.loadMedia(request);
       videoRef.current?.pause();
       castingRef.current = true;
@@ -395,6 +454,16 @@ export function WebPlayer() {
     setMenu(null);
   };
 
+  const selectSubtitle = (id: string | null) => {
+    const tracks = Array.from(videoRef.current?.textTracks ?? []);
+    authorization?.subtitleTracks.forEach((track, index) => {
+      if (tracks[index]) tracks[index].mode = track.id === id ? 'showing' : 'disabled';
+    });
+    activeSubtitleRef.current = id;
+    setActiveSubtitle(id);
+    setMenu(null);
+  };
+
   if (!media) return null;
   return (
     <section ref={overlayRef} className={styles.overlay} role="dialog" aria-modal="true" aria-label={`Afspiller ${media.title}`}>
@@ -420,7 +489,18 @@ export function WebPlayer() {
         onError={() => {
           if (sourceReady) setError('Browseren kunne ikke afspille den leverede stream.');
         }}
-      />
+      >
+        {authorization?.subtitleTracks.map((track) => (
+          <track
+            key={track.id}
+            kind="subtitles"
+            src={track.src}
+            srcLang={track.language}
+            label={track.label}
+            default={track.id === activeSubtitle}
+          />
+        ))}
+      </video>
 
       <div className={styles.topBar}>
         <button className={styles.iconButton} onClick={() => void stop()} aria-label="Tilbage"><ArrowLeft /></button>
@@ -434,9 +514,9 @@ export function WebPlayer() {
           <button
             className={styles.iconButton}
             onClick={() => void startCast()}
-            disabled={!castAvailable || !authorization || !sourceReady || casting}
+            disabled={!authorization || !sourceReady || casting}
             aria-label="Chromecast"
-            title={castAvailable ? 'Afspil på Chromecast' : 'Google Cast er ikke tilgængelig'}
+            title={castAvailable ? 'Afspil på Chromecast' : castReason}
           >
             <Cast />
           </button>
@@ -481,7 +561,20 @@ export function WebPlayer() {
             </button>
           ))}
           {menu === 'subtitles' && (
-            <div className={styles.emptyMenu}>Der blev ikke fundet undertekster til denne fil.</div>
+            <>
+              <button className={styles.menuRow} onClick={() => selectSubtitle(null)}>
+                <span>Fra</span>{activeSubtitle === null && <Check size={17} />}
+              </button>
+              {authorization?.subtitleTracks.map((track) => (
+                <button className={styles.menuRow} key={track.id} onClick={() => selectSubtitle(track.id)}>
+                  <span><strong>{track.label}</strong><small>{track.language === 'und' ? 'Ukendt sprog' : track.language}</small></span>
+                  {activeSubtitle === track.id && <Check size={17} />}
+                </button>
+              ))}
+              {!authorization?.subtitleTracks.length && (
+                <div className={styles.emptyMenu}>Der blev ikke fundet kompatible tekstundertekster til denne fil.</div>
+              )}
+            </>
           )}
           {menu === 'audio' && (audioTracks.length ? audioTracks.map((track) => (
             <button className={styles.menuRow} key={track.index} onClick={() => selectAudioTrack(track.index)}>
@@ -499,7 +592,11 @@ export function WebPlayer() {
                   <span>{quality.label}</span>{activeQuality === quality.index && <Check size={17} />}
                 </button>
               ))}
-              {!qualities.length && <div className={styles.emptyMenu}>Original kvalitet · Direct Play</div>}
+              {!qualities.length && (
+                <div className={styles.emptyMenu}>
+                  Original kvalitet · {authorization ? formatVideoProfile(authorization) || 'Direct Play' : 'Direct Play'}
+                </div>
+              )}
             </>
           )}
           {menu === 'info' && (
@@ -509,6 +606,7 @@ export function WebPlayer() {
               <dt>Type</dt><dd>{media.type ?? 'Ukendt'}</dd>
               <dt>Kategori</dt><dd>{media.category ?? 'Ikke angivet'}</dd>
               <dt>Metode</dt><dd>{status || 'Forbereder'}</dd>
+              <dt>Videosignal</dt><dd>{authorization ? formatVideoProfile(authorization) || 'Standard dynamic range' : 'Ukendt'}</dd>
             </dl>
           )}
         </aside>
@@ -577,10 +675,36 @@ export function WebPlayer() {
 }
 
 function browserCapabilities() {
+  const hevcTypes = [
+    'video/mp4; codecs="hvc1.1.6.L153.B0"',
+    'video/mp4; codecs="hev1.1.6.L153.B0"',
+  ];
+  const supportsHevc = typeof MediaSource !== 'undefined'
+    && hevcTypes.some((contentType) => MediaSource.isTypeSupported(contentType));
+  const supportsHdr = supportsHevc
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(dynamic-range: high)').matches;
   return {
-    supportedCodecs: ['h264', 'avc1', 'aac', 'mp3', 'vp8', 'vp9', 'opus'],
+    supportedCodecs: ['h264', 'avc1', 'aac', 'mp3', 'vp8', 'vp9', 'opus', ...(supportsHevc ? ['hevc', 'h265'] : [])],
     supportedContainers: ['mov', 'mp4', 'webm', 'ogg'],
+    supportsHdr,
   };
+}
+
+function formatVideoProfile(authorization: Authorization): string {
+  const height = authorization.videoProfile.output.height ?? authorization.videoProfile.source.height;
+  const resolution = height && height >= 2160 ? '4K' : height ? `${height}p` : '';
+  const hdr = ({
+    hdr10: 'HDR10',
+    hlg: 'HLG',
+    dolby_vision: 'Dolby Vision',
+  } as const)[authorization.videoProfile.output.hdr ?? authorization.videoProfile.source.hdr ?? 'hdr10'];
+  const hasHdr = authorization.videoProfile.output.hdr ?? (
+    authorization.method === 'direct_play' ? authorization.videoProfile.source.hdr : null
+  );
+  return [resolution, hasHdr ? hdr : '', authorization.videoProfile.source.bitDepth && hasHdr ? `${authorization.videoProfile.source.bitDepth}-bit` : '']
+    .filter(Boolean)
+    .join(' · ');
 }
 
 async function waitForTranscode(statusUrl: string, isCurrent: () => boolean): Promise<boolean> {
@@ -596,10 +720,18 @@ async function waitForTranscode(statusUrl: string, isCurrent: () => boolean): Pr
   throw new Error('Transcoding tog længere end fem minutter om at levere det første segment.');
 }
 
-async function loadCastFramework(): Promise<boolean> {
+async function loadCastFramework(): Promise<{ available: boolean; reason: string }> {
+  if (!window.isSecureContext) {
+    return {
+      available: false,
+      reason: 'Chromecast kræver HTTPS, når webpanelet åbnes fra en anden maskine.',
+    };
+  }
   const castWindow = window as CastWindow;
-  if (castWindow.cast?.framework && castWindow.chrome?.cast?.media) return true;
-  return new Promise<boolean>((resolve) => {
+  if (castWindow.cast?.framework && castWindow.chrome?.cast?.media) {
+    return { available: true, reason: 'Afspil på Chromecast' };
+  }
+  return new Promise((resolve) => {
     let settled = false;
     const finish = (available: boolean) => {
       if (settled) return;
@@ -612,11 +744,14 @@ async function loadCastFramework(): Promise<boolean> {
             receiverApplicationId: media.DEFAULT_MEDIA_RECEIVER_APP_ID,
             autoJoinPolicy: framework.AutoJoinPolicy.ORIGIN_SCOPED,
           });
-          resolve(true);
+          resolve({ available: true, reason: 'Afspil på Chromecast' });
           return;
         }
       }
-      resolve(false);
+      resolve({
+        available: false,
+        reason: 'Google Cast Framework kunne ikke indlæses. Brug en understøttet Chrome-browser på samme netværk.',
+      });
     };
     castWindow.__onGCastApiAvailable = finish;
     if (!document.getElementById(castScriptId)) {

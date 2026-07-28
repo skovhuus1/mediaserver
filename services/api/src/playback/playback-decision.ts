@@ -7,11 +7,15 @@ export type PlaybackDecision =
 export function choosePlaybackMethod(input: {
   codec: string | null;
   container: string | null;
+  height: number | null;
+  bitrate: number | null;
+  hdr: string | null;
+  supportsHdr: boolean;
   supportedCodecs: readonly string[];
   supportedContainers: readonly string[];
   entitlements: EffectiveEntitlements;
 }): PlaybackDecision {
-  const { codec, container, supportedCodecs, supportedContainers, entitlements } = input;
+  const { codec, container, height, bitrate, hdr, supportsHdr, supportedCodecs, supportedContainers, entitlements } = input;
   if (!codec || !container) {
     return { allowed: false, method: null, code: 'media_profile_missing', reason: 'Media codec and container analysis is required before playback' };
   }
@@ -19,9 +23,24 @@ export function choosePlaybackMethod(input: {
   const normalizedContainer = container.toLowerCase();
   const codecSupported = supportedCodecs.map((value) => value.toLowerCase()).includes(normalizedCodec);
   const containerSupported = supportedContainers.map((value) => value.toLowerCase()).includes(normalizedContainer);
+  const resolutionAllowed = height === null || height <= entitlements.maxVideoResolution;
+  const bitrateAllowed = bitrate === null || bitrate <= entitlements.maxVideoBitrate * 1_000;
+  const dynamicRangeSupported = hdr === null || supportsHdr;
 
-  if (codecSupported && containerSupported && entitlements.allowDirectPlay) {
-    return { allowed: true, method: 'direct_play', code: 'playback_method_selected', reason: 'Device supports codec and container' };
+  if (
+    codecSupported
+    && containerSupported
+    && resolutionAllowed
+    && bitrateAllowed
+    && dynamicRangeSupported
+    && entitlements.allowDirectPlay
+  ) {
+    return {
+      allowed: true,
+      method: 'direct_play',
+      code: 'playback_method_selected',
+      reason: 'Device and plan support the source codec, container, quality and dynamic range',
+    };
   }
   if (entitlements.allowVideoTranscode) {
     return { allowed: true, method: 'transcode', code: 'playback_method_selected', reason: 'A compatible stream must be transcoded' };

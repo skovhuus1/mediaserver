@@ -1,5 +1,5 @@
 import { ForbiddenException, HttpException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import type { AuthenticatedUser } from '@boltbytes/contracts';
+import { detectVideoSignalProfile, isHevcCodec, type AuthenticatedUser } from '@boltbytes/contracts';
 import { isPrivileged } from '../common/auth';
 import { correlationId } from '../common/request-context';
 import { EntitlementsService } from '../entitlements/entitlements.service';
@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthorizePlaybackDto } from './playback.dto';
 import { choosePlaybackMethod } from './playback-decision';
 import { StreamReservationService } from './stream-reservation.service';
+import { SubtitleStreamService } from './subtitle-stream.service';
 import { TranscodeStreamService } from './transcode-stream.service';
 
 @Injectable()
@@ -16,6 +17,7 @@ export class PlaybackService {
     private readonly entitlements: EntitlementsService,
     private readonly reservations: StreamReservationService,
     private readonly transcodeStream: TranscodeStreamService,
+    private readonly subtitleStream: SubtitleStreamService,
   ) {}
 
   async authorize(actor: AuthenticatedUser, dto: AuthorizePlaybackDto) {
@@ -36,7 +38,7 @@ export class PlaybackService {
 
     const media = await this.prisma.mediaItem.findFirst({
       where: { id: dto.mediaId, accountId: actor.accountId },
-      include: { file: true },
+      include: { file: { include: { storageRoot: true } } },
     });
     if (!media) throw new NotFoundException({ code: 'media_not_found', message: 'Media item was not found' });
     if (!media.file || media.file.status !== 'ready') {
@@ -45,9 +47,14 @@ export class PlaybackService {
         message: 'The media item has no readable scanned file',
       });
     }
+    const sourceVideo = detectVideoSignalProfile(media.file.probe);
     const decision = choosePlaybackMethod({
       codec: media.codec,
       container: media.container,
+      height: media.height,
+      bitrate: media.bitrate,
+      hdr: sourceVideo.hdr,
+      supportsHdr: dto.capabilities.supportsHdr,
       supportedCodecs: dto.capabilities.supportedCodecs,
       supportedContainers: dto.capabilities.supportedContainers,
       entitlements: entitlement.effective,
@@ -72,6 +79,11 @@ export class PlaybackService {
           await this.transcodeStream.enqueue(session.id, actor.accountId, {
             maxVideoResolution: entitlement.effective.maxVideoResolution,
             maxVideoBitrate: entitlement.effective.maxVideoBitrate,
+            preserveHdr: Boolean(
+              sourceVideo.hdr
+              && dto.capabilities.supportsHdr
+              && dto.capabilities.supportedCodecs.some((codec) => isHevcCodec(codec)),
+            ),
           });
         } catch (error) {
           await this.reservations.release(actor, session.id, 'transcode_queue_failed');
@@ -83,13 +95,40 @@ export class PlaybackService {
       const streamUrl = decision.method === 'transcode'
         ? `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${token}`
         : `/api/v1/playback/sessions/${session.id}/stream?token=${token}`;
+      const subtitleTracks = await this.subtitleStream.listForPlayback(
+        session.id,
+        session.streamToken,
+        media.file,
+        decision.method === 'transcode',
+      );
       return {
         sessionId: session.id,
         logicalSessionId: session.logicalSessionId,
         method: decision.method,
         streamToken: session.streamToken,
         streamUrl,
-        contentType: decision.method === 'transcode' ? 'application/vnd.apple.mpegurl' : this.directContentType(media.container),
+        contentType: decision.method === 'transcode' ? 'application/x-mpegURL' : this.directContentType(media.container),
+        subtitleTracks,
+        videoProfile: {
+          source: {
+            width: media.width,
+            height: media.height,
+            bitrate: media.bitrate,
+            codec: sourceVideo.codec ?? media.codec,
+            hdr: sourceVideo.hdr,
+            bitDepth: sourceVideo.bitDepth,
+          },
+          output: {
+            height: decision.method === 'direct_play'
+              ? media.height
+              : Math.min(media.height ?? entitlement.effective.maxVideoResolution, entitlement.effective.maxVideoResolution),
+            hdr: decision.method === 'direct_play'
+              ? sourceVideo.hdr
+              : sourceVideo.hdr && dto.capabilities.supportsHdr && isHevcCodec(sourceVideo.codec)
+                ? sourceVideo.hdr
+                : null,
+          },
+        },
         ...(decision.method === 'transcode'
           ? { transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?token=${token}` }
           : {}),
