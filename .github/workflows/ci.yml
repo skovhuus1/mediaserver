@@ -111,10 +111,13 @@ jobs:
 
           api_id="$(docker compose ps --quiet api)"
           worker_id="$(docker compose ps --quiet worker)"
+          transcoder_id="$(docker compose ps --quiet transcoder)"
           test -n "$api_id"
           test -n "$worker_id"
+          test -n "$transcoder_id"
           test "$(docker inspect --format '{{.State.Health.Status}}' "$api_id")" = "healthy"
           test "$(docker inspect --format '{{.State.Status}}' "$worker_id")" = "running"
+          test "$(docker inspect --format '{{.State.Status}}' "$transcoder_id")" = "running"
           curl --fail --silent --show-error http://127.0.0.1:5555/api/v1/system/health
 
           api_base="http://127.0.0.1:5555/api/v1"
@@ -206,6 +209,44 @@ jobs:
             -d '{"positionMs":950,"durationMs":1000}' \
             "$api_base/playback/sessions/$session_id/progress" >/dev/null
           test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/playback/history/continue" | jq 'length')" -eq 0
+          curl --fail --silent --show-error \
+            -X DELETE \
+            -H "authorization: Bearer $token" \
+            "$api_base/playback/sessions/$session_id" >/dev/null
+
+          transcode_authorization="$(curl --fail --silent --show-error \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d "{\"profileId\":\"$profile_id\",\"mediaId\":\"$media_id\",\"deviceId\":\"$device_id\",\"capabilities\":{\"supportedCodecs\":[\"vp9\"],\"supportedContainers\":[\"webm\"]}}" \
+            "$api_base/playback/authorize")"
+          transcode_session_id="$(jq -er '.sessionId' <<<"$transcode_authorization")"
+          transcode_status_url="$(jq -er '.transcodeStatusUrl' <<<"$transcode_authorization")"
+          test "$(jq -r '.method' <<<"$transcode_authorization")" = "transcode"
+          transcode_state=""
+          for _ in $(seq 1 90); do
+            transcode_status="$(curl --fail --silent --show-error "http://127.0.0.1:5555$transcode_status_url")"
+            transcode_state="$(jq -r '.state' <<<"$transcode_status")"
+            if [ "$transcode_state" = "ready" ] || [ "$transcode_state" = "failed" ]; then break; fi
+            sleep 1
+          done
+          if [ "$transcode_state" != "ready" ]; then
+            jq . <<<"$transcode_status"
+            exit 1
+          fi
+          transcode_stream_url="$(jq -er '.streamUrl' <<<"$transcode_authorization")"
+          curl --fail --silent --show-error \
+            -o /tmp/bb-media-master.m3u8 \
+            "http://127.0.0.1:5555$transcode_stream_url"
+          segment_path="$(grep -E '^segment[0-9]{5}\.ts\?token=' /tmp/bb-media-master.m3u8 | head -n1)"
+          test -n "$segment_path"
+          curl --fail --silent --show-error \
+            -o /tmp/bb-media-segment.ts \
+            "http://127.0.0.1:5555/api/v1/playback/sessions/$transcode_session_id/hls/$segment_path"
+          test -s /tmp/bb-media-segment.ts
+          curl --fail --silent --show-error \
+            -X DELETE \
+            -H "authorization: Bearer $token" \
+            "$api_base/playback/sessions/$transcode_session_id" >/dev/null
           test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/libraries" | jq -r --arg id "$library_id" '.[] | select(.id == $id) | .paths[0].path')" = "/media/Film"
           curl --fail --silent --show-error \
             -X DELETE \

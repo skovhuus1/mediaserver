@@ -23,9 +23,6 @@ export function choosePlaybackMethod(input: {
   if (codecSupported && containerSupported && entitlements.allowDirectPlay) {
     return { allowed: true, method: 'direct_play', code: 'playback_method_selected', reason: 'Device supports codec and container' };
   }
-  if (codecSupported && entitlements.allowDirectStream) {
-    return { allowed: true, method: 'direct_stream', code: 'playback_method_selected', reason: 'Codec is supported and the container can be remuxed' };
-  }
   if (entitlements.allowVideoTranscode) {
     return { allowed: true, method: 'transcode', code: 'playback_method_selected', reason: 'A compatible stream must be transcoded' };
   }

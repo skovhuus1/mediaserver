@@ -6,10 +6,11 @@ import { StreamReservationService } from './stream-reservation.service';
 import { DirectStreamService } from './direct-stream.service';
 import { PlaybackHistoryController } from './playback-history.controller';
 import { PlaybackHistoryService } from './playback-history.service';
+import { TranscodeStreamService } from './transcode-stream.service';
 
 @Module({
   imports: [EntitlementsModule],
   controllers: [PlaybackController, PlaybackHistoryController],
-  providers: [PlaybackService, PlaybackHistoryService, StreamReservationService, DirectStreamService],
+  providers: [PlaybackService, PlaybackHistoryService, StreamReservationService, DirectStreamService, TranscodeStreamService],
 })
 export class PlaybackModule {}

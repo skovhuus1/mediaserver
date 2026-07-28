@@ -28,6 +28,14 @@ services:
       timeout: 5s
       retries: 10
 
+  transcode-init:
+    image: alpine:3.20
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 1000:1000 /transcode"]
+    volumes:
+      - transcode_data:/transcode
+
   api:
     build:
       context: .
@@ -39,6 +47,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       REDIS_URL: redis://redis:6379
       MEDIA_MOUNT_PATH: /media
+      TRANSCODE_PATH: /transcode
       BB_MEDIA_UPDATE_REPO_PATH: /workspace
     volumes:
       - .:/workspace
@@ -79,12 +88,40 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       REDIS_URL: redis://redis:6379
+      BB_MEDIA_WORKER_MODE: jobs
+      TRANSCODE_PATH: /transcode
     volumes:
       - ${MEDIA_PATH:-./media}:/media:ro
       - ${DOWNLOADS_PATH:-./downloads}:/downloads
       - transcode_data:/transcode
       - application_data:/app/data
     depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  transcoder:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      REDIS_URL: redis://redis:6379
+      BB_MEDIA_WORKER_MODE: transcode
+      TRANSCODE_PATH: /transcode
+    volumes:
+      - ${MEDIA_PATH:-./media}:/media:ro
+      - transcode_data:/transcode
+    depends_on:
+      transcode-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:

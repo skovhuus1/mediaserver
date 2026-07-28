@@ -38,4 +38,24 @@ describe('playback decision', () => {
       entitlements,
     })).toMatchObject({ allowed: false, code: 'transcode_required_but_forbidden' });
   });
+
+  it('selects transcode for a browser-incompatible codec when the plan permits it', () => {
+    expect(choosePlaybackMethod({
+      codec: 'hevc',
+      container: 'matroska',
+      supportedCodecs: ['h264'],
+      supportedContainers: ['mp4'],
+      entitlements: { ...entitlements, allowVideoTranscode: true },
+    })).toMatchObject({ allowed: true, method: 'transcode' });
+  });
+
+  it('does not claim direct-stream support before a remux pipeline exists', () => {
+    expect(choosePlaybackMethod({
+      codec: 'h264',
+      container: 'matroska',
+      supportedCodecs: ['h264'],
+      supportedContainers: ['mp4'],
+      entitlements,
+    })).toMatchObject({ allowed: false, code: 'transcode_required_but_forbidden' });
+  });
 });

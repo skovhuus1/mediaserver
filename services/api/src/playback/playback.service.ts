@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthorizePlaybackDto } from './playback.dto';
 import { choosePlaybackMethod } from './playback-decision';
 import { StreamReservationService } from './stream-reservation.service';
+import { TranscodeStreamService } from './transcode-stream.service';
 
 @Injectable()
 export class PlaybackService {
@@ -14,6 +15,7 @@ export class PlaybackService {
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementsService,
     private readonly reservations: StreamReservationService,
+    private readonly transcodeStream: TranscodeStreamService,
   ) {}
 
   async authorize(actor: AuthenticatedUser, dto: AuthorizePlaybackDto) {
@@ -65,13 +67,32 @@ export class PlaybackService {
         isCastSession: dto.isCastSession,
         maxConcurrentStreams: entitlement.effective.maxConcurrentStreams,
       });
+      if (decision.method === 'transcode') {
+        try {
+          await this.transcodeStream.enqueue(session.id, actor.accountId, {
+            maxVideoResolution: entitlement.effective.maxVideoResolution,
+            maxVideoBitrate: entitlement.effective.maxVideoBitrate,
+          });
+        } catch (error) {
+          await this.reservations.release(actor, session.id, 'transcode_queue_failed');
+          throw error;
+        }
+      }
       await this.audit(actor, dto, 'allowed', 'playback_authorized', { method: decision.method, sessionId: session.id });
+      const token = encodeURIComponent(session.streamToken);
+      const streamUrl = decision.method === 'transcode'
+        ? `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${token}`
+        : `/api/v1/playback/sessions/${session.id}/stream?token=${token}`;
       return {
         sessionId: session.id,
         logicalSessionId: session.logicalSessionId,
         method: decision.method,
         streamToken: session.streamToken,
-        streamUrl: `/api/v1/playback/sessions/${session.id}/stream?token=${encodeURIComponent(session.streamToken)}`,
+        streamUrl,
+        contentType: decision.method === 'transcode' ? 'application/vnd.apple.mpegurl' : this.directContentType(media.container),
+        ...(decision.method === 'transcode'
+          ? { transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?token=${token}` }
+          : {}),
         leaseExpiresAt: session.leaseExpiresAt,
         decision: { entitlement, playback: decision },
       };
@@ -85,6 +106,48 @@ export class PlaybackService {
       }
       throw error;
     }
+  }
+
+  async handoffToCast(actor: AuthenticatedUser, sessionId: string) {
+    const session = await this.prisma.playbackSession.findFirst({
+      where: {
+        id: sessionId,
+        accountId: actor.accountId,
+        ...(isPrivileged(actor) ? {} : { userId: actor.sub }),
+        status: { in: ['reserving', 'active', 'paused'] },
+        leaseExpiresAt: { gt: new Date() },
+      },
+    });
+    if (!session) throw new NotFoundException({ code: 'session_not_found', message: 'Playback session was not found or has expired' });
+    const entitlement = await this.entitlements.evaluate(actor, {
+      profileId: session.profileId,
+      mediaId: session.mediaId,
+      action: 'cast',
+      device: { deviceId: session.deviceId, supportedCodecs: [] },
+    });
+    if (!entitlement.allowed) {
+      throw new ForbiddenException({
+        code: entitlement.code,
+        message: entitlement.reasons[0] ?? 'Chromecast is not allowed by the active plan',
+      });
+    }
+    await this.prisma.playbackSession.update({
+      where: { id: session.id },
+      data: { isCastSession: true, lastHeartbeatAt: new Date() },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        accountId: actor.accountId,
+        userId: actor.sub,
+        profileId: session.profileId,
+        correlationId: correlationId(),
+        action: 'playback.cast_handoff',
+        outcome: 'allowed',
+        code: 'cast_handoff_accepted',
+        details: { sessionId: session.id, logicalSessionId: session.logicalSessionId, mediaId: session.mediaId },
+      },
+    });
+    return { accepted: true, sessionId: session.id, logicalSessionId: session.logicalSessionId };
   }
 
   list(actor: AuthenticatedUser) {
@@ -129,5 +192,11 @@ export class PlaybackService {
         details: { mediaId: dto.mediaId, deviceId: dto.deviceId, ...details },
       },
     });
+  }
+
+  private directContentType(container: string | null): string {
+    if (container === 'webm') return 'video/webm';
+    if (container === 'mov' || container === 'mp4') return 'video/mp4';
+    return 'application/octet-stream';
   }
 }

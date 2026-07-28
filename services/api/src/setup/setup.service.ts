@@ -15,7 +15,7 @@ const DEFAULT_ENTITLEMENTS = {
   maxVideoBitrate: 12_000,
   allowDirectPlay: true,
   allowDirectStream: true,
-  allowVideoTranscode: false,
+  allowVideoTranscode: true,
   allowAudioTranscode: true,
   allowSubtitleBurnIn: false,
   allowChromecast: true,

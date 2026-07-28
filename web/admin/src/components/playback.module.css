@@ -2,23 +2,43 @@
   position: fixed;
   inset: 0;
   z-index: 100;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  background:
-    radial-gradient(circle at 70% 0%, rgba(145, 84, 255, .18), transparent 38%),
-    linear-gradient(160deg, #07090d 0%, #10151b 60%, #080a0d 100%);
-  color: #f6f7fa;
+  overflow: hidden;
+  color: #f8f8fb;
+  background: #030405;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
 }
 
-.header {
-  display: flex;
+.overlay::after {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, .82) 0%, transparent 22%, transparent 56%, rgba(0, 0, 0, .94) 100%),
+    radial-gradient(circle at 50% 70%, transparent 25%, rgba(0, 0, 0, .38) 100%);
+  content: "";
+  pointer-events: none;
+}
+
+.video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.topBar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 20px;
-  padding: 18px 24px;
-  background: rgba(7, 9, 13, .78);
-  border-bottom: 1px solid rgba(255, 255, 255, .08);
-  backdrop-filter: blur(18px);
+  padding: 28px 34px;
 }
 
 .title {
@@ -32,71 +52,343 @@
 
 .title strong {
   overflow: hidden;
-  font-size: 17px;
+  font-size: clamp(20px, 2vw, 30px);
+  font-weight: 600;
+  letter-spacing: -.02em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .title small {
-  margin-top: 4px;
-  color: #9ca5b2;
-  font-size: 11px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+  margin-top: 5px;
+  color: rgba(255, 255, 255, .72);
+  font-size: 13px;
 }
 
-.close,
-.playButton,
-.episodeButton {
-  border: 1px solid rgba(255, 255, 255, .13);
-  color: #fff;
+.topActions,
+.transport,
+.optionControls {
+  display: flex;
+  align-items: center;
+}
+
+.topActions {
+  gap: 10px;
+}
+
+.iconButton,
+.transport button,
+.optionControls button,
+.controlLabel,
+.settingsPanel button {
+  border: 0;
+  color: inherit;
   cursor: pointer;
 }
 
-.close {
+.iconButton {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 48px;
+  height: 48px;
   place-items: center;
+  border: 1px solid rgba(255, 255, 255, .1);
   border-radius: 50%;
-  background: rgba(255, 255, 255, .07);
+  background: rgba(7, 7, 9, .67);
+  backdrop-filter: blur(16px);
 }
 
-.stage {
-  display: grid;
-  min-height: 0;
-  place-items: center;
-  padding: 16px;
-}
-
-.video {
-  width: 100%;
-  height: 100%;
-  max-height: calc(100vh - 150px);
-  outline: none;
-  background: #000;
+.iconButton:disabled,
+.transport button:disabled {
+  opacity: .28;
+  cursor: not-allowed;
 }
 
 .notice {
-  max-width: 620px;
-  padding: 26px;
-  border: 1px solid rgba(255, 255, 255, .09);
-  border-radius: 14px;
-  background: rgba(15, 19, 25, .9);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 5;
+  width: min(520px, calc(100vw - 40px));
+  padding: 30px;
+  border: 1px solid rgba(255, 255, 255, .11);
+  border-radius: 18px;
+  background: rgba(10, 12, 15, .9);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .5);
   text-align: center;
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(20px);
 }
 
-.notice p {
+.notice h2 {
+  margin: 12px 0 8px;
+}
+
+.notice p,
+.emptyMenu {
   color: #aeb6c2;
 }
 
-.footer {
-  min-height: 46px;
-  padding: 12px 24px;
-  color: #9ca5b2;
-  background: rgba(7, 9, 13, .82);
-  border-top: 1px solid rgba(255, 255, 255, .08);
-  font-size: 12px;
+.playbackBadge {
+  position: absolute;
+  top: 116px;
+  right: 34px;
+  z-index: 4;
+  min-width: 230px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 14px;
+  background: rgba(6, 7, 9, .76);
+  box-shadow: 0 20px 55px rgba(0, 0, 0, .35);
+  backdrop-filter: blur(18px);
+}
+
+.playbackBadge span,
+.playbackBadge strong,
+.playbackBadge small {
+  display: block;
+}
+
+.playbackBadge span {
+  margin-bottom: 13px;
+  color: #a669ff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.playbackBadge strong {
+  color: #65df7a;
+  font-size: 15px;
+}
+
+.playbackBadge small {
+  margin-top: 5px;
+  color: #a8adb5;
+}
+
+.controls {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  padding: 18px 34px 24px;
+}
+
+.timeline {
+  display: grid;
+  grid-template-columns: 70px 1fr 70px;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline span:last-child {
+  text-align: right;
+}
+
+.timeline input,
+.volume input {
+  height: 4px;
+  accent-color: #9d51ed;
+  cursor: pointer;
+}
+
+.controlRow {
+  display: grid;
+  grid-template-columns: minmax(165px, 1fr) auto minmax(390px, 1fr);
+  align-items: center;
+  gap: 20px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(255, 255, 255, .18);
+}
+
+.controlLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 11px;
+  padding: 10px;
+  background: transparent;
+  font-weight: 600;
+}
+
+.transport {
+  gap: 12px;
+}
+
+.transport button {
+  position: relative;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  background: transparent;
+}
+
+.transport button small {
+  position: absolute;
+  top: 17px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.transport .primaryControl {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ad63ff, #7131ca);
+  box-shadow: 0 12px 35px rgba(123, 55, 210, .4);
+}
+
+.primaryControl svg {
+  width: 29px;
+  height: 29px;
+}
+
+.optionControls {
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.optionControls button {
+  display: grid;
+  min-width: 70px;
+  min-height: 58px;
+  place-items: center;
+  gap: 3px;
+  padding: 5px 8px;
+  background: transparent;
+}
+
+.optionControls button small {
+  position: absolute;
+  margin-top: -25px;
+  margin-left: 42px;
+  color: #c18aff;
+  font-size: 10px;
+}
+
+.optionControls button span {
+  color: rgba(255, 255, 255, .72);
+  font-size: 10px;
+}
+
+.optionControls button:hover,
+.controlLabel:hover,
+.transport button:hover:not(:disabled),
+.iconButton:hover:not(:disabled) {
+  color: #bd82ff;
+}
+
+.volume {
+  position: absolute;
+  right: 38px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: .78;
+}
+
+.volume input {
+  width: 90px;
+}
+
+.settingsPanel {
+  position: absolute;
+  right: 36px;
+  bottom: 132px;
+  z-index: 6;
+  width: min(370px, calc(100vw - 40px));
+  max-height: min(480px, calc(100vh - 260px));
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 16px;
+  background: rgba(10, 12, 15, .94);
+  box-shadow: 0 25px 70px rgba(0, 0, 0, .55);
+  backdrop-filter: blur(22px);
+}
+
+.settingsPanel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 8px 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  color: #bd82ff;
+}
+
+.settingsPanel header button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  background: transparent;
+}
+
+.menuRow {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 10px;
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, .06) !important;
+  text-align: left;
+}
+
+.menuRow:hover {
+  background: rgba(255, 255, 255, .045);
+}
+
+.menuRow span {
+  flex: 1;
+}
+
+.menuRow strong,
+.menuRow small {
+  display: block;
+}
+
+.menuRow small {
+  margin-top: 3px;
+  color: #9299a3;
+}
+
+.menuRow > svg:last-child {
+  color: #a65df5;
+}
+
+.emptyMenu {
+  padding: 20px 10px;
+  line-height: 1.5;
+}
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 0;
+  margin: 0;
+}
+
+.infoGrid dt,
+.infoGrid dd {
+  margin: 0;
+  padding: 11px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+}
+
+.infoGrid dt {
+  color: #9299a3;
+}
+
+.infoGrid dd {
+  overflow-wrap: anywhere;
 }
 
 .playButton {
@@ -105,8 +397,11 @@
   gap: 8px;
   margin: 8px 0 14px;
   padding: 11px 18px;
+  border: 1px solid rgba(255, 255, 255, .13);
   border-radius: 7px;
+  color: #fff;
   background: linear-gradient(135deg, #9b55f6, #6b35c4);
+  cursor: pointer;
   font-weight: 700;
 }
 
@@ -117,7 +412,10 @@
   align-items: center;
   gap: 12px;
   padding: 12px;
+  border: 1px solid rgba(255, 255, 255, .13);
+  color: #fff;
   background: rgba(255, 255, 255, .035);
+  cursor: pointer;
   text-align: left;
 }
 
@@ -184,13 +482,91 @@
   background: linear-gradient(90deg, #9c55f5, #c179ff);
 }
 
-@media (max-width: 900px) {
-  .continueRow {
-    grid-template-columns: repeat(2, minmax(150px, 1fr));
+@media (max-width: 1050px) {
+  .controlRow {
+    grid-template-columns: auto 1fr;
   }
 
-  .header,
-  .footer {
-    padding-inline: 14px;
+  .controlLabel {
+    display: none;
+  }
+
+  .transport {
+    justify-self: start;
+  }
+
+  .optionControls {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .playbackBadge {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .topBar {
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .topActions .iconButton:nth-child(2) {
+    display: none;
+  }
+
+  .iconButton {
+    width: 42px;
+    height: 42px;
+  }
+
+  .controls {
+    padding: 12px 14px 18px;
+  }
+
+  .timeline {
+    grid-template-columns: 52px 1fr 52px;
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .controlRow {
+    display: block;
+  }
+
+  .transport {
+    justify-content: center;
+  }
+
+  .transport button:first-child,
+  .transport button:last-child {
+    display: none;
+  }
+
+  .optionControls {
+    justify-content: center;
+    margin-top: 8px;
+  }
+
+  .optionControls button {
+    min-width: 55px;
+  }
+
+  .optionControls button:last-child,
+  .optionControls button span {
+    display: none;
+  }
+
+  .volume {
+    display: none;
+  }
+
+  .settingsPanel {
+    right: 14px;
+    bottom: 142px;
+  }
+
+  .continueRow {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
   }
 }

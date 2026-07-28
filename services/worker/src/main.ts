@@ -1,17 +1,19 @@
 import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
 import { classifyMediaPath } from '@boltbytes/contracts';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readdir, realpath, stat } from 'node:fs/promises';
-import { extname, isAbsolute, posix, relative, sep } from 'node:path';
+import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { enrichLibraryMetadata, hasTmdbConfiguration } from './metadata.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
-const workerId = `worker-${randomUUID()}`;
+const workerMode = process.env.BB_MEDIA_WORKER_MODE === 'transcode' ? 'transcode' : 'jobs';
+const workerId = `${workerMode}-${randomUUID()}`;
 const pollIntervalMs = 2_000;
 const leaseMs = 60_000;
+const transcodeRoot = resolve(process.env.TRANSCODE_PATH?.trim() || '/transcode');
 
 function legacyLibraryPathCandidate(rootPath: string, configuredPath: string): string | null {
   const root = posix.resolve('/', rootPath);
@@ -72,6 +74,9 @@ const mediaExtensions = new Set(['.avi', '.m2ts', '.m4v', '.mkv', '.mov', '.mp4'
 
 async function claimNextJob(): Promise<ClaimedJob | null> {
   return prisma.$transaction(async (tx) => {
+    const typeFilter = workerMode === 'transcode'
+      ? Prisma.sql`type = 'playback.transcode'`
+      : Prisma.sql`type <> 'playback.transcode'`;
     const rows = await tx.$queryRaw<SystemJob[]>`
       SELECT
         id,
@@ -93,6 +98,7 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
           status = 'queued'
           OR (status = 'running' AND lease_expires_at <= NOW())
         )
+        AND ${typeFilter}
         AND available_at <= NOW()
         AND attempt_count < max_attempts
       ORDER BY available_at ASC, created_at ASC
@@ -129,6 +135,9 @@ async function processJob(job: ClaimedJob): Promise<void> {
       return;
     case 'media.metadata':
       await enrichMetadata(job);
+      return;
+    case 'playback.transcode':
+      await transcodePlayback(job);
       return;
     case 'playback.expire-leases':
       await expirePlaybackLeases();
@@ -279,6 +288,122 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
     });
     throw error;
   }
+}
+
+async function transcodePlayback(job: ClaimedJob): Promise<void> {
+  const payload = asJsonObject(job.payload);
+  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : null;
+  if (!sessionId) throw new Error('playback.transcode payload requires sessionId');
+  const session = await prisma.playbackSession.findFirst({
+    where: { id: sessionId, accountId: job.accountId },
+    include: {
+      media: {
+        include: {
+          file: { include: { storageRoot: true } },
+        },
+      },
+    },
+  });
+  if (!session || session.method !== 'transcode') throw new Error('Transcode playback session was not found');
+  if (!['reserving', 'active', 'paused'].includes(session.status) || session.leaseExpiresAt <= new Date()) return;
+  const file = session.media.file;
+  if (!file || file.status !== 'ready') throw new Error('Transcode source file is unavailable');
+
+  const mediaRoot = await realpath(file.storageRoot.mountPath);
+  const inputPath = await realpath(resolve(mediaRoot, ...file.relativePath.split('/')));
+  if (!isWithin(mediaRoot, inputPath)) throw new Error('Transcode source escapes its storage root');
+
+  await mkdir(transcodeRoot, { recursive: true });
+  const outputPath = resolve(transcodeRoot, session.id);
+  if (!isWithin(transcodeRoot, outputPath)) throw new Error('Transcode output escapes its storage root');
+  await rm(outputPath, { recursive: true, force: true });
+  await mkdir(outputPath, { recursive: true });
+
+  const resolution = Math.max(240, Math.min(2160, finiteInteger(payload.maxVideoResolution) ?? 1080));
+  const bitrateKbps = Math.max(500, Math.min(50_000, finiteInteger(payload.maxVideoBitrate) ?? 8_000));
+  const cancelled = await runFfmpeg(job.id, session.id, [
+    '-hide_banner',
+    '-loglevel', 'warning',
+    '-nostdin',
+    '-y',
+    '-i', inputPath,
+    '-map', '0:v:0',
+    '-map', '0:a:0?',
+    '-vf', `scale=w=-2:h=trunc(min(ih\\,${resolution})/2)*2`,
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '22',
+    '-pix_fmt', 'yuv420p',
+    '-maxrate', `${bitrateKbps}k`,
+    '-bufsize', `${bitrateKbps * 2}k`,
+    '-c:a', 'aac',
+    '-b:a', '160k',
+    '-ac', '2',
+    '-force_key_frames', 'expr:gte(t,n_forced*4)',
+    '-f', 'hls',
+    '-hls_time', '4',
+    '-hls_list_size', '0',
+    '-hls_playlist_type', 'event',
+    '-hls_flags', 'independent_segments+temp_file',
+    '-hls_segment_filename', resolve(outputPath, 'segment%05d.ts'),
+    resolve(outputPath, 'master.m3u8'),
+  ]);
+  if (cancelled) await rm(outputPath, { recursive: true, force: true });
+}
+
+async function runFfmpeg(jobId: string, sessionId: string, args: string[]): Promise<boolean> {
+  return new Promise<boolean>((resolveProcess, rejectProcess) => {
+    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    let cancelled = false;
+    let leaseFailure: Error | null = null;
+    let checking = false;
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      stderr = `${stderr}${chunk}`.slice(-8_000);
+    });
+    const timer = setInterval(() => {
+      if (checking) return;
+      checking = true;
+      void Promise.all([
+        renewJobLease(jobId),
+        prisma.playbackSession.findUnique({
+          where: { id: sessionId },
+          select: { status: true, leaseExpiresAt: true },
+        }),
+      ]).then(([, session]) => {
+        if (!session || !['reserving', 'active', 'paused'].includes(session.status) || session.leaseExpiresAt <= new Date()) {
+          cancelled = true;
+          child.kill('SIGTERM');
+        }
+      }).catch((error: unknown) => {
+        leaseFailure = error instanceof Error ? error : new Error('Unable to renew transcode lease');
+        child.kill('SIGTERM');
+      }).finally(() => {
+        checking = false;
+      });
+    }, 10_000);
+    child.once('error', (error) => {
+      clearInterval(timer);
+      rejectProcess(error);
+    });
+    child.once('close', (code) => {
+      clearInterval(timer);
+      if (leaseFailure) {
+        rejectProcess(leaseFailure);
+        return;
+      }
+      if (cancelled) {
+        resolveProcess(true);
+        return;
+      }
+      if (code !== 0) {
+        rejectProcess(new Error(`FFmpeg exited with code ${code}: ${stderr.trim() || 'no diagnostic output'}`));
+        return;
+      }
+      resolveProcess(false);
+    });
+  });
 }
 
 async function enrichMetadata(job: ClaimedJob): Promise<void> {
@@ -459,7 +584,7 @@ function isWithin(root: string, candidate: string): boolean {
 
 async function expirePlaybackLeases(): Promise<number> {
   const now = new Date();
-  return prisma.$transaction(async (tx) => {
+  const expired = await prisma.$transaction(async (tx) => {
     const sessions = await tx.playbackSession.findMany({
       where: {
         status: { in: ['reserving', 'active', 'paused'] },
@@ -479,6 +604,16 @@ async function expirePlaybackLeases(): Promise<number> {
     });
     return ids.length;
   });
+  const finished = await prisma.playbackSession.findMany({
+    where: {
+      method: 'transcode',
+      status: { notIn: ['reserving', 'active', 'paused'] },
+      endedAt: { lte: new Date(Date.now() - 5 * 60_000) },
+    },
+    select: { id: true },
+  });
+  await Promise.all(finished.map(({ id }) => rm(resolve(transcodeRoot, id), { recursive: true, force: true })));
+  return expired;
 }
 
 async function finishJob(job: ClaimedJob): Promise<void> {
@@ -550,8 +685,8 @@ async function rescheduleRecurringJob(job: ClaimedJob): Promise<void> {
 
 async function loop(): Promise<void> {
   await prisma.$connect();
-  await ensureRecurringLeaseJob();
-  console.info(JSON.stringify({ level: 'info', component: 'worker', workerId, message: 'Worker started' }));
+  if (workerMode === 'jobs') await ensureRecurringLeaseJob();
+  console.info(JSON.stringify({ level: 'info', component: 'worker', workerId, workerMode, message: 'Worker started' }));
   while (!stopping) {
     const job = await claimNextJob();
     if (!job) {
