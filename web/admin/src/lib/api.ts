@@ -5,8 +5,24 @@ export type ApiFailure = {
   details?: unknown;
 };
 
+type TokenPair = {
+  accessToken: string;
+  refreshToken: string;
+};
+
+type RefreshOutcome =
+  | { status: 'refreshed' }
+  | { status: 'invalid'; failure: ApiFailure }
+  | { status: 'unavailable'; failure: ApiFailure };
+
+let refreshRequest: Promise<RefreshOutcome> | null = null;
+
 export function accessToken(): string | null {
   return typeof window === 'undefined' ? null : window.localStorage.getItem('bb_access_token');
+}
+
+function refreshToken(): string | null {
+  return typeof window === 'undefined' ? null : window.localStorage.getItem('bb_refresh_token');
 }
 
 export function saveSession(access: string, refresh: string): void {
@@ -41,17 +57,80 @@ export function deviceFingerprint(): string {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}, authenticated = true): Promise<T> {
-  const token = accessToken();
-  const response = await fetch(`/api/v1${path}`, {
+  const response = await request(path, init, authenticated ? accessToken() : null);
+  if (authenticated && response.status === 401) {
+    const outcome = await refreshSession();
+    if (outcome.status === 'refreshed') {
+      return parseResponse<T>(await request(path, init, accessToken()));
+    }
+    if (outcome.status === 'invalid' && typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.assign('/login?session=expired');
+    }
+    throw outcome.failure;
+  }
+  return parseResponse<T>(response);
+}
+
+function request(path: string, init: RequestInit, token: string | null): Promise<Response> {
+  return fetch(`/api/v1${path}`, {
     ...init,
     cache: 'no-store',
     headers: {
       'content-type': 'application/json',
-      ...(authenticated && token ? { authorization: `Bearer ${token}` } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...init.headers,
     },
   });
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({ code: 'invalid_response', message: `HTTP ${response.status}` })) as T | ApiFailure;
   if (!response.ok) throw body;
   return body as T;
+}
+
+function refreshSession(): Promise<RefreshOutcome> {
+  if (refreshRequest) return refreshRequest;
+  refreshRequest = performRefresh().finally(() => {
+    refreshRequest = null;
+  });
+  return refreshRequest;
+}
+
+async function performRefresh(): Promise<RefreshOutcome> {
+  const currentRefreshToken = refreshToken();
+  if (!currentRefreshToken) {
+    const failure = { code: 'refresh_token_missing', message: 'Sessionen er udløbet. Log ind igen.' };
+    clearSession();
+    return { status: 'invalid', failure };
+  }
+  let response: Response;
+  try {
+    response = await fetch('/api/v1/auth/refresh', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refreshToken: currentRefreshToken }),
+    });
+  } catch {
+    return {
+      status: 'unavailable',
+      failure: { code: 'refresh_unavailable', message: 'Serveren er midlertidigt utilgængelig. Prøv igen om et øjeblik.' },
+    };
+  }
+  const body = await response.json().catch(() => ({
+    code: 'invalid_response',
+    message: `HTTP ${response.status}`,
+  })) as TokenPair | ApiFailure;
+  if (response.ok) {
+    const tokens = body as TokenPair;
+    saveSession(tokens.accessToken, tokens.refreshToken);
+    return { status: 'refreshed' };
+  }
+  const failure = body as ApiFailure;
+  if (response.status === 400 || response.status === 401) {
+    clearSession();
+    return { status: 'invalid', failure };
+  }
+  return { status: 'unavailable', failure };
 }
