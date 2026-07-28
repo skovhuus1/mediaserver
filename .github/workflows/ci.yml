@@ -135,6 +135,13 @@ jobs:
             "$api_base/libraries")"
           library_id="$(jq -er '.id' <<<"$library")"
           library_path_id="$(jq -er '.paths[0].id' <<<"$library")"
+          library="$(curl --fail --silent --show-error \
+            -X PATCH \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d "{\"storageRootId\":\"$root_id\",\"name\":\"CI Film Edited\",\"type\":\"movie\",\"path\":\"/media/Film\",\"recursive\":true}" \
+            "$api_base/libraries/$library_id")"
+          test "$(jq -r '.name' <<<"$library")" = "CI Film Edited"
           postgres_user="$(grep '^POSTGRES_USER=' .env | cut -d= -f2-)"
           postgres_db="$(grep '^POSTGRES_DB=' .env | cut -d= -f2-)"
           docker compose exec -T postgres psql \
@@ -160,3 +167,8 @@ jobs:
           test "$(jq -r '.[0].filesSeen' <<<"$scans")" -ge 1
           test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/media" | jq 'length')" -ge 1
           test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/libraries" | jq -r --arg id "$library_id" '.[] | select(.id == $id) | .paths[0].path')" = "/media/Film"
+          curl --fail --silent --show-error \
+            -X DELETE \
+            -H "authorization: Bearer $token" \
+            "$api_base/libraries/$library_id" >/dev/null
+          test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/libraries" | jq 'length')" -eq 0
