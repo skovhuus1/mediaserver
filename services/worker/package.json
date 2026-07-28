@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@boltbytes/contracts": "file:../../shared/contracts",
     "@prisma/client": "5.22.0"
   },
   "devDependencies": {

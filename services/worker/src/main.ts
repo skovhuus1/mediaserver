@@ -1,8 +1,9 @@
 import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
+import { classifyMediaPath } from '@boltbytes/contracts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readdir, realpath, stat } from 'node:fs/promises';
-import { basename, extname, isAbsolute, posix, relative, sep } from 'node:path';
+import { extname, isAbsolute, posix, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const prisma = new PrismaClient();
@@ -187,6 +188,7 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
             return;
           }
           const relativePath = relative(rootPath, resolvedPath).split(sep).join('/');
+          const libraryRelativePath = relative(libraryPath, resolvedPath).split(sep).join('/');
           if (discovered.has(relativePath)) return;
           discovered.add(relativePath);
           filesSeen += 1;
@@ -205,6 +207,7 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
             scanId: scan.id,
             absolutePath: resolvedPath,
             relativePath,
+            libraryRelativePath,
             sizeBytes: fileStat.size,
             modifiedAt: fileStat.mtime,
             probe,
@@ -261,6 +264,7 @@ async function upsertScannedFile(input: {
   scanId: string;
   absolutePath: string;
   relativePath: string;
+  libraryRelativePath: string;
   sizeBytes: number;
   modifiedAt: Date;
   probe: ProbeMetadata | null;
@@ -268,8 +272,8 @@ async function upsertScannedFile(input: {
   const existing = await prisma.mediaFile.findUnique({
     where: { libraryId_relativePath: { libraryId: input.libraryId, relativePath: input.relativePath } },
   });
-  const title = basename(input.absolutePath, extname(input.absolutePath)).replace(/[._]+/g, ' ').trim();
-  const mediaType: MediaType = input.libraryType === 'series' ? 'episode' : 'movie';
+  const classification = classifyMediaPath(input.libraryType, input.libraryRelativePath);
+  const mediaType: MediaType = classification.type;
   const fileData = {
     accountId: input.accountId,
     libraryId: input.libraryId,
@@ -289,8 +293,13 @@ async function upsertScannedFile(input: {
     lastSeenScanId: input.scanId,
   };
   const mediaData = {
-    title: title || 'Untitled media',
+    title: classification.title,
     type: mediaType,
+    category: classification.category,
+    seriesTitle: classification.seriesTitle,
+    seasonNumber: classification.seasonNumber,
+    episodeNumber: classification.episodeNumber,
+    releaseYear: classification.releaseYear,
     codec: input.probe?.videoCodec ?? null,
     container: input.probe?.container ?? null,
     bitrate: input.probe?.bitrate ?? null,

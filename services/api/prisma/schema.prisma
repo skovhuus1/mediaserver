@@ -411,6 +411,11 @@ model MediaItem {
   bitrate              Int?
   width                Int?
   height               Int?
+  category             String?
+  seriesTitle          String?           @map("series_title")
+  seasonNumber         Int?              @map("season_number")
+  episodeNumber        Int?              @map("episode_number")
+  releaseYear          Int?              @map("release_year")
   releaseDate          DateTime?         @map("release_date")
   availabilityOverride DateTime?         @map("availability_override")
   createdAt            DateTime          @default(now()) @map("created_at")
@@ -422,6 +427,8 @@ model MediaItem {
   playbackHistory      PlaybackHistory[]
 
   @@index([accountId, type])
+  @@index([accountId, category])
+  @@index([accountId, seriesTitle, seasonNumber])
   @@map("media_items")
 }
 

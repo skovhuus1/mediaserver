@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export * from './media-classification.js';
 
 export const entitlementActionSchema = z.enum(['playback', 'cast', 'offline_download']);
 export type EntitlementAction = z.infer<typeof entitlementActionSchema>;

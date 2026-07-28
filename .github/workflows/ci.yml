@@ -104,7 +104,7 @@ jobs:
             -f lavfi -i color=c=black:s=320x240:d=1 \
             -f lavfi -i anullsrc=r=48000:cl=stereo \
             -shortest -c:v libx264 -c:a aac \
-            /ci-media/ci-smoke.mp4
+            "/ci-media/CI Smoke (2026).mp4"
 
           docker compose up --detach --wait --wait-timeout 180
           sleep 5
@@ -166,6 +166,11 @@ jobs:
           fi
           test "$(jq -r '.[0].filesSeen' <<<"$scans")" -ge 1
           test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/media" | jq 'length')" -ge 1
+          media="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/media")"
+          test "$(jq -r '.[0].title' <<<"$media")" = "CI Smoke"
+          test "$(jq -r '.[0].type' <<<"$media")" = "movie"
+          test "$(jq -r '.[0].category' <<<"$media")" = "Action"
+          test "$(jq -r '.[0].releaseYear' <<<"$media")" -eq 2026
           test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/libraries" | jq -r --arg id "$library_id" '.[] | select(.id == $id) | .paths[0].path')" = "/media/Film"
           curl --fail --silent --show-error \
             -X DELETE \
