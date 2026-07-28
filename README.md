@@ -119,6 +119,8 @@ CI afspiller endnu ikke en stor fil gennem nginx eller tester host-specifikke mo
 
 Container-gaten starter desuden hele Compose-stakken efter image-build, venter på API-health, kontrollerer at worker-processen forbliver kørende og kalder health-endpointet gennem nginx. Det beskytter mod runtime-fejl, som et isoleret `docker compose build` ikke kan opdage, herunder en manglende genereret Prisma-klient.
 
+Eksisterende biblioteker fra den tidligere path-policy repareres automatisk ved scanning, når en gemt sti har det kendte dobbelte storage-root-mønster (for eksempel `/media/media/Film`). Reparationen udføres kun, hvis den oprindelige sti mangler, den korrigerede sti findes, og dens `realpath` fortsat er under det konfigurerede storage root. CI fremprovokerer legacy-formatet og kræver både vellykket import og permanent databaseheling.
+
 ## Ikke implementeret endnu
 
 - Automatisk oprettelse og klassifikation af film-/seriebiblioteker samt mappebaserede kategorier som Action og Drama.
