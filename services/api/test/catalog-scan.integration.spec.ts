@@ -64,4 +64,46 @@ describe('library scan queue concurrency', () => {
     expect(await prisma.libraryScan.count({ where: { libraryId: library.id } })).toBe(1);
     expect(await prisma.systemJob.count({ where: { accountId, type: 'library.scan' } })).toBe(1);
   });
+
+  it('searches, filters and groups account-scoped catalog entries', async () => {
+    const account = await prisma.account.create({ data: { name: `catalog-test-${Date.now()}` } });
+    accountId = account.id;
+    const user = await prisma.user.create({
+      data: {
+        accountId,
+        email: `catalog-${Date.now()}@example.test`,
+        displayName: 'Catalog',
+        passwordHash: 'unused',
+      },
+    });
+    const root = await prisma.storageRoot.create({
+      data: { accountId, label: 'catalog-test', mountPath: '/media' },
+    });
+    const library = await prisma.library.create({
+      data: { accountId, storageRootId: root.id, name: 'Catalog', type: 'mixed' },
+    });
+    await prisma.mediaItem.createMany({
+      data: [
+        { accountId, libraryId: library.id, title: 'Arrival', type: 'movie', category: 'Drama', releaseYear: 2016 },
+        { accountId, libraryId: library.id, title: 'Pilot', type: 'episode', category: 'Drama', seriesTitle: 'Foundation', seasonNumber: 1, episodeNumber: 1 },
+        { accountId, libraryId: library.id, title: 'The Mathematician', type: 'episode', category: 'Drama', seriesTitle: 'Foundation', seasonNumber: 1, episodeNumber: 2 },
+      ],
+    });
+    const actor: AuthenticatedUser = {
+      sub: user.id,
+      accountId,
+      profileId: null,
+      deviceId: null,
+      roles: ['admin'],
+    };
+
+    const movies = await catalog.listCatalog(actor, { q: 'arrival', type: 'movie', page: 1, pageSize: 10, sort: 'title' });
+    expect(movies.total).toBe(1);
+    expect(movies.items[0]).toMatchObject({ title: 'Arrival', category: 'Drama', releaseYear: 2016 });
+    const series = await catalog.listCatalog(actor, { type: 'series', page: 1, pageSize: 10, sort: 'title' });
+    expect(series.total).toBe(1);
+    expect(series.items[0]).toMatchObject({ title: 'Foundation', type: 'series', episodeCount: 2 });
+    const detail = await catalog.getMedia(actor, movies.items[0]!.id);
+    expect(detail).toMatchObject({ title: 'Arrival', library: { id: library.id, name: 'Catalog' } });
+  });
 });

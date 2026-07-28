@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { api, clearSession } from '@/lib/api';
 import { t } from '@/lib/messages';
 import { AppShell } from './app-shell';
+import { CatalogView } from './catalog-view';
 import { ManagementView } from './management-view';
 
 type Media = { id: string; title: string; type: string; codec: string | null; container: string | null };
@@ -74,6 +75,14 @@ export function Dashboard() {
   const query = (searchParams.get('q') ?? '').trim().toLocaleLowerCase('da');
   const requestedType = searchParams.get('type');
   const adminView = searchParams.get('admin');
+  const catalogMode = Boolean(
+    searchParams.get('q') ||
+    requestedType ||
+    searchParams.get('category') ||
+    searchParams.get('libraryId') ||
+    searchParams.get('media') ||
+    searchParams.get('view') === 'catalog'
+  );
   const visibleMedia = media.filter((item) =>
     (!query || item.title.toLocaleLowerCase('da').includes(query)) &&
     (requestedType === 'movie' ? item.type === 'movie' : requestedType === 'series' ? ['series', 'season', 'episode'].includes(item.type) : true)
@@ -98,7 +107,7 @@ export function Dashboard() {
 
   return (
     <AppShell rail={<StatusRail health={health} sessions={sessions} mediaCount={media.length} libraries={libraries} scanPending={scanPending} scanMessage={scanMessage} onScan={queueScan} />}>
-      {adminView ? <ManagementView view={adminView} /> : (
+      {adminView ? <ManagementView view={adminView} /> : catalogMode ? <CatalogView /> : (
       <>
       <section className="hero-line">
         <div><span className="eyebrow">CONTROL PLANE</span><h1>{requestedType === 'movie' ? 'Film' : requestedType === 'series' ? 'Serier' : query ? `Søgning: ${searchParams.get('q')}` : 'Dit mediebibliotek'}</h1><p>Rigtig server-state, ingen demodata.</p></div>
@@ -107,8 +116,8 @@ export function Dashboard() {
       {loading ? <LoadingGrid /> : (
         <>
           <MediaSection title={t.continueWatching} items={[]} emptyLabel={t.noSessions} wide />
-          <MediaSection title="Nyeste film" items={movies} emptyLabel={t.noMedia} />
-          <MediaSection title="Nyeste serier" items={series} emptyLabel={t.noMedia} />
+          <MediaSection title="Nyeste film" items={movies} emptyLabel={t.noMedia} onSeeAll={() => router.push('/?type=movie')} />
+          <MediaSection title="Nyeste serier" items={series} emptyLabel={t.noMedia} onSeeAll={() => router.push('/?type=series')} />
           {!media.length && (
             <div className="empty-library">
               <span className="empty-orbit"><Database size={28} /></span>
@@ -127,7 +136,7 @@ export function Dashboard() {
   );
 }
 
-function MediaSection({ title, items, emptyLabel, wide = false }: { title: string; items: Media[]; emptyLabel: string; wide?: boolean }) {
+function MediaSection({ title, items, emptyLabel, wide = false, onSeeAll }: { title: string; items: Media[]; emptyLabel: string; wide?: boolean; onSeeAll?: () => void }) {
   if (!items.length) return (
     <section className="media-section compact-empty">
       <div className="section-heading"><h2>{title}</h2></div>
@@ -136,7 +145,7 @@ function MediaSection({ title, items, emptyLabel, wide = false }: { title: strin
   );
   return (
     <section className="media-section">
-      <div className="section-heading"><h2>{title}</h2><button>Se alle</button></div>
+      <div className="section-heading"><h2>{title}</h2>{onSeeAll && <button onClick={onSeeAll}>Se alle</button>}</div>
       <div className={wide ? 'media-grid wide' : 'media-grid'}>
         {items.slice(0, wide ? 4 : 6).map((item, index) => (
           <article className="media-card" key={item.id}>

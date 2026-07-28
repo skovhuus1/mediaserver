@@ -5,7 +5,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
-import { BrowseLibraryDirectoriesDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
+import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
 
 @Injectable()
@@ -168,6 +168,136 @@ export class CatalogService {
     }));
   }
 
+  async listCatalog(actor: AuthenticatedUser, query: CatalogQueryDto) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 24;
+    const where = this.catalogWhere(actor, query);
+    const [categories, libraries] = await this.prisma.$transaction([
+      this.prisma.mediaItem.findMany({
+        where: { accountId: actor.accountId, category: { not: null } },
+        distinct: ['category'],
+        select: { category: true },
+        orderBy: { category: 'asc' },
+      }),
+      this.prisma.library.findMany({
+        where: { accountId: actor.accountId },
+        select: { id: true, name: true, type: true },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+    const facets = {
+      categories: categories.flatMap(({ category }) => category ? [category] : []),
+      libraries,
+    };
+
+    if (query.type === 'series') {
+      const orderBy: Prisma.MediaItemOrderByWithAggregationInput =
+        query.sort === 'title'
+          ? { seriesTitle: 'asc' }
+          : query.sort === 'year'
+            ? { _max: { releaseYear: 'desc' } }
+            : { _max: { updatedAt: 'desc' } };
+      const [groups, allGroups] = await this.prisma.$transaction([
+        this.prisma.mediaItem.groupBy({
+          by: ['seriesTitle'],
+          where,
+          _count: { _all: true },
+          _max: {
+            id: true,
+            category: true,
+            releaseYear: true,
+            seasonNumber: true,
+            episodeNumber: true,
+            updatedAt: true,
+          },
+          orderBy,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        this.prisma.mediaItem.findMany({
+          where,
+          distinct: ['seriesTitle'],
+          select: { seriesTitle: true },
+        }),
+      ]);
+      const total = allGroups.length;
+      return {
+        items: groups.flatMap((group) => {
+          const maximums = group._max;
+          const counts = group._count;
+          if (!group.seriesTitle || !maximums?.id || typeof counts !== 'object') return [];
+          return [{
+            id: maximums.id,
+            title: group.seriesTitle,
+            type: 'series',
+            seriesTitle: group.seriesTitle,
+            category: maximums.category,
+            releaseYear: maximums.releaseYear,
+            seasonNumber: maximums.seasonNumber,
+            episodeNumber: maximums.episodeNumber,
+            episodeCount: counts._all ?? 0,
+            updatedAt: maximums.updatedAt,
+          }];
+        }),
+        page,
+        pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / pageSize)),
+        facets,
+      };
+    }
+
+    const orderBy: Prisma.MediaItemOrderByWithRelationInput[] =
+      query.sort === 'title'
+        ? [{ title: 'asc' }]
+        : query.sort === 'year'
+          ? [{ releaseYear: 'desc' }, { title: 'asc' }]
+          : [{ updatedAt: 'desc' }];
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.mediaItem.findMany({
+        where,
+        include: {
+          library: { select: { id: true, name: true, type: true } },
+          file: {
+            select: {
+              id: true,
+              relativePath: true,
+              sizeBytes: true,
+              status: true,
+              durationMs: true,
+              videoCodec: true,
+              audioCodec: true,
+            },
+          },
+        },
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.mediaItem.count({ where }),
+    ]);
+    return {
+      items: items.map((item) => this.serializeMedia(item)),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      facets,
+    };
+  }
+
+  async getMedia(actor: AuthenticatedUser, mediaId: string) {
+    const item = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      include: {
+        library: { select: { id: true, name: true, type: true } },
+        file: true,
+      },
+    });
+    if (!item) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+    return this.serializeMedia(item);
+  }
+
   listScans(actor: AuthenticatedUser, libraryId: string) {
     return this.prisma.libraryScan.findMany({
       where: { accountId: actor.accountId, libraryId },
@@ -243,6 +373,38 @@ export class CatalogService {
         details: { scanId: active.id, status: active.status },
       });
     }
+  }
+
+  private catalogWhere(actor: AuthenticatedUser, query: CatalogQueryDto): Prisma.MediaItemWhereInput {
+    const where: Prisma.MediaItemWhereInput = {
+      accountId: actor.accountId,
+      ...(query.libraryId ? { libraryId: query.libraryId } : {}),
+      ...(query.category ? { category: { equals: query.category, mode: 'insensitive' } } : {}),
+      ...(query.seriesTitle ? { seriesTitle: { equals: query.seriesTitle, mode: 'insensitive' } } : {}),
+      ...(query.q ? {
+        OR: [
+          { title: { contains: query.q, mode: 'insensitive' } },
+          { seriesTitle: { contains: query.q, mode: 'insensitive' } },
+          { category: { contains: query.q, mode: 'insensitive' } },
+        ],
+      } : {}),
+    };
+    if (query.type === 'series') {
+      where.type = 'episode';
+      where.seriesTitle = query.seriesTitle
+        ? { equals: query.seriesTitle, mode: 'insensitive' }
+        : { not: null };
+    } else if (query.type) {
+      where.type = query.type;
+    }
+    return where;
+  }
+
+  private serializeMedia<T extends { file?: { sizeBytes: bigint } | null }>(item: T) {
+    return {
+      ...item,
+      file: item.file ? { ...item.file, sizeBytes: item.file.sizeBytes.toString() } : null,
+    };
   }
 
   private async assertReadableLibraryPath(rootPath: string, libraryPath: string): Promise<void> {
