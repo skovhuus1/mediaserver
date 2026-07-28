@@ -52,7 +52,10 @@ function AppShellContent({ children, rail }: { children: ReactNode; rail: ReactN
   const currentQuery = searchParams.toString();
   const isActive = (href: string) => {
     const [targetPath, targetQuery = ''] = href.split('?');
-    return pathname === targetPath && targetQuery === currentQuery;
+    if (pathname !== targetPath) return false;
+    if (!targetQuery) return !currentQuery;
+    const targetParams = new URLSearchParams(targetQuery);
+    return Array.from(targetParams.entries()).every(([key, value]) => searchParams.get(key) === value);
   };
 
   return (

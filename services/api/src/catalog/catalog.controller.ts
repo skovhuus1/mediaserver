@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { BrowseLibraryDirectoriesDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
+import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, UpdateLibraryDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -58,6 +58,16 @@ export class CatalogController {
   @Get('media')
   media(@CurrentUser() actor: AuthenticatedUser) {
     return this.catalog.listMedia(actor);
+  }
+
+  @Get('media/catalog')
+  mediaCatalog(@CurrentUser() actor: AuthenticatedUser, @Query() query: CatalogQueryDto) {
+    return this.catalog.listCatalog(actor, query);
+  }
+
+  @Get('media/:id')
+  mediaDetails(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.catalog.getMedia(actor, id);
   }
 
   @Post('media')

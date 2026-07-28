@@ -1,4 +1,4 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 
 export class CreateLibraryDto {
@@ -53,6 +53,49 @@ export class BrowseLibraryDirectoriesDto {
   @IsString()
   @Length(1, 4096)
   path?: string;
+}
+
+export class CatalogQueryDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  @Transform(({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value)
+  q?: string;
+
+  @IsOptional()
+  @IsIn(['movie', 'series', 'episode'])
+  type?: 'movie' | 'series' | 'episode';
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  category?: string;
+
+  @IsOptional()
+  @IsUUID()
+  libraryId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 240)
+  seriesTitle?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  pageSize = 24;
+
+  @IsOptional()
+  @IsIn(['newest', 'title', 'year'])
+  sort: 'newest' | 'title' | 'year' = 'newest';
 }
 
 export class CreateMediaDto {
