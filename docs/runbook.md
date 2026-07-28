@@ -1,30 +1,38 @@
-﻿# Runbook – fase 1
+# Runbook
 
-## Bootstrap flow
+## Health
 
-1. Start database og API.
-2. Kør `POST /api/v1/system/setup` med konto og admin.
-3. Opret de første roller via bootstrap (ADMINISTRATOR oprettes automatisk hvis fraværende).
-4. Opret planer/plan-versioner og tildel abonnementer.
-5. Opret media og bibibliotek(er).
+```bash
+curl http://127.0.0.1:5555/api/v1/system/health
+curl http://127.0.0.1:5555/api/v1/system/ready
+```
 
-## Playback beslutningsflow
+`health` viser processtatus. `ready` kontrollerer både PostgreSQL og Redis.
 
-1. Klient kalder `POST /api/v1/playback/authorize`.
-2. Entitlement bliver evalueret server-side.
-3. Metode vælges via `PlaybackDecisionService`.
-4. Reservation reserverer plads med lease og advisory lock.
-5. Klienten sender heartbeat og forlanger forlængelse.
+## Docker logs
 
-## Fejl-situationer
+```bash
+docker compose ps
+docker compose logs --tail=200 api worker admin
+```
 
-- `max_streams_reached` – når kontoens aktive samtidige sessioner rammer limit.
-- `no_subscription` – bruger uden aktivt abonnement.
-- `release_delay_active` – indhold ikke frigivet.
-- `transcode_blocked` – plan tillader ikke transkodning.
+## Direkte installation
 
-## Recovery
+```bash
+systemctl status bb-media.target
+journalctl -u bb-media-api -u bb-media-worker -u bb-media-admin --since "30 minutes ago"
+```
 
-- Ved service-downtime frigives lejede sessions ved heartbeat timeout:
-  - `/playback/sessions` listen validerer `lease_expires_at`.
-  - Udløbne sessioner markeres som `expired`.
+## Migration fejler
+
+Stop applikationen, tag databasebackup og inspicer Prisma-fejlkoden. Brug aldrig `prisma migrate reset` på en produktionsdatabase.
+
+## Updater nægter
+
+- `update_dirty_worktree`: commit eller fjern bevidste tracked ændringer.
+- `update_not_fast_forward`: historikken divergerer og kræver manuel Git-gennemgang.
+- `update_command_failed`: kontroller Git-remote, netværk og servicebrugerens adgang.
+
+## Streamslot frigives ikke
+
+Kontroller workerloggen og `lease_expires_at`. Workerens recurring `playback.expire-leases` job frigiver udløbne reservationsrækker. Heartbeat kan ikke forlænge en afsluttet session.

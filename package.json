@@ -1,26 +1,37 @@
 {
-  "name": "bb-media-server",
-  "private": true,
+  "name": "boltbytes-media-server",
   "version": "0.1.0",
-  "type": "module",
-  "scripts": {
-  "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
-  "dev:api": "npm run start:dev --workspace=services/api",
-  "dev:web": "npm run dev --workspace=web/admin",
-  "build": "npm run build:api && npm run build:web",
-  "build:api": "npm run build --workspace=services/api",
-  "build:web": "npm run build --workspace=web/admin",
-  "lint": "npm run lint --workspace=services/api && npm run lint --workspace=web/admin",
-  "typecheck": "npm run build:api && npm run lint --workspace=web/admin",
-  "test": "npm run test --workspace=services/api",
-  "env:bootstrap": "node scripts/bootstrap-env.mjs"
+  "private": true,
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=10"
   },
   "workspaces": [
     "services/*",
     "web/*",
     "shared/*"
   ],
+  "scripts": {
+    "bootstrap": "node scripts/bootstrap-env.mjs",
+    "build": "npm run build --workspace=@boltbytes/contracts && npm run build --workspace=@boltbytes/api && npm run build --workspace=@boltbytes/worker && npm run build --workspace=@boltbytes/admin",
+    "dev": "concurrently \"npm run start:dev --workspace=@boltbytes/api\" \"npm run dev --workspace=@boltbytes/admin\" \"npm run start:dev --workspace=@boltbytes/worker\"",
+    "lint": "eslint services/api/src services/api/test services/worker/src web/admin/src shared/contracts/src --ext .ts,.tsx",
+    "typecheck": "npm run build --workspace=@boltbytes/contracts && npm run typecheck --workspace=@boltbytes/api && npm run typecheck --workspace=@boltbytes/worker && npm run typecheck --workspace=@boltbytes/admin",
+    "test": "npm run test --workspace=@boltbytes/api",
+    "test:integration": "npm run test:integration --workspace=@boltbytes/api",
+    "prisma:generate": "npm run prisma:generate --workspace=@boltbytes/api",
+    "prisma:migrate": "npm run prisma:migrate --workspace=@boltbytes/api",
+    "ci": "npm run lint && npm run typecheck && npm run test && npm run build"
+  },
   "devDependencies": {
-    "concurrently": "^9.1.2"
-  ]
+    "@typescript-eslint/eslint-plugin": "8.65.0",
+    "@typescript-eslint/parser": "8.65.0",
+    "concurrently": "10.0.4",
+    "eslint": "10.8.0",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.3"
+  }
 }

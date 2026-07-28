@@ -1,175 +1,124 @@
-﻿import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { EntitlementAction, EntitlementDecision } from '@bb-media/shared-types';
-import { PlaybackDecisionService } from './playback-decision.service';
-import { StreamReservationService } from './stream-reservation.service';
+import { ForbiddenException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
+import type { AuthenticatedUser } from '@boltbytes/contracts';
+import { isPrivileged } from '../common/auth';
+import { correlationId } from '../common/request-context';
 import { EntitlementsService } from '../entitlements/entitlements.service';
-
-type AuthorizeRequest = {
-  profileId: string;
-  mediaId: string;
-  deviceId: string;
-  deviceType: string;
-  appVersion?: string;
-  playbackContext?: {
-    deviceId: string;
-    type: string;
-    supportsCodecs?: string[];
-  };
-  requestedAction?: EntitlementAction;
-  isCastSession?: boolean;
-};
+import { PrismaService } from '../prisma/prisma.service';
+import { AuthorizePlaybackDto } from './playback.dto';
+import { choosePlaybackMethod } from './playback-decision';
+import { StreamReservationService } from './stream-reservation.service';
 
 @Injectable()
 export class PlaybackService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementsService,
-    private readonly decision: PlaybackDecisionService,
     private readonly reservations: StreamReservationService,
   ) {}
 
-  async authorize(user: any, dto: AuthorizeRequest) {
-    const action: EntitlementAction = dto.requestedAction ?? 'playback';
-    const evaluation = await this.entitlements.evaluateForProfile(
-      dto.profileId,
-      dto.mediaId,
-      {
-        deviceId: dto.deviceId,
-        type: dto.deviceType,
-        appVersion: dto.appVersion,
-        supportsCodec: dto.playbackContext?.supportsCodecs,
-      },
-      action,
-    );
-
-    if (!evaluation.allowed) {
-      throw new ForbiddenException({
-        code: evaluation.reason ?? 'entitlement_denied',
-        message: evaluation.reasons[0] ?? 'Access denied',
-        reasons: evaluation.reasons,
-      });
-    }
-
-    const media = await this.prisma.media_items.findUnique({ where: { id: dto.mediaId } });
-    if (!media) {
-      throw new NotFoundException({
-        code: 'media_not_found',
-        message: 'Medie ikke fundet',
-      });
-    }
-
-    const method = await this.decision.chooseMethod(media, {
-      supportsCodecs: dto.playbackContext?.supportsCodecs,
-    }, evaluation.effectiveEntitlements);
-
-    if (method === 'transcode' && !evaluation.effectiveEntitlements.allowVideoTranscode) {
-      throw new ForbiddenException({
-        code: 'transcode_blocked',
-        message: 'Plan tillader ikke transcode',
-      });
-    }
-
-    const session = await this.reservations.reserve({
-      accountId: user.accountId,
-      userId: user.sub,
+  async authorize(actor: AuthenticatedUser, dto: AuthorizePlaybackDto) {
+    const entitlement = await this.entitlements.evaluate(actor, {
       profileId: dto.profileId,
-      deviceId: dto.deviceId,
       mediaId: dto.mediaId,
-      playbackMethod: method,
-      isCastSession: dto.isCastSession ?? false,
-      maxConcurrentStreams: Number(evaluation.effectiveEntitlements.maxConcurrentStreams || 1),
-      leaseSeconds: Number(process.env.SESSION_LEASE_SECONDS ?? 90),
+      action: dto.isCastSession ? 'cast' : 'playback',
+      device: { deviceId: dto.deviceId, supportedCodecs: dto.capabilities.supportedCodecs },
     });
+    if (!entitlement.allowed) {
+      await this.audit(actor, dto, 'denied', entitlement.code, { reasons: entitlement.reasons });
+      throw new ForbiddenException({
+        code: entitlement.code,
+        message: entitlement.reasons[0] ?? 'Playback entitlement was denied',
+        details: { reasons: entitlement.reasons, availableAt: entitlement.availableAt },
+      });
+    }
 
-    await this.prisma.audit_logs.create({
+    const media = await this.prisma.mediaItem.findFirst({ where: { id: dto.mediaId, accountId: actor.accountId } });
+    if (!media) throw new NotFoundException({ code: 'media_not_found', message: 'Media item was not found' });
+    const decision = choosePlaybackMethod({
+      codec: media.codec,
+      container: media.container,
+      supportedCodecs: dto.capabilities.supportedCodecs,
+      supportedContainers: dto.capabilities.supportedContainers,
+      entitlements: entitlement.effective,
+    });
+    if (!decision.allowed) {
+      await this.audit(actor, dto, 'denied', decision.code, { reason: decision.reason });
+      throw new ForbiddenException({ code: decision.code, message: decision.reason });
+    }
+
+    try {
+      const session = await this.reservations.reserve({
+        actor,
+        profileId: dto.profileId,
+        mediaId: dto.mediaId,
+        deviceId: dto.deviceId,
+        method: decision.method,
+        isCastSession: dto.isCastSession,
+        maxConcurrentStreams: entitlement.effective.maxConcurrentStreams,
+      });
+      await this.audit(actor, dto, 'allowed', 'playback_authorized', { method: decision.method, sessionId: session.id });
+      return {
+        sessionId: session.id,
+        logicalSessionId: session.logicalSessionId,
+        method: decision.method,
+        streamToken: session.streamToken,
+        leaseExpiresAt: session.leaseExpiresAt,
+        decision: { entitlement, playback: decision },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        const response = error.getResponse();
+        const code = typeof response === 'object' && response !== null && 'code' in response
+          ? String(response.code)
+          : 'playback_rejected';
+        await this.audit(actor, dto, 'denied', code, {});
+      }
+      throw error;
+    }
+  }
+
+  list(actor: AuthenticatedUser) {
+    return this.prisma.playbackSession.findMany({
+      where: {
+        accountId: actor.accountId,
+        ...(isPrivileged(actor) ? {} : { userId: actor.sub }),
+        status: { in: ['reserving', 'active', 'paused'] },
+      },
+      select: {
+        id: true,
+        logicalSessionId: true,
+        method: true,
+        status: true,
+        isCastSession: true,
+        leaseExpiresAt: true,
+        lastHeartbeatAt: true,
+        media: { select: { id: true, title: true, type: true } },
+        device: { select: { id: true, name: true, type: true } },
+        user: { select: { id: true, displayName: true } },
+      },
+      orderBy: { startedAt: 'desc' },
+    });
+  }
+
+  private audit(
+    actor: AuthenticatedUser,
+    dto: AuthorizePlaybackDto,
+    outcome: string,
+    code: string,
+    details: object,
+  ): Promise<unknown> {
+    return this.prisma.auditLog.create({
       data: {
-        account_id: user.accountId,
-        user_id: user.sub,
-        profile_id: dto.profileId,
-        device_id: dto.deviceId,
-        session_id: session.id,
-        category: 'playback',
-        action: 'authorize',
-        reason: 'ok',
-        details: {
-          mediaId: dto.mediaId,
-          method,
-        },
+        accountId: actor.accountId,
+        userId: actor.sub,
+        profileId: dto.profileId,
+        correlationId: correlationId(),
+        action: 'playback.authorize',
+        outcome,
+        code,
+        details: { mediaId: dto.mediaId, deviceId: dto.deviceId, ...details },
       },
     });
-
-    return {
-      sessionId: session.id,
-      status: session.status,
-      method,
-      leaseExpiresAt: session.lease_expires_at,
-      streamToken: session.stream_token,
-      entitlementDecision: evaluation as EntitlementDecision,
-    };
-  }
-
-  async listSessions(accountId?: string) {
-    if (!accountId) {
-      return [];
-    }
-
-    const now = new Date();
-    const expiredSessions = await this.prisma.playback_sessions.findMany({
-      where: {
-        account_id: accountId,
-        status: { in: ['active', 'reserving', 'paused'] },
-        lease_expires_at: { lt: now },
-      },
-      select: { id: true },
-    });
-
-    if (expiredSessions.length > 0) {
-      const expiredIds = expiredSessions.map((session) => session.id);
-      await this.prisma.$transaction([
-        this.prisma.playback_sessions.updateMany({
-          where: {
-            id: { in: expiredIds },
-            status: { in: ['active', 'reserving', 'paused'] },
-          },
-          data: {
-            status: 'expired',
-            ended_at: now,
-          },
-        }),
-        this.prisma.stream_reservations.updateMany({
-          where: {
-            playback_session_id: { in: expiredIds },
-            released_at: null,
-          },
-          data: {
-            released_at: now,
-            reason: 'lease_expired',
-          },
-        }),
-      ]);
-    }
-
-    return this.prisma.playback_sessions.findMany({
-      where: {
-        account_id: accountId,
-        status: { in: ['active', 'reserving', 'paused'] },
-      },
-      include: {
-        media_items: true,
-        users: true,
-        devices: true,
-      },
-      orderBy: { last_heartbeat_at: 'desc' },
-    });
-  }
-
-  async refreshHeartbeat(id: string, leaseSeconds: number) {
-    return this.reservations.refreshHeartbeat(id, leaseSeconds);
-  }
-
-  async releaseSession(id: string, reason: string) {
-    return this.reservations.release(id, reason);
   }
 }
 

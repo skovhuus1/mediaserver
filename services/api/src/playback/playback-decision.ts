@@ -1,0 +1,38 @@
+import type { EffectiveEntitlements, PlaybackMethod } from '@boltbytes/contracts';
+
+export type PlaybackDecision =
+  | { allowed: true; method: PlaybackMethod; code: 'playback_method_selected'; reason: string }
+  | { allowed: false; method: null; code: string; reason: string };
+
+export function choosePlaybackMethod(input: {
+  codec: string | null;
+  container: string | null;
+  supportedCodecs: readonly string[];
+  supportedContainers: readonly string[];
+  entitlements: EffectiveEntitlements;
+}): PlaybackDecision {
+  const { codec, container, supportedCodecs, supportedContainers, entitlements } = input;
+  if (!codec || !container) {
+    return { allowed: false, method: null, code: 'media_profile_missing', reason: 'Media codec and container analysis is required before playback' };
+  }
+  const normalizedCodec = codec.toLowerCase();
+  const normalizedContainer = container.toLowerCase();
+  const codecSupported = supportedCodecs.map((value) => value.toLowerCase()).includes(normalizedCodec);
+  const containerSupported = supportedContainers.map((value) => value.toLowerCase()).includes(normalizedContainer);
+
+  if (codecSupported && containerSupported && entitlements.allowDirectPlay) {
+    return { allowed: true, method: 'direct_play', code: 'playback_method_selected', reason: 'Device supports codec and container' };
+  }
+  if (codecSupported && entitlements.allowDirectStream) {
+    return { allowed: true, method: 'direct_stream', code: 'playback_method_selected', reason: 'Codec is supported and the container can be remuxed' };
+  }
+  if (entitlements.allowVideoTranscode) {
+    return { allowed: true, method: 'transcode', code: 'playback_method_selected', reason: 'A compatible stream must be transcoded' };
+  }
+  return {
+    allowed: false,
+    method: null,
+    code: 'transcode_required_but_forbidden',
+    reason: 'This device requires video transcoding, but the active plan does not allow it',
+  };
+}

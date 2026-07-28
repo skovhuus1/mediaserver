@@ -4,76 +4,78 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  build:
+  validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_ENV: test
+      API_PORT: 3001
+      DATABASE_URL: postgresql://bbmedia:bbmedia_pass@localhost:5432/bbmedia_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      CORS_ORIGIN: http://localhost:5555
+      JWT_SECRET: ci-only-secret-ci-only-secret-ci-only-secret-ci-only-secret-ci-only-secret
+      JWT_ACCESS_TTL_SECONDS: 900
+      JWT_REFRESH_TTL_DAYS: 30
+      ENCRYPTION_KEY: base64:Y2ktb25seS0zMi1ieXRlLWVuY3J5cHRpb24ta2V5ISE=
+      SESSION_LEASE_SECONDS: 90
+      BILLING_ENABLED: false
+      BB_MEDIA_UPDATE_ENABLED: false
     services:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: bbmedia
+          POSTGRES_DB: bbmedia_test
           POSTGRES_USER: bbmedia
           POSTGRES_PASSWORD: bbmedia_pass
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
+          --health-cmd "pg_isready -U bbmedia -d bbmedia_test"
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
-          --health-start-period 10s
+          --health-retries 20
       redis:
         image: redis:7-alpine
         ports:
           - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
-          --health-interval 10s
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
-          --health-start-period 10s
+          --health-retries 20
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: 22
           cache: npm
-
-      - name: Prepare environment
-        run: |
-          cp .env.example .env
-          npm run env:bootstrap
-
-      - name: Install deps
-        run: npm install
-
-      - name: API migrations
-        run: npm run prisma:migrate --workspace=services/api
-
-      - name: Shared types build
-        run: npm run build --workspace=shared/types
-
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+      - name: Apply migrations
+        run: npm run prisma:migrate
       - name: Lint
         run: npm run lint
-
       - name: Type check
         run: npm run typecheck
-
-      - name: API tests
-        run: npm run test --workspace=services/api
-
-      - name: API build
-        run: npm run build:api
-
-      - name: Web build
-        run: npm run build:web
-
-      - name: Docker compose validation
-        run: docker compose -f docker-compose.yml config
-
-      - name: Docker compose build
-        run: docker compose -f docker-compose.yml build --no-cache
+      - name: Tests
+        run: npm run test
+      - name: Integration tests
+        run: npm run test:integration
+      - name: Build
+        run: npm run build
+      - name: Dependency audit
+        run: npm audit --omit=dev --audit-level=high
+      - name: Validate Compose
+        run: |
+          cp .env.example .env
+          node scripts/bootstrap-env.mjs
+          docker compose config --quiet
+      - name: Build containers
+        run: docker compose build
