@@ -591,3 +591,25 @@
 .episodeCopy b, .episodeCopy small { display: block; }
 .episodeCopy b { overflow: hidden; color: #fff; text-overflow: ellipsis; white-space: nowrap; }
 .episodeCopy small { display: -webkit-box; margin-top: 4px; overflow: hidden; color: rgba(255, 255, 255, .57); line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.controls {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.controlsHidden {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.overlay > :not(video) {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.overlayIdle {
+  cursor: none;
+}
+
+.overlayIdle > :not(video) {
+  pointer-events: none;
+  opacity: 0;
+}

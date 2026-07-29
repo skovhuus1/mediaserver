@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowRight, Play, Sparkles } from 'lucide-react';
+import { PersonalizedRecommendations } from './personalized-recommendations';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -49,6 +50,7 @@ export function WatchPortal() {
   if (!user) return <main className="watch-loading" aria-busy="true" />;
   return (
     <CustomerShell user={user}>
+      <PersonalizedRecommendations />
       {continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : (
         <>
           <section className="watch-hero">

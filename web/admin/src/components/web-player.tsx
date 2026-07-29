@@ -63,13 +63,35 @@ type Authorization = {
     };
     output: { height: number | null; hdr: 'hdr10' | 'hlg' | 'dolby_vision' | null };
   };
+  playbackPreferences: {
+    qualityMode: 'auto' | 'fixed' | 'original';
+    fixedQualityHeight: number | null;
+    allowUpscale: boolean;
+    dataSaver: boolean;
+    playbackRate: number;
+    hdrMode: 'auto' | 'prefer_hdr' | 'force_sdr';
+    preferredAudioLanguages: string[];
+    preferredSubtitleLanguages: string[];
+    subtitleMode: 'auto' | 'always' | 'forced' | 'off';
+    autoplayNext: boolean;
+  };
+  adaptiveQuality: {
+    renditions: Array<{ height: number; bitrate: number; upscaled: boolean; hdr: boolean }>;
+  };
   leaseExpiresAt: string;
 };
 type TranscodeStatus = { state: 'queued' | 'running' | 'ready' | 'failed'; message: string };
 type PlayerMenu = 'playlist' | 'speed' | 'subtitles' | 'audio' | 'quality' | 'info' | null;
 type AudioTrack = { index: number; name: string; language: string };
 type QualityLevel = { index: number; label: string };
-type SubtitleTrack = { id: string; label: string; language: string; src: string; contentType: 'text/vtt' };
+type SubtitleTrack = {
+  id: string;
+  label: string;
+  language: string;
+  src: string | null;
+  contentType: 'text/vtt' | null;
+  delivery: 'webvtt' | 'burn_in';
+};
 type CastHandoff = {
   accepted: true;
   sessionId: string;
@@ -196,6 +218,9 @@ export function WebPlayer() {
   const [qualities, setQualities] = useState<QualityLevel[]>([]);
   const [activeQuality, setActiveQuality] = useState(-1);
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [castAvailable, setCastAvailable] = useState(false);
   const [castReason, setCastReason] = useState('Google Cast Framework indlæses...');
   const [casting, setCasting] = useState(false);
@@ -314,10 +339,18 @@ export function WebPlayer() {
             return;
           }
           sessionRef.current = next.sessionId;
-          const defaultSubtitle = next.subtitleTracks.find((track) => track.language === 'da')?.id ?? null;
+          const subtitleCandidates = next.playbackPreferences.subtitleMode === 'forced'
+            ? next.subtitleTracks.filter((track) => /forced|tvungen/i.test(track.label))
+            : next.subtitleTracks;
+          const defaultSubtitle = next.playbackPreferences.subtitleMode === 'off'
+            ? null
+            : next.playbackPreferences.preferredSubtitleLanguages
+                .map((language) => subtitleCandidates.find((track) => track.language === language))
+                .find(Boolean)?.id ?? null;
           activeSubtitleRef.current = defaultSubtitle;
           setActiveSubtitle(defaultSubtitle);
           setAuthorization(next);
+          setPlaybackRate(next.playbackPreferences?.playbackRate ?? 1);
           if (next.method === 'transcode') {
             if (!next.transcodeStatusUrl) throw new Error('Transcode-status mangler i serverens svar.');
             setStatus('FFmpeg forbereder streamen...');
@@ -361,6 +394,9 @@ export function WebPlayer() {
         backBufferLength: 90,
         maxBufferLength: 45,
         enableWorker: true,
+        startLevel: -1,
+        capLevelToPlayerSize: true,
+        capLevelOnFPSDrop: true,
       });
       hlsRef.current = hls;
       hls.loadSource(authorization.streamUrl);
@@ -368,18 +404,31 @@ export function WebPlayer() {
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
       setQualities(hls.levels.map((level, index) => ({
           index,
-          label: level.height
-            ? `${level.height}p${level.bitrate > 0 ? ` · ${(level.bitrate / 1_000_000).toFixed(1)} Mbps` : ''}`
-            : level.bitrate > 0
-              ? `${Math.round(level.bitrate / 1000)} Kbps`
-              : 'Transcoded',
+          label: qualityLabel(
+            level.height,
+            level.bitrate,
+            authorization.adaptiveQuality.renditions[index],
+          ),
         })));
         setAudioTracks(hls.audioTracks.map((track, index) => ({
           index,
           name: track.name || `Lydspor ${index + 1}`,
           language: track.lang || '',
         })));
+        const preferredAudioTrack = authorization.playbackPreferences.preferredAudioLanguages
+          .map((language) =>
+            hls.audioTracks.findIndex((track) => track.lang?.toLowerCase().startsWith(language)),
+          )
+          .find((index) => index !== undefined && index >= 0);
+        if (preferredAudioTrack !== undefined) {
+          hls.audioTrack = preferredAudioTrack;
+          setActiveAudioTrack(preferredAudioTrack);
+        }
         start();
+      });
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        if (hls.autoLevelEnabled) setActiveQuality(-1);
+        else setActiveQuality(data.level);
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
@@ -490,10 +539,12 @@ export function WebPlayer() {
       mediaInfo.metadata = metadata;
       mediaInfo.streamType = mediaApi.StreamType.BUFFERED;
       if (media.file?.durationMs) mediaInfo.duration = media.file.durationMs / 1000;
-      mediaInfo.tracks = handoff.subtitleTracks.map((subtitle, index) => {
+      mediaInfo.tracks = handoff.subtitleTracks
+        .filter((subtitle) => subtitle.delivery === 'webvtt' && subtitle.src)
+        .map((subtitle, index) => {
         const track = new mediaApi.Track(index + 1, mediaApi.TrackType.TEXT);
-        track.trackContentId = subtitle.src;
-        track.trackContentType = subtitle.contentType;
+        track.trackContentId = subtitle.src!;
+        track.trackContentType = subtitle.contentType!;
         track.subtype = mediaApi.TextTrackType.SUBTITLES;
         track.name = subtitle.label;
         if (subtitle.language !== 'und') track.language = subtitle.language;
@@ -585,7 +636,115 @@ export function WebPlayer() {
     setMenu(null);
   };
 
+  const revealControls = useCallback(() => {
+    setControlsVisible(true);
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    const video = videoRef.current;
+    if (video && !video.paused && !menu && !error) {
+      controlsTimerRef.current = setTimeout(() => setControlsVisible(false), 3_000);
+    }
+  }, [error, menu]);
+
+  useEffect(() => {
+    revealControls();
+    return () => {
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    };
+  }, [revealControls]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === overlayRef.current);
+      setControlsVisible(true);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !authorization) return;
+    const applyTrackSelection = () => {
+      const textTracks = Array.from(video.textTracks);
+      authorization.subtitleTracks.forEach((track, index) => {
+        if (textTracks[index]) {
+          textTracks[index].mode = track.id === activeSubtitle ? 'showing' : 'disabled';
+        }
+        });
+    };
+    video.addEventListener('loadedmetadata', applyTrackSelection);
+    video.textTracks.addEventListener('addtrack', applyTrackSelection);
+    applyTrackSelection();
+    return () => {
+      video.removeEventListener('loadedmetadata', applyTrackSelection);
+      video.textTracks.removeEventListener('addtrack', applyTrackSelection);
+    };
+  }, [activeSubtitle, authorization, sourceReady]);
+
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement === overlayRef.current) {
+      await document.exitFullscreen();
+    } else {
+      await overlayRef.current?.requestFullscreen();
+    }
+  };
+
   const selectSubtitle = (id: string | null) => {
+    const selectedTrack = authorization?.subtitleTracks.find((track) => track.id === id);
+    const activeTrack = authorization?.subtitleTracks.find(
+      (track) => track.id === activeSubtitleRef.current,
+    );
+    if (
+      authorization
+      && (
+        selectedTrack?.delivery === 'burn_in'
+        || (!selectedTrack && activeTrack?.delivery === 'burn_in')
+      )
+    ) {
+      resumeRef.current = Math.round((videoRef.current?.currentTime ?? currentTime) * 1_000);
+      setSourceReady(false);
+      setStatus(selectedTrack ? 'Forbereder undertekster med burn-in...' : 'Fjerner burn-in...');
+      void api<{
+        method: 'transcode';
+        streamUrl: string;
+        transcodeStatusUrl: string;
+        adaptiveQuality: Authorization['adaptiveQuality'];
+      }>(`/playback/sessions/${authorization.sessionId}/configuration`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          streamToken: authorization.streamToken,
+          burnIn: Boolean(selectedTrack),
+          ...(selectedTrack ? { subtitleTrackId: selectedTrack.id } : {}),
+        }),
+      }).then(async (configuration) => {
+        for (let attempt = 0; attempt < 180; attempt += 1) {
+          const response = await fetch(configuration.transcodeStatusUrl, {
+            cache: 'no-store',
+          });
+          const transcode = await response.json() as TranscodeStatus;
+          if (transcode.state === 'failed') throw new Error(transcode.message);
+          if (transcode.state === 'ready') break;
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          if (attempt === 179) throw new Error('Transcode timed out');
+        }
+        setAuthorization({
+          ...authorization,
+          method: 'transcode',
+          streamUrl: configuration.streamUrl,
+          transcodeStatusUrl: configuration.transcodeStatusUrl,
+          adaptiveQuality: configuration.adaptiveQuality,
+        });
+        activeSubtitleRef.current = selectedTrack?.id ?? null;
+        setActiveSubtitle(selectedTrack?.id ?? null);
+        setSourceReady(true);
+        setStatus(selectedTrack ? 'Burn-in undertekster aktive' : 'Burn-in fjernet');
+      }).catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : 'Burn-in kunne ikke aktiveres.');
+        setControlsVisible(true);
+      });
+      setMenu(null);
+      return;
+    }
     if (castingRef.current) {
       const castWindow = window as CastWindow;
       const mediaApi = castWindow.chrome?.cast?.media;
@@ -608,13 +767,27 @@ export function WebPlayer() {
 
   if (!media) return null;
   return (
-    <section ref={overlayRef} className={styles.overlay} role="dialog" aria-modal="true" aria-label={`Afspiller ${media.title}`}>
+    <section
+      ref={overlayRef}
+      className={`${styles.overlay} ${controlsVisible ? '' : styles.overlayIdle}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Afspiller ${media.title}`}
+      onMouseMove={revealControls}
+      onPointerDown={revealControls}
+      onTouchStart={revealControls}
+    >
       <video
+        onSeeking={() => setControlsVisible(true)}
         className={styles.video}
         ref={videoRef}
         playsInline
-        onPlay={() => setPaused(false)}
+        onPlay={() => {
+          setPaused(false);
+          revealControls();
+        }}
         onPause={() => {
+          setControlsVisible(true);
           setPaused(true);
           void saveProgress(false).catch(() => undefined);
         }}
@@ -632,11 +805,11 @@ export function WebPlayer() {
           if (sourceReady) setError('Browseren kunne ikke afspille den leverede stream.');
         }}
       >
-        {authorization?.subtitleTracks.map((track) => (
+        {authorization?.subtitleTracks.filter((track) => track.delivery === 'webvtt' && track.src).map((track) => (
           <track
             key={track.id}
             kind="subtitles"
-            src={track.src}
+            src={track.src ?? undefined}
             srcLang={track.language}
             label={track.label}
             default={track.id === activeSubtitle}
@@ -755,7 +928,7 @@ export function WebPlayer() {
       )}
 
       {sourceReady && (
-        <div className={styles.controls}>
+        <div className={`${styles.controls} ${controlsVisible ? '' : styles.controlsHidden}`}>
           <div className={styles.timeline}>
             <span>{formatTime(currentTime)}</span>
             <input
@@ -798,7 +971,7 @@ export function WebPlayer() {
               <button onClick={() => setMenu(menu === 'subtitles' ? null : 'subtitles')}><Captions /><span>Undertekster</span></button>
               <button onClick={() => setMenu(menu === 'audio' ? null : 'audio')}><Volume2 /><span>Lydspor</span></button>
               <button onClick={() => setMenu(menu === 'quality' ? null : 'quality')}><Settings2 /><span>Kvalitet</span></button>
-              <button onClick={() => void overlayRef.current?.requestFullscreen()}><Maximize /><span>Fuld skærm</span></button>
+              <button onClick={() => void toggleFullscreen()}><Maximize /><span>{isFullscreen ? 'Afslut fuld skærm' : 'Fuld skærm'}</span></button>
             </div>
           </div>
           <div className={styles.volume}>
@@ -843,6 +1016,13 @@ function browserCapabilities() {
   return {
     supportedCodecs: ['h264', 'avc1', 'aac', 'mp3', 'vp8', 'vp9', 'opus', ...(supportsHevc ? ['hevc', 'h265'] : [])],
     supportedContainers: ['mov', 'mp4', 'webm', 'ogg'],
+    screenHeight: window.screen.height,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    estimatedDownlinkMbps:
+      'connection' in navigator
+      && typeof (navigator as Navigator & { connection?: { downlink?: number } }).connection?.downlink === 'number'
+        ? (navigator as Navigator & { connection: { downlink: number } }).connection.downlink
+        : undefined,
     supportsHdr,
   };
 }
@@ -931,6 +1111,18 @@ function menuTitle(menu: Exclude<PlayerMenu, null>) {
     quality: 'Kvalitet',
     info: 'Information',
   } as const)[menu];
+}
+
+function qualityLabel(
+  height: number,
+  bitrate: number,
+  rendition?: { upscaled: boolean; hdr: boolean },
+) {
+  const resolution = height ? (height === 2160 ? '4K' : `${height}p`) : 'Transcoded';
+  const speed = bitrate > 0 ? ` ? ${(bitrate / 1_000_000).toFixed(1)} Mbps` : '';
+  const signal = rendition ? ` ? ${rendition.hdr ? 'HDR' : 'SDR'}` : '';
+  const upscale = rendition?.upscaled ? ' ? Opskaleret' : '';
+  return `${resolution}${speed}${signal}${upscale}`;
 }
 
 function formatTime(seconds: number) {

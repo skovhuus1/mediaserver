@@ -34,11 +34,12 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
   return (
     <div className="watch-shell">
       <header className="watch-header">
-        <Brand />
+        <Link aria-label="BoltBytes hjem" href="/watch"><Brand /></Link>
         <nav>{links.map(({ href, label, icon: Icon }) => <Link className={active(href) ? 'active' : ''} href={href} key={href}><Icon size={16} />{label}</Link>)}</nav>
         <form className="watch-search" action="/watch"><Search size={16} /><input name="q" defaultValue={searchParams.get('q') ?? ''} placeholder="Søg efter film og serier" /></form>
         <div className="watch-account">
           {isAdmin && <Link className="admin-return" href="/"><ChevronLeft size={15} />Admin</Link>}
+          <Link className="admin-return" href="/watch/settings">Indstillinger</Link>
           <Link className="profile-button" href="/profiles"><span>{activeProfile?.name.slice(0, 1).toUpperCase() ?? <UserRound size={15} />}</span>{activeProfile?.name ?? user.displayName}</Link>
           <button onClick={() => void logout()} aria-label="Log ud"><LogOut size={16} /></button>
         </div>

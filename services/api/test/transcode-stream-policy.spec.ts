@@ -5,6 +5,8 @@ describe('transcode stream policy', () => {
   it('allows only the generated manifest and numbered transport-stream segments', () => {
     expect(isAllowedHlsAsset('master.m3u8')).toBe(true);
     expect(isAllowedHlsAsset('segment00001.ts')).toBe(true);
+    expect(isAllowedHlsAsset('stream_2.m3u8')).toBe(true);
+    expect(isAllowedHlsAsset('segment_2_00001.ts')).toBe(true);
     expect(isAllowedHlsAsset('../secret')).toBe(false);
     expect(isAllowedHlsAsset('segment1.ts')).toBe(false);
   });

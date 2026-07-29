@@ -1,5 +1,5 @@
 import { ForbiddenException, HttpException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { detectVideoSignalProfile, isHevcCodec, type AuthenticatedUser } from '@boltbytes/contracts';
+import { buildAdaptiveQualityPlan, detectVideoSignalProfile, isHevcCodec, type AuthenticatedUser } from '@boltbytes/contracts';
 import { isPrivileged } from '../common/auth';
 import { correlationId } from '../common/request-context';
 import { EntitlementsService } from '../entitlements/entitlements.service';
@@ -7,10 +7,10 @@ import { readEnvironment } from '../config/environment';
 import { PrismaService } from '../prisma/prisma.service';
 import { createCastStreamToken } from './cast-stream-token';
 import { streamTokenMatches } from './direct-stream-policy';
-import { AuthorizePlaybackDto, CastHandoffDto } from './playback.dto';
+import { AuthorizePlaybackDto, CastHandoffDto, ReconfigurePlaybackDto } from './playback.dto';
 import { choosePlaybackMethod } from './playback-decision';
 import { StreamReservationService } from './stream-reservation.service';
-import { SubtitleStreamService } from './subtitle-stream.service';
+import { imageSubtitleDescriptors, SubtitleStreamService } from './subtitle-stream.service';
 import { TranscodeStreamService } from './transcode-stream.service';
 
 @Injectable()
@@ -52,8 +52,44 @@ export class PlaybackService {
         message: 'The media item has no readable scanned file',
       });
     }
+    const [device, profilePreferences] = await Promise.all([
+      this.prisma.device.findFirst({
+        where: {
+          id: dto.deviceId,
+          accountId: actor.accountId,
+          userId: actor.sub,
+          isRevoked: false,
+        },
+      }),
+      this.prisma.profilePreferences.findUnique({
+        where: { profileId: dto.profileId },
+      }),
+    ]);
+    if (!device) {
+      throw new NotFoundException({
+        code: 'device_not_found',
+        message: 'The active playback device was not found',
+      });
+    }
     const sourceVideo = detectVideoSignalProfile(media.file.probe);
-    const decision = choosePlaybackMethod({
+    const adaptiveQuality = buildAdaptiveQualityPlan({
+      sourceWidth: media.width,
+      sourceHeight: media.height,
+      sourceBitrate: media.bitrate,
+      sourceHdr: Boolean(sourceVideo.hdr),
+      planMaxHeight: entitlement.effective.maxVideoResolution,
+      planMaxBitrate: entitlement.effective.maxVideoBitrate * 1_000,
+      serverMaxHeight: Number(process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT ?? 2160),
+      screenHeight: dto.capabilities.screenHeight ?? null,
+      devicePixelRatio: dto.capabilities.devicePixelRatio ?? null,
+      estimatedDownlinkMbps: dto.capabilities.estimatedDownlinkMbps ?? null,
+      qualityMode: device.qualityMode as 'auto' | 'fixed' | 'original',
+      fixedQualityHeight: device.fixedQualityHeight,
+      allowUpscale: device.allowUpscale,
+      dataSaver: device.dataSaver,
+      hdrMode: device.hdrMode as 'auto' | 'prefer_hdr' | 'force_sdr',
+    });
+    const normalDecision = choosePlaybackMethod({
       codec: media.codec,
       container: media.container,
       height: media.height,
@@ -64,6 +100,18 @@ export class PlaybackService {
       supportedContainers: dto.capabilities.supportedContainers,
       entitlements: entitlement.effective,
     });
+    const decision =
+      normalDecision.allowed
+      && normalDecision.method === 'direct_play'
+      && device.qualityMode !== 'original'
+      && entitlement.effective.allowVideoTranscode
+        ? {
+            allowed: true as const,
+            method: 'transcode' as const,
+            code: 'adaptive_transcode',
+            reason: 'Adaptive quality is enabled for this device',
+          }
+        : normalDecision;
     if (!decision.allowed) {
       await this.audit(actor, dto, 'denied', decision.code, { reason: decision.reason });
       throw new ForbiddenException({ code: decision.code, message: decision.reason });
@@ -89,6 +137,8 @@ export class PlaybackService {
               && dto.capabilities.supportsHdr
               && dto.capabilities.supportedCodecs.some((codec) => isHevcCodec(codec)),
             ),
+            adaptiveQuality,
+            hdrMode: device.hdrMode,
           });
         } catch (error) {
           await this.reservations.release(actor, session.id, 'transcode_queue_failed');
@@ -114,6 +164,19 @@ export class PlaybackService {
         streamUrl,
         contentType: decision.method === 'transcode' ? 'application/x-mpegURL' : this.directContentType(media.container),
         subtitleTracks,
+        playbackPreferences: {
+          qualityMode: device.qualityMode,
+          fixedQualityHeight: device.fixedQualityHeight,
+          allowUpscale: device.allowUpscale,
+          dataSaver: device.dataSaver,
+          playbackRate: device.playbackRate,
+          hdrMode: device.hdrMode,
+          preferredAudioLanguages: profilePreferences?.preferredAudioLanguages ?? ['da', 'en'],
+          preferredSubtitleLanguages: profilePreferences?.preferredSubtitleLanguages ?? ['da', 'en'],
+          subtitleMode: profilePreferences?.subtitleMode ?? 'auto',
+          autoplayNext: profilePreferences?.autoplayNext ?? true,
+        },
+        adaptiveQuality,
         videoProfile: {
           source: {
             width: media.width,
@@ -150,6 +213,151 @@ export class PlaybackService {
       }
       throw error;
     }
+  }
+
+  async reconfigure(
+    actor: AuthenticatedUser,
+    sessionId: string,
+    dto: ReconfigurePlaybackDto,
+  ) {
+    const session = await this.prisma.playbackSession.findFirst({
+      where: {
+        id: sessionId,
+        accountId: actor.accountId,
+        ...(isPrivileged(actor) ? {} : { userId: actor.sub }),
+        status: { in: ['reserving', 'active', 'paused'] },
+        leaseExpiresAt: { gt: new Date() },
+      },
+      include: {
+        media: { include: { file: true } },
+        device: true,
+      },
+    });
+    if (!session || !session.media.file) {
+      throw new NotFoundException({
+        code: 'session_not_found',
+        message: 'Playback session was not found or has expired',
+      });
+    }
+    if (!streamTokenMatches(dto.streamToken, session.streamTokenHash)) {
+      throw new ForbiddenException({
+        code: 'stream_token_invalid',
+        message: 'The playback stream token is invalid',
+      });
+    }
+    if (dto.burnIn && !dto.subtitleTrackId) {
+      throw new UnprocessableEntityException({
+        code: 'subtitle_track_required',
+        message: 'A subtitle track is required for burn-in',
+      });
+    }
+    if (
+      dto.burnIn
+      && !imageSubtitleDescriptors(session.media.file.probe)
+        .some((track) => `burnin-${track.streamIndex}` === dto.subtitleTrackId)
+    ) {
+      throw new UnprocessableEntityException({
+        code: 'subtitle_burn_in_track_invalid',
+        message: 'The selected track is not a supported image subtitle',
+      });
+    }
+    const entitlement = await this.entitlements.evaluate(actor, {
+      profileId: session.profileId,
+      mediaId: session.mediaId,
+      action: 'playback',
+      device: {
+        deviceId: session.deviceId,
+        supportedCodecs: [],
+      },
+    });
+    if (!entitlement.allowed || !entitlement.effective.allowVideoTranscode) {
+      throw new ForbiddenException({
+        code: entitlement.allowed
+          ? 'video_transcode_not_allowed'
+          : entitlement.code,
+        message:
+          entitlement.reasons[0]
+          ?? 'The active plan does not allow stream reconfiguration',
+      });
+    }
+    if (dto.burnIn && !entitlement.effective.allowSubtitleBurnIn) {
+      throw new ForbiddenException({
+        code: 'subtitle_burn_in_not_allowed',
+        message: 'The active plan does not allow subtitle burn-in',
+      });
+    }
+
+    const sourceVideo = detectVideoSignalProfile(session.media.file.probe);
+    const adaptiveQuality = buildAdaptiveQualityPlan({
+      sourceWidth: session.media.width,
+      sourceHeight: session.media.height,
+      sourceBitrate: session.media.bitrate,
+      sourceHdr: Boolean(sourceVideo.hdr),
+      planMaxHeight: entitlement.effective.maxVideoResolution,
+      planMaxBitrate: entitlement.effective.maxVideoBitrate * 1_000,
+      serverMaxHeight: Number(process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT ?? 2160),
+      screenHeight: null,
+      devicePixelRatio: null,
+      estimatedDownlinkMbps: null,
+      qualityMode: session.device.qualityMode as 'auto' | 'fixed' | 'original',
+      fixedQualityHeight: session.device.fixedQualityHeight,
+      allowUpscale: session.device.allowUpscale,
+      dataSaver: session.device.dataSaver,
+      hdrMode: session.device.hdrMode as 'auto' | 'prefer_hdr' | 'force_sdr',
+    });
+    await this.prisma.$transaction([
+      this.prisma.systemJob.updateMany({
+        where: {
+          accountId: actor.accountId,
+          type: 'playback.transcode',
+          status: { in: ['queued', 'running'] },
+          payload: { path: ['sessionId'], equals: session.id },
+        },
+        data: { status: 'failed', leaseExpiresAt: null },
+      }),
+      this.prisma.playbackSession.update({
+        where: { id: session.id },
+        data: { method: 'transcode', lastHeartbeatAt: new Date() },
+      }),
+    ]);
+    await this.transcodeStream.enqueue(session.id, actor.accountId, {
+      maxVideoResolution: entitlement.effective.maxVideoResolution,
+      maxVideoBitrate: entitlement.effective.maxVideoBitrate,
+      preserveHdr: Boolean(
+        sourceVideo.hdr
+        && session.device.hdrMode !== 'force_sdr',
+      ),
+      adaptiveQuality,
+      hdrMode: session.device.hdrMode,
+      subtitleTrackId: dto.burnIn ? dto.subtitleTrackId ?? null : null,
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        accountId: actor.accountId,
+        userId: actor.sub,
+        profileId: session.profileId,
+        correlationId: correlationId(),
+        action: 'playback.configuration_update',
+        outcome: 'allowed',
+        code: 'playback_configuration_updated',
+        details: {
+          sessionId: session.id,
+          logicalSessionId: session.logicalSessionId,
+          burnIn: dto.burnIn,
+          subtitleTrackId: dto.subtitleTrackId ?? null,
+        },
+      },
+    });
+    const token = encodeURIComponent(dto.streamToken);
+    return {
+      accepted: true,
+      sessionId: session.id,
+      logicalSessionId: session.logicalSessionId,
+      method: 'transcode',
+      streamUrl: `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${token}`,
+      transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?token=${token}`,
+      adaptiveQuality,
+    };
   }
 
   async handoffToCast(
@@ -244,7 +452,7 @@ export class PlaybackService {
         : this.directContentType(session.media.container),
       subtitleTracks: subtitleTracks.map((track) => ({
         ...track,
-        src: new URL(track.src, publicBaseUrl).toString(),
+        src: track.src ? new URL(track.src, publicBaseUrl).toString() : null,
       })),
       tokenExpiresAt: signed.expiresAt,
     };

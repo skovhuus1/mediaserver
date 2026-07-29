@@ -5,7 +5,9 @@ describe('transcode stream policy', () => {
   it('allows only the fixed master, variant and numbered segment assets', () => {
     expect(isAllowedHlsAsset('master.m3u8')).toBe(true);
     expect(isAllowedHlsAsset('stream.m3u8')).toBe(true);
+    expect(isAllowedHlsAsset('stream_0.m3u8')).toBe(true);
     expect(isAllowedHlsAsset('segment00000.ts')).toBe(true);
+    expect(isAllowedHlsAsset('segment_0_00000.ts')).toBe(true);
     expect(isAllowedHlsAsset('../stream.m3u8')).toBe(false);
   });
 

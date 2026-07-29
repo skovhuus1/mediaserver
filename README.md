@@ -1,5 +1,10 @@
 # BoltBytes Media Server
 
+> CI-smoke dækker både eksplicit Direct Play (`original`) og adaptiv HLS
+> (`auto`) med op til fire tokenbeskyttede renditions. Workflowet validerer de
+> aktuelle `stream_<n>.m3u8`- og `segment_<n>_<sekvens>.ts`-kontrakter samt
+> klientens `screenHeight`, pixel-ratio og estimerede netværkssignal.
+
 BoltBytes Media Server er en selvhostet TypeScript-platform til administration og autoriseret afspilning af egne film og serier. Kodebasen er genopbygget fra bunden med server-side adgangskontrol, reproducerbar installation og en tydelig grænse mellem implementeret funktionalitet og kommende faser.
 
 ## Hurtig installation med Docker
@@ -23,7 +28,7 @@ MEDIA_PATH=/home/seeds/Media/Films/user/google/google/external/Media
 Åbn derefter:
 
 ```text
-http://SERVERENS-IP:5555
+http://SERVERENS-IP:6555
 ```
 
 `JWT_SECRET` og `ENCRYPTION_KEY` genereres automatisk af `scripts/bootstrap-env.mjs`. Eksisterende secrets overskrives ikke, og værdierne skrives aldrig til terminalen.
@@ -44,7 +49,7 @@ Direkte installation fungerer Plex-lignende som tre systemd-services bag nginx. 
 1. Opret PostgreSQL-databasen og brugeren, som er angivet i `.env.direct.example`.
 2. Kør `sudo bash scripts/install-direct.sh`.
 
-Installeren bygger API, admin og worker, anvender migrationer, opretter systemd-services, konfigurerer nginx og åbner applikationen på port `5555`. Databasen bruger normalt `5432`, Redis `6379`, API internt `3001` og admin internt `3000`; kun `5555` skal eksponeres offentligt.
+Installeren bygger API, admin og worker, anvender migrationer, opretter systemd-services, konfigurerer nginx og åbner applikationen på port `5555`. Databasen bruger normalt `5432`, Redis `6379`, API internt `3001` og admin internt `3000`; kun `6555` skal eksponeres offentligt.
 
 ## Sikker updater
 
@@ -330,3 +335,47 @@ Produktionsdomænet er `https://media.boltbytes.com`, mens Docker fortsat bruger
 Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, planlagte scans/file-watcher, manuel metadata-match, hardware-transcoding, egen Chromecast receiver samt Android- og TV-klienter.
 
 CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, så health-, Direct Play-, subtitle-, HLS- og transcode-kontroller rammer den publicerede testport.
+
+
+## Personlige kundepr?ferencer og anbefalinger (2026-07-29)
+
+- `/watch/settings` har separate, eksplicitte Gem-forl?b for profil, lyd/undertekster, anbefalinger, sikkerhed og enhedens afspilning.
+- Profilpr?ferencer synkroniserer sprogprioritet, underteksttilstand, autoplay og personalisering. Kvalitet, maksimumopl?sning, upscaling, databesparelse, hastighed og HDR gemmes p? den aktive enhed.
+- En eksisterende profil-PIN skal bekr?ftes, f?r den ?ndres eller fjernes; ny PIN hashes med bcrypt cost 12.
+- Anbefalinger scores kun blandt lokale titler med en registreret mediefil. Historik, provider-lighed, skuespillere, genrer, kategori, rating og Like/Dislike/Ikke for mig indg?r i scoren.
+- Anbefalingscache bruger Redis i 15 minutter og versionsbindes til profilindstillinger, seneste historik og seneste feedback. Reset bevarer historikken, men afsk?rer ?ldre signaler.
+- Kundeportalens logo linker til `/watch`, kundeheaderen linker til indstillinger, og native vandrette scrollbars skjules p? kunde-r?kker.
+
+### Rester i den samlede personalized-watch-ABR-leverance
+
+- Metadataworkeren udfylder genre-, top-15 credit- og provider-similar-felter fra TMDB. TVDB-serier krydslinkes best-effort til TMDB.
+- PGS/VobSub/DVB-billedspor vises som burn-in-valg og rekonfigurerer den eksisterende logical session uden en ekstra streamreservation.
+- Denne branch m? ikke merges til `main`, f?r de resterende dele samt alle lokale og GitHub-gates er gr?nne.
+
+
+## Adaptiv HLS og personlig player (2026-07-29)
+
+- Playback authorization beregner et serverstyret kvalitetsloft som minimum af abonnement, servermaksimum, fysisk sk?rmh?jde, enhedens kvalitetstilstand, databesparelse og upscaling-politik.
+- Den f?lles ladder indeholder 360p, 480p, 720p, 1080p, 1440p og 2160p og v?lger h?jst fire j?vnt fordelte renditions. Databesparelse begr?nser output til 720p og cirka 3 Mbps.
+- Workeren producerer renditions i ?n FFmpeg-dekodning med segmentjusterede streams, automatisk mastermanifest og nummererede playlists/segmenter. API-et markerer f?rst streamen klar, n?r alle variant-playlister har et l?sbart f?rste segment.
+- NVIDIA NVENC v?lges kun, n?r container-runtime er synlig og FFmpeg annoncerer den n?dvendige H.264/HEVC-encoder. Ellers bruges libx264/libx265.
+- HDR bevares som HEVC Main10, n?r klient, plan og HDR-mode tillader det. `force_sdr` bruger tone mapping; opskalerede niveauer m?rkes tydeligt og p?st?r ikke at skabe ny kildedetalje.
+- Hls.js starter i Auto med player-size- og FPS-drop-capping. Manuelle niveauer kan v?lges, og Auto gendannes med level `-1`.
+- Playeren bruger profilens lyd-/undertekstsprog, binder tekstspor efter `loadedmetadata` og `addtrack`, skjuler overlay efter tre sekunders afspilning og holder fullscreen-state synkron med `fullscreenchange`.
+- Det tidligere enkelt-rendition assetformat accepteres fortsat read-only under rullende opdatering; nye jobs producerer kun `stream_%v.m3u8` og `segment_%v_%05d.ts`.
+
+### Fortsat rester
+
+- `PATCH /playback/sessions/:id/configuration` genbruger stream-token, session-id og logical session ved aktivering eller fjernelse af PGS/VobSub/DVB burn-in.
+- NVENC og HDR/SDR skal staging-smoketestes p? den faktiske NVIDIA-host med rigtige 4K HDR-filer.
+- Egen Chromecast receiver er fortsat en senere fase; Default Media Receiver-flowet er bevaret.
+
+
+## Burn-in og session-rekonfiguration (2026-07-29)
+
+- PGS, VobSub/DVD og DVB-billedspor klassificeres fra ffprobe og vises med stabilt `burnin-<streamIndex>`-id.
+- Kunden kan aktivere eller fjerne burn-in direkte i playerens undertekstmenu. API-et kr?ver den eksisterende stream-token og planens video-transcode samt subtitle-burn-in entitlement.
+- Reconfiguration beholder samme playback-session, logical session, lease, historik og streamreservation. Et superseded worker-job stoppes, f?r det nye job overtager outputmappen.
+- Workeren l?gger billedsporet oven p? videoen f?r HDR-bevarelse eller SDR tone mapping og bygger derefter alle adaptive renditions fra samme filtergraf.
+- Tekstspor leveres fortsat som WebVTT. Chromecast-tracklisten indeholder kun WebVTT; burn-in ligger allerede i videostr?mmen.
+- Unit-testen verificerer, at reconfiguration genbruger session og logical session og ikke opretter en ny reservation.

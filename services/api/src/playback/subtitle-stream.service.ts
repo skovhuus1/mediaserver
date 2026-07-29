@@ -23,8 +23,9 @@ export type PlaybackSubtitleTrack = {
   id: string;
   label: string;
   language: string;
-  src: string;
-  contentType: 'text/vtt';
+  src: string | null;
+  contentType: 'text/vtt' | null;
+  delivery: 'webvtt' | 'burn_in';
 };
 
 type SidecarTrack = SubtitleDescriptor & { path: string };
@@ -49,6 +50,7 @@ export class SubtitleStreamService {
       language: track.language,
       src: `/api/v1/playback/sessions/${sessionId}/subtitles/sidecar-${index}.vtt?token=${encodedToken}`,
       contentType: 'text/vtt',
+      delivery: 'webvtt',
     }));
     if (includeEmbedded) {
       for (const track of embeddedSubtitleDescriptors(file.probe)) {
@@ -58,8 +60,19 @@ export class SubtitleStreamService {
           language: track.language,
           src: `/api/v1/playback/sessions/${sessionId}/subtitles/embedded-${track.streamIndex}.vtt?token=${encodedToken}`,
           contentType: 'text/vtt',
+          delivery: 'webvtt',
         });
       }
+    }
+    for (const track of imageSubtitleDescriptors(file.probe)) {
+      tracks.push({
+        id: `burnin-${track.streamIndex}`,
+        label: `${track.label} · Burn-in`,
+        language: track.language,
+        src: null,
+        contentType: null,
+        delivery: 'burn_in',
+      });
     }
     return tracks;
   }
@@ -150,4 +163,39 @@ export class SubtitleStreamService {
     }
     return session;
   }
+}
+
+export function imageSubtitleDescriptors(probe: unknown) {
+  const root =
+    typeof probe === 'object' && probe !== null && !Array.isArray(probe)
+      ? probe as Record<string, unknown>
+      : {};
+  const streams = Array.isArray(root.streams) ? root.streams : [];
+  const codecs = new Set(['dvb_subtitle', 'dvd_subtitle', 'hdmv_pgs_subtitle', 'pgssub', 'vobsub']);
+  return streams.flatMap((value) => {
+    const stream =
+      typeof value === 'object' && value !== null && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : {};
+    if (
+      stream.codec_type !== 'subtitle'
+      || typeof stream.codec_name !== 'string'
+      || !codecs.has(stream.codec_name.toLowerCase())
+      || typeof stream.index !== 'number'
+    ) {
+      return [];
+    }
+    const tags =
+      typeof stream.tags === 'object' && stream.tags !== null && !Array.isArray(stream.tags)
+        ? stream.tags as Record<string, unknown>
+        : {};
+    const language =
+      typeof tags.language === 'string' ? tags.language.toLowerCase() : 'und';
+    const title = typeof tags.title === 'string' ? tags.title : language.toUpperCase();
+    return [{
+      streamIndex: Math.trunc(stream.index),
+      language,
+      label: `${title} (${stream.codec_name})`,
+    }];
+  });
 }
