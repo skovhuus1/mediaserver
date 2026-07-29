@@ -5,7 +5,7 @@ import type { Response } from 'express';
 import { CurrentUser, Public } from '../common/auth';
 import { DirectStreamService } from './direct-stream.service';
 import { applyMediaCors } from './media-cors';
-import { AuthorizePlaybackDto, CastHandoffDto, ReconfigurePlaybackDto } from './playback.dto';
+import { AuthorizePlaybackDto, CastHandoffDto, PlaybackHeartbeatDto, ReconfigurePlaybackDto } from './playback.dto';
 import { PlaybackService } from './playback.service';
 import { StreamReservationService } from './stream-reservation.service';
 import { SubtitleStreamService } from './subtitle-stream.service';
@@ -33,8 +33,12 @@ export class PlaybackController {
   }
 
   @Patch('sessions/:id/heartbeat')
-  heartbeat(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
-    return this.reservations.heartbeat(actor, id);
+  heartbeat(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: PlaybackHeartbeatDto,
+  ) {
+    return this.reservations.heartbeat(actor, id, dto);
   }
 
   @Delete('sessions/:id')

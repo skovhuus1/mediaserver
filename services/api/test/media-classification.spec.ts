@@ -30,4 +30,25 @@ describe('media path classification', () => {
     expect(classifyMediaPath('mixed', 'Shows/Fallout/Fallout.1x02.The.Target.mkv').type).toBe('episode');
     expect(classifyMediaPath('mixed', 'Action/Civil War (2024).mkv').type).toBe('movie');
   });
+
+  it('removes release quality, source, codec, audio and group tags from movie titles', () => {
+    expect(classifyMediaPath(
+      'movie',
+      'Music/U2 Under a Blood Red Sky 1080p WEB DL AAC 2 0 JD07.mkv',
+    ).title).toBe('U2 Under a Blood Red Sky');
+    expect(classifyMediaPath(
+      'movie',
+      'Comedy/Roast on the Coast Sverige (2025)/DANISH 1080p WEB DL DDP5 1 H264 BANDOLEROS.mkv',
+    )).toMatchObject({
+      title: 'Roast on the Coast Sverige',
+      releaseYear: 2025,
+    });
+  });
+
+  it('removes release tags after episode names', () => {
+    expect(classifyMediaPath(
+      'series',
+      'Drama/The Last of Us/Season 01/The.Last.of.Us.S01E05.Endure.2160p.WEB-DL.H265.DDP5.1.mkv',
+    ).title).toBe('Endure');
+  });
 });

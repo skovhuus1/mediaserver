@@ -50,7 +50,7 @@ export function WatchPortal() {
   if (!user) return <main className="watch-loading" aria-busy="true" />;
   return (
     <CustomerShell user={user}>
-      <PersonalizedRecommendations />
+      {!browse && !continueOnly ? <PersonalizedRecommendations /> : null}
       {continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : (
         <>
           <section className="watch-hero">

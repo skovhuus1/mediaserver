@@ -13,6 +13,7 @@ import {
   RecommendationSignal,
   scoreRecommendation,
 } from './recommendation-score';
+import { sanitizeMediaTitle } from '@boltbytes/contracts';
 
 interface RecommendationCard {
   id: string;
@@ -25,6 +26,27 @@ interface RecommendationCard {
   communityRating: number | null;
   reason: string;
   score: number;
+}
+
+interface RankedRecommendation extends RecommendationCard {
+  dedupeKey: string;
+}
+
+function normalizeRecommendationKey(value: string): string {
+  return sanitizeMediaTitle(value).toLocaleLowerCase('da-DK').replace(/[^a-z0-9]+/g, '');
+}
+
+function dedupeRecommendations(items: RankedRecommendation[]): RankedRecommendation[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.dedupeKey)) return false;
+    seen.add(item.dedupeKey);
+    return true;
+  });
+}
+
+function publicRecommendation({ dedupeKey: _dedupeKey, ...card }: RankedRecommendation): RecommendationCard {
+  return card;
 }
 
 @Injectable()
@@ -123,7 +145,7 @@ export class RecommendationsService {
         })
       : [];
 
-    const ranked = candidates
+    const ranked = dedupeRecommendations(candidates
       .filter(
         (media) =>
           !watchedIds.has(media.id)
@@ -136,9 +158,10 @@ export class RecommendationsService {
           signals,
           feedback.get(media.id) as 'like' | 'dislike' | 'hidden' | undefined,
         );
+        const title = sanitizeMediaTitle(media.seriesTitle ?? media.title);
         return {
           id: media.id,
-          title: media.title,
+          title,
           category: media.category ?? 'uncategorized',
           summary: media.overview,
           posterPath: media.posterPath,
@@ -149,28 +172,31 @@ export class RecommendationsService {
             ? result.reason
             : 'Populært i dit lokale bibliotek',
           score: result.score,
-        } satisfies RecommendationCard;
+          dedupeKey: media.seriesTitle
+            ? `series:${normalizeRecommendationKey(media.seriesTitle)}`
+            : `movie:${media.releaseYear ?? 0}:${normalizeRecommendationKey(title)}`,
+        } satisfies RankedRecommendation;
       })
       .filter((media) => Number.isFinite(media.score))
-      .sort((left, right) => right.score - left.score);
+      .sort((left, right) => right.score - left.score));
 
     const mostRecent = history[0]?.media;
     const primaryReason = mostRecent
-      ? `Fordi du så ${mostRecent.title}`
+      ? `Fordi du så ${sanitizeMediaTitle(mostRecent.seriesTitle ?? mostRecent.title)}`
       : `Udvalgt til ${profile.name}`;
     const response = {
       personalized,
-      hero: ranked[0] ?? null,
+      hero: ranked[0] ? publicRecommendation(ranked[0]) : null,
       sections: [
         {
           id: 'for-you',
           title: `Udvalgt til ${profile.name}`,
-          items: ranked.slice(0, 20),
+          items: ranked.slice(0, 20).map(publicRecommendation),
         },
         {
           id: 'because-you-watched',
           title: primaryReason,
-          items: ranked.slice(5, 25),
+          items: ranked.slice(5, 25).map(publicRecommendation),
         },
         {
           id: 'new-and-rated',
@@ -182,7 +208,8 @@ export class RecommendationsService {
                 (right.releaseYear ?? 0) - (left.releaseYear ?? 0) ||
                 (right.communityRating ?? 0) - (left.communityRating ?? 0),
             )
-            .slice(0, 20),
+            .slice(0, 20)
+            .map(publicRecommendation),
         },
       ].filter((section) => section.items.length > 0),
     };

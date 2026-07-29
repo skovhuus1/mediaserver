@@ -706,6 +706,15 @@ function SettingsView() {
     setLoadingErrors(true);
     try { setErrors(await api<ErrorEntry[]>('/system/errors')); } finally { setLoadingErrors(false); }
   }
+  async function clearErrors() {
+    setLoadingErrors(true);
+    try {
+      await api('/system/errors', { method: 'DELETE' });
+      setErrors([]);
+    } finally {
+      setLoadingErrors(false);
+    }
+  }
   useEffect(() => {
     void api<UpdateStatus>('/system/update/status').then(setUpdate).catch(() => undefined);
     void api<MetadataStatus>('/media/metadata/status').then((status) => { setMetadata(status); setMetadataLanguage(status.language); }).catch(() => undefined);
@@ -764,7 +773,7 @@ function SettingsView() {
         {metadataMessage && <div className="update-message">{metadataMessage}</div>}
       </div>
       <div className="management-card">
-        <div className="management-heading"><h2><ShieldCheck size={18} /> Fejllog</h2><button onClick={() => void loadErrors()} disabled={loadingErrors}>{loadingErrors ? 'Henter...' : 'Opdater'}</button></div>
+        <div className="management-heading"><h2><ShieldCheck size={18} /> Fejllog</h2><div className="row-actions"><button onClick={() => void clearErrors()} disabled={loadingErrors || !errors.length}>Ryd viste</button><button onClick={() => void loadErrors()} disabled={loadingErrors}>{loadingErrors ? 'Henter...' : 'Opdater'}</button></div></div>
         {!errors.length && <p>Ingen durable scanner- eller workerfejl er registreret.</p>}
         {errors.map((entry) => <article className={`error-entry ${entry.severity}`} key={entry.id}><div><strong>{entry.source} · {entry.code}</strong><time>{new Date(entry.timestamp).toLocaleString('da-DK')}</time></div><p>{entry.message}</p><pre>{JSON.stringify(entry.details, null, 2)}</pre></article>)}
       </div>

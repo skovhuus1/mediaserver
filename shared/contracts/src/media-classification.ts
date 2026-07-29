@@ -16,6 +16,7 @@ const episodePatterns = [
 ];
 const seasonDirectoryPattern = /^(?:season|sæson|s)\s*0*(\d{1,2})$/i;
 const yearPattern = /(?:^|[\s([])((?:19|20)\d{2})(?=$|[\s.)\]])/;
+const technicalSuffixPattern = /(?:^|\s+)(?:danish|nordic|multi|(?:4320|2160|1440|1080|720|576|480|360)[pi]|4k|8k|uhd|web(?:\s+dl|\s+rip)?|blu\s*ray|bluray|b[rd]rip|remux|hdtv|dvd\s*rip|x26[45]|h\.?26[45]|hevc|avc|av1|vp9|hdr10\+?|hdr|dolby\s*vision|dovi|sdr|aac|dts(?:\s*hd)?|ddp?\+?(?:\s*\d(?:\s*\d)?)?|eac3|ac3|atmos)\b.*$/i;
 
 export function classifyMediaPath(libraryKind: LibraryKind, relativePath: string): MediaClassification {
   const segments = relativePath.split('/').filter(Boolean);
@@ -30,10 +31,10 @@ export function classifyMediaPath(libraryKind: LibraryKind, relativePath: string
     const category = nonSeasonDirectories.length > 1 ? cleanName(nonSeasonDirectories[0]!) : null;
     const seasonNumber = numberOrNull(episodeMatch?.[1] ?? seasonDirectory?.[1]);
     const episodeNumber = numberOrNull(episodeMatch?.[2]);
-    const episodeSuffix = episodeMatch ? cleanName(stem.slice(episodeMatch.index + episodeMatch[0].length)) : '';
+    const episodeSuffix = episodeMatch ? sanitizeMediaTitle(stem.slice(episodeMatch.index + episodeMatch[0].length)) : '';
     return {
       type: 'episode',
-      title: episodeSuffix || (episodeNumber === null ? cleanName(stem) : `Episode ${episodeNumber}`),
+      title: episodeSuffix || (episodeNumber === null ? sanitizeMediaTitle(stem) : `Episode ${episodeNumber}`),
       category,
       seriesTitle,
       seasonNumber,
@@ -42,11 +43,13 @@ export function classifyMediaPath(libraryKind: LibraryKind, relativePath: string
     };
   }
 
-  const cleanedStem = cleanName(stem);
-  const releaseYear = extractYear(cleanedStem);
+  const cleanedStem = sanitizeMediaTitle(stem);
+  const directoryTitle = segments.length > 1 ? sanitizeMediaTitle(segments.at(-1) ?? '') : '';
+  const classifiedTitle = cleanedStem || directoryTitle;
+  const releaseYear = extractYear(classifiedTitle);
   const title = releaseYear === null
-    ? cleanedStem
-    : cleanName(cleanedStem.replace(new RegExp(`(?:\\(|\\[)?${releaseYear}(?:\\)|\\])?`), ''));
+    ? classifiedTitle
+    : cleanName(classifiedTitle.replace(new RegExp(`(?:\\(|\\[)?${releaseYear}(?:\\)|\\])?`), ''));
   return {
     type: 'movie',
     title: title || 'Unavngivet medie',
@@ -56,6 +59,10 @@ export function classifyMediaPath(libraryKind: LibraryKind, relativePath: string
     episodeNumber: null,
     releaseYear,
   };
+}
+
+export function sanitizeMediaTitle(value: string): string {
+  return cleanName(value).replace(technicalSuffixPattern, '').trim();
 }
 
 function cleanName(value: string): string {

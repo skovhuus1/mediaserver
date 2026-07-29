@@ -1,6 +1,7 @@
 'use client';
 
 import Hls from 'hls.js';
+import { sanitizeMediaTitle } from '@boltbytes/contracts';
 import {
   ArrowLeft,
   Captions,
@@ -196,6 +197,7 @@ export function WebPlayer() {
   const mediaRef = useRef<PlayableMedia | null>(null);
   const resumeRef = useRef(0);
   const castingRef = useRef(false);
+  const bufferingRef = useRef(false);
   const castRemotePlayerRef = useRef<CastRemotePlayer | null>(null);
   const castRemoteControllerRef = useRef<CastRemotePlayerController | null>(null);
   const clearCastListenerRef = useRef<(() => void) | null>(null);
@@ -451,12 +453,30 @@ export function WebPlayer() {
 
   useEffect(() => {
     if (!authorization) return;
-    const heartbeat = window.setInterval(() => {
+    const sendHeartbeat = () => {
+      const video = videoRef.current;
+      const remote = castingRef.current ? castRemotePlayerRef.current : null;
+      const hls = hlsRef.current;
+      const level = hls && hls.currentLevel >= 0 ? hls.levels[hls.currentLevel] : null;
+      const position = remote?.currentTime ?? video?.currentTime ?? 0;
+      const mediaDuration = remote?.duration ?? video?.duration;
+      const remoteState = remote?.playerState?.toLowerCase();
       void api(`/playback/sessions/${authorization.sessionId}/heartbeat`, {
         method: 'PATCH',
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          runtimeState: remote
+            ? remoteState === 'buffering' ? 'buffering' : remote.isPaused ? 'paused' : 'playing'
+            : bufferingRef.current ? 'buffering' : video?.paused ? 'paused' : 'playing',
+          positionMs: Math.max(0, Math.round(position * 1000)),
+          durationMs: Number.isFinite(mediaDuration) ? Math.max(0, Math.round((mediaDuration ?? 0) * 1000)) : null,
+          currentBitrate: remote ? null : Math.max(0, Math.round(level?.bitrate ?? authorization.videoProfile.source.bitrate ?? 0)),
+          currentHeight: Math.round(level?.height ?? authorization.videoProfile.output.height ?? authorization.videoProfile.source.height ?? 0) || null,
+          bufferAheadMs: remote || !video ? null : bufferedAheadMs(video),
+        }),
       }).catch((caught: ApiFailure) => setError(caught.message ?? 'Playback-sessionen udløb.'));
-    }, 30_000);
+    };
+    void sendHeartbeat();
+    const heartbeat = window.setInterval(sendHeartbeat, 5_000);
     return () => window.clearInterval(heartbeat);
   }, [authorization]);
 
@@ -772,7 +792,7 @@ export function WebPlayer() {
       className={`${styles.overlay} ${controlsVisible ? '' : styles.overlayIdle}`}
       role="dialog"
       aria-modal="true"
-      aria-label={`Afspiller ${media.title}`}
+      aria-label={`Afspiller ${sanitizeMediaTitle(media.seriesTitle ?? media.title) || media.title}`}
       onMouseMove={revealControls}
       onPointerDown={revealControls}
       onTouchStart={revealControls}
@@ -783,15 +803,21 @@ export function WebPlayer() {
         ref={videoRef}
         playsInline
         onPlay={() => {
+          bufferingRef.current = false;
           setPaused(false);
           revealControls();
         }}
         onPause={() => {
+          bufferingRef.current = false;
           setControlsVisible(true);
           setPaused(true);
           void saveProgress(false).catch(() => undefined);
         }}
         onDurationChange={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+        onWaiting={() => { bufferingRef.current = true; }}
+        onStalled={() => { bufferingRef.current = true; }}
+        onPlaying={() => { bufferingRef.current = false; }}
+        onCanPlay={() => { bufferingRef.current = false; }}
         onVolumeChange={(event) => setVolume(event.currentTarget.volume)}
         onTimeUpdate={(event) => {
           setCurrentTime(event.currentTarget.currentTime);
@@ -820,7 +846,7 @@ export function WebPlayer() {
       <div className={styles.topBar}>
         <button className={styles.iconButton} onClick={() => void stop()} aria-label="Tilbage"><ArrowLeft /></button>
         <div className={styles.title}>
-          <strong>{media.seriesTitle ?? media.title}</strong>
+          <strong>{sanitizeMediaTitle(media.seriesTitle ?? media.title) || media.title}</strong>
           <small>
             {[media.releaseYear, media.category, episodeLabel(media)].filter(Boolean).join(' · ')}
           </small>
@@ -1065,7 +1091,9 @@ async function loadCastFramework(): Promise<{ available: boolean; reason: string
   }
   const castWindow = window as CastWindow;
   if (castWindow.cast?.framework && castWindow.chrome?.cast?.media) {
-    return { available: true, reason: 'Afspil på Chromecast' };
+    return configureCastFramework(castWindow)
+      ? { available: true, reason: 'Afspil på Chromecast' }
+      : { available: false, reason: 'Google Cast Framework kunne ikke initialiseres.' };
   }
   return new Promise((resolve) => {
     let settled = false;
@@ -1075,11 +1103,7 @@ async function loadCastFramework(): Promise<{ available: boolean; reason: string
       if (available) {
         const framework = castWindow.cast?.framework;
         const media = castWindow.chrome?.cast?.media;
-        if (framework && media) {
-          framework.CastContext.getInstance().setOptions({
-            receiverApplicationId: media.DEFAULT_MEDIA_RECEIVER_APP_ID,
-            autoJoinPolicy: framework.AutoJoinPolicy.ORIGIN_SCOPED,
-          });
+        if (framework && media && configureCastFramework(castWindow)) {
           resolve({ available: true, reason: 'Afspil på Chromecast' });
           return;
         }
@@ -1100,6 +1124,32 @@ async function loadCastFramework(): Promise<{ available: boolean; reason: string
     }
     window.setTimeout(() => finish(Boolean(castWindow.cast?.framework)), 10_000);
   });
+}
+
+function configureCastFramework(castWindow: CastWindow): boolean {
+  const framework = castWindow.cast?.framework;
+  const media = castWindow.chrome?.cast?.media;
+  if (!framework || !media) return false;
+  try {
+    framework.CastContext.getInstance().setOptions({
+      receiverApplicationId: media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+      autoJoinPolicy: framework.AutoJoinPolicy.ORIGIN_SCOPED,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function bufferedAheadMs(video: HTMLVideoElement): number {
+  for (let index = 0; index < video.buffered.length; index += 1) {
+    const start = video.buffered.start(index);
+    const end = video.buffered.end(index);
+    if (video.currentTime >= start && video.currentTime <= end) {
+      return Math.max(0, Math.round((end - video.currentTime) * 1000));
+    }
+  }
+  return 0;
 }
 
 function menuTitle(menu: Exclude<PlayerMenu, null>) {
@@ -1138,7 +1188,7 @@ function formatTime(seconds: number) {
 
 function episodeLabel(media: PlayableMedia) {
   if (media.seasonNumber === null || media.seasonNumber === undefined) return media.type === 'movie' ? 'Film' : '';
-  return `S${String(media.seasonNumber).padStart(2, '0')}E${String(media.episodeNumber ?? 0).padStart(2, '0')} · ${media.title}`;
+  return `S${String(media.seasonNumber).padStart(2, '0')}E${String(media.episodeNumber ?? 0).padStart(2, '0')} · ${sanitizeMediaTitle(media.title) || media.title}`;
 }
 
 export const playbackHistoryChangedEvent = historyEvent;

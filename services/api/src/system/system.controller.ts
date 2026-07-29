@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Patch, Post, Put } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,6 +9,44 @@ import { SetUpdateBranchDto, UpdateServerSettingsDto } from './system.dto';
 import { SaveMetadataSettingsDto } from './metadata-settings.dto';
 import { metadataSettingsStatus, saveMetadataSettings } from './metadata-settings';
 import { collectDefaultMetrics, register } from 'prom-client';
+import { cpus, freemem, loadavg, totalmem, uptime } from 'node:os';
+
+type CpuSnapshot = { idle: number; total: number };
+
+function cpuSnapshot(): CpuSnapshot {
+  return cpus().reduce(
+    (result, cpu) => {
+      const times = Object.values(cpu.times);
+      return {
+        idle: result.idle + cpu.times.idle,
+        total: result.total + times.reduce((sum, value) => sum + value, 0),
+      };
+    },
+    { idle: 0, total: 0 },
+  );
+}
+
+let previousCpu = cpuSnapshot();
+
+function serverStatsSnapshot() {
+  const currentCpu = cpuSnapshot();
+  const totalDelta = currentCpu.total - previousCpu.total;
+  const idleDelta = currentCpu.idle - previousCpu.idle;
+  previousCpu = currentCpu;
+  const memoryTotalBytes = totalmem();
+  const memoryUsedBytes = Math.max(0, memoryTotalBytes - freemem());
+  return {
+    cpuPercent: totalDelta > 0
+      ? Math.max(0, Math.min(100, ((totalDelta - idleDelta) / totalDelta) * 100))
+      : 0,
+    memoryUsedBytes,
+    memoryTotalBytes,
+    memoryPercent: memoryTotalBytes > 0 ? (memoryUsedBytes / memoryTotalBytes) * 100 : 0,
+    loadAverage: loadavg(),
+    uptimeSeconds: Math.floor(uptime()),
+    sampledAt: new Date().toISOString(),
+  };
+}
 
 let metricsInitialized = false;
 if (!metricsInitialized) {
@@ -48,10 +86,16 @@ export class SystemController {
     return register.metrics();
   }
 
+  @Get('stats')
+  @Roles('admin', 'operator')
+  stats() {
+    return serverStatsSnapshot();
+  }
+
   @Get('errors')
   @Roles('admin')
   async errors(@CurrentUser() actor: AuthenticatedUser) {
-    const [scans, attempts] = await Promise.all([
+    const [scans, attempts, dismissedSetting] = await Promise.all([
       this.prisma.libraryScan.findMany({
         where: {
           accountId: actor.accountId,
@@ -67,7 +111,19 @@ export class SystemController {
         orderBy: { startedAt: 'desc' },
         take: 50,
       }),
+      this.prisma.systemSetting.findUnique({
+        where: {
+          accountId_key: {
+            accountId: actor.accountId,
+            key: 'notifications.dismissedBefore',
+          },
+        },
+        select: { value: true },
+      }),
     ]);
+    const dismissedBefore = typeof dismissedSetting?.value === 'string'
+      ? Date.parse(dismissedSetting.value)
+      : 0;
     return [
       ...scans.map((scan) => ({
         id: `scan:${scan.id}`,
@@ -99,7 +155,45 @@ export class SystemController {
           attempt: attempt.number,
         },
       })),
-    ].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp)).slice(0, 75);
+    ]
+      .filter((entry) => Date.parse(entry.timestamp) > dismissedBefore)
+      .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))
+      .slice(0, 75);
+  }
+
+  @Delete('errors')
+  @Roles('admin')
+  async clearErrors(@CurrentUser() actor: AuthenticatedUser) {
+    const clearedAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.systemSetting.upsert({
+        where: {
+          accountId_key: {
+            accountId: actor.accountId,
+            key: 'notifications.dismissedBefore',
+          },
+        },
+        create: {
+          accountId: actor.accountId,
+          key: 'notifications.dismissedBefore',
+          value: clearedAt.toISOString(),
+        },
+        update: { value: clearedAt.toISOString() },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: actor.profileId,
+          correlationId: 'system-errors',
+          action: 'system.notifications_cleared',
+          outcome: 'allowed',
+          code: 'notifications_cleared',
+          details: { clearedAt: clearedAt.toISOString() },
+        },
+      }),
+    ]);
+    return { clearedAt: clearedAt.toISOString() };
   }
 
   @Get('server-settings')
