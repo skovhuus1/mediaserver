@@ -9,7 +9,50 @@ type Root = { id: string; label: string; mountPath: string; isReadOnly: boolean 
 type Scan = { id: string; status: string; filesSeen: number; filesCreated: number; errors: number; error: string | null };
 type Library = { id: string; name: string; type: string; storageRoot: Root; paths: Array<{ path: string; recursive: boolean }>; scans: Scan[] };
 type DirectoryListing = { currentPath: string; parentPath: string | null; directories: Array<{ name: string; path: string }> };
-type User = { id: string; email: string; displayName: string; status: string; profiles: Array<{ id: string; name: string }>; roles: Array<{ role: { code: string } }> };
+type UserProfile = {
+  id: string;
+  name: string;
+  isChildProfile: boolean;
+  language: string;
+  hasPin: boolean;
+  archivedAt: string | null;
+};
+type UserSubscription = {
+  id: string;
+  status: string;
+  planVersionId: string;
+  startsAt: string;
+  endsAt: string | null;
+  planVersion: { version: number; plan: { name: string } };
+};
+type User = {
+  id: string;
+  email: string;
+  displayName: string;
+  status: string;
+  mustChangePassword: boolean;
+  profiles: UserProfile[];
+  subscriptions: UserSubscription[];
+  roles: Array<{ role: { code: string } }>;
+};
+type Device = {
+  id: string;
+  userId: string;
+  name: string;
+  type: string;
+  platform: string | null;
+  appVersion: string | null;
+  isRevoked: boolean;
+  lastSeenAt: string;
+};
+type EntitlementOverride = {
+  id: string;
+  userId: string;
+  profileId: string | null;
+  values: Record<string, unknown>;
+  reason: string;
+  expiresAt: string | null;
+};
 type PlanEntitlements = {
   maxConcurrentStreams: number; maxRegisteredDevices: number; maxVideoResolution: number; maxVideoBitrate: number;
   allowDirectPlay: boolean; allowDirectStream: boolean; allowVideoTranscode: boolean; allowAudioTranscode: boolean;
@@ -172,9 +215,272 @@ function LibrariesView() {
 
 function UsersView() {
   const [users, setUsers] = useState<User[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [overrides, setOverrides] = useState<EntitlementOverride[]>([]);
+  const [canWrite, setCanWrite] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState('');
   const [message, setMessage] = useState('');
-  useEffect(() => { void api<User[]>('/users').then(setUsers).catch((error) => setMessage(errorMessage(error))); }, []);
-  return <section className="management-page"><span className="eyebrow">ACCESS CONTROL</span><h1>Brugere</h1><p>Rigtige konti, roller og profiler fra serveren.</p><div className="management-card"><h2><Users size={18} /> Brugere</h2>{users.map((user) => <div className="data-row" key={user.id}><div><strong>{user.displayName}</strong><small>{user.email}</small><small>{user.roles.map(({ role }) => role.code).join(', ')} · {user.profiles.length} profil(er)</small></div><span className={`state-badge ${user.status}`}>{user.status}</span></div>)}</div>{message && <div className="update-message">{message}</div>}</section>;
+  const [temporaryPassword, setTemporaryPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    const [nextUsers, nextPlans, nextDevices, nextOverrides, session] = await Promise.all([
+      api<User[]>('/users'),
+      api<Plan[]>('/plans'),
+      api<Device[]>('/devices'),
+      api<EntitlementOverride[]>('/entitlement-overrides'),
+      api<{ roles: string[] }>('/auth/me'),
+    ]);
+    setUsers(nextUsers);
+    setPlans(nextPlans);
+    setDevices(nextDevices);
+    setOverrides(nextOverrides);
+    setCanWrite(session.roles.includes('admin'));
+    setSelectedUserId((current) => current && nextUsers.some((user) => user.id === current)
+      ? current
+      : nextUsers[0]?.id ?? '');
+  }
+
+  useEffect(() => { void refresh().catch((error) => setMessage(errorMessage(error))); }, []);
+
+  async function run(action: () => Promise<unknown>, success: string) {
+    setBusy(true);
+    setMessage('');
+    try {
+      await action();
+      setMessage(success);
+      await refresh();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    setMessage('');
+    setTemporaryPassword('');
+    try {
+      const created = await api<{ id: string; temporaryPassword: string }>('/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: form.get('email'),
+          displayName: form.get('displayName'),
+          profileName: form.get('profileName'),
+          planVersionId: form.get('planVersionId') || undefined,
+        }),
+      });
+      setTemporaryPassword(created.temporaryPassword);
+      setSelectedUserId(created.id);
+      event.currentTarget.reset();
+      setMessage('Kunden er oprettet. Den midlertidige adgangskode vises kun her.');
+      await refresh();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const selected = users.find((user) => user.id === selectedUserId);
+  const activeSubscription = selected?.subscriptions.find((subscription) =>
+    ['pending', 'trialing', 'active', 'grace_period'].includes(subscription.status));
+  const planVersions = plans.flatMap((plan) => plan.versions.map((version) => ({
+    id: version.id,
+    label: `${plan.name} · version ${version.version}`,
+  })));
+
+  return (
+    <section className="management-page customer-admin">
+      <span className="eyebrow">ACCESS CONTROL</span><h1>Kundeadministration</h1>
+      <p>Konti, profiler, abonnementer, enheder og individuelle rettigheder.</p>
+      <div className="customer-admin-grid">
+        <div>
+          <form className="management-card management-form" onSubmit={createUser}>
+            <h2><Users size={18} /> Opret kunde</h2>
+            <label>Navn<input name="displayName" minLength={2} required disabled={!canWrite || busy} /></label>
+            <label>E-mail<input name="email" type="email" required disabled={!canWrite || busy} /></label>
+            <label>Profilnavn<input name="profileName" required disabled={!canWrite || busy} /></label>
+            <label>Plan<select name="planVersionId" required disabled={!canWrite || busy}><option value="">Vælg plan</option>{planVersions.map((plan) => <option value={plan.id} key={plan.id}>{plan.label}</option>)}</select></label>
+            <button className="primary-action" disabled={!canWrite || busy}>Opret med midlertidig kode</button>
+          </form>
+          {temporaryPassword && (
+            <div className="temporary-password">
+              <strong>Midlertidig adgangskode</strong><code>{temporaryPassword}</code>
+              <button onClick={() => void navigator.clipboard.writeText(temporaryPassword)}>Kopiér</button>
+            </div>
+          )}
+          <div className="management-card customer-list">
+            <h2>Brugere</h2>
+            {users.map((user) => (
+              <button className={selectedUserId === user.id ? 'selected' : ''} onClick={() => setSelectedUserId(user.id)} key={user.id}>
+                <span><strong>{user.displayName}</strong><small>{user.email}</small></span>
+                <i className={`state-badge ${user.status}`}>{user.status}</i>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          {!selected && <div className="management-card"><p>Vælg en kunde.</p></div>}
+          {selected && (
+            <>
+              <form className="management-card management-form" onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                void run(() => api(`/users/${selected.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({ displayName: form.get('displayName'), email: form.get('email') }),
+                }), 'Kunden er opdateret.');
+              }}>
+                <div className="management-heading"><h2>Konto</h2><span className={`state-badge ${selected.status}`}>{selected.status}</span></div>
+                <label>Navn<input name="displayName" defaultValue={selected.displayName} required disabled={!canWrite || busy} /></label>
+                <label>E-mail<input name="email" type="email" defaultValue={selected.email} required disabled={!canWrite || busy} /></label>
+                <small>{selected.mustChangePassword ? 'Afventer første passwordskifte' : 'Adgangskode aktiveret'}</small>
+                <div className="row-actions">
+                  <button className="primary-action" disabled={!canWrite || busy}>Gem</button>
+                  <button type="button" disabled={!canWrite || busy} onClick={() => void run(
+                    () => api(`/users/${selected.id}/suspend`, {
+                      method: 'PATCH',
+                      body: JSON.stringify({ suspended: selected.status !== 'suspended' }),
+                    }),
+                    selected.status === 'suspended' ? 'Kunden er reaktiveret.' : 'Kunden er suspenderet.',
+                  )}>{selected.status === 'suspended' ? 'Reaktivér' : 'Suspendér'}</button>
+                  <button type="button" disabled={!canWrite || busy} onClick={() => void (async () => {
+                    setBusy(true);
+                    try {
+                      const result = await api<{ temporaryPassword: string }>(`/users/${selected.id}/reset-password`, { method: 'POST' });
+                      setTemporaryPassword(result.temporaryPassword);
+                      setMessage('Ny midlertidig adgangskode er oprettet.');
+                      await refresh();
+                    } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
+                  })()}>Nulstil adgangskode</button>
+                </div>
+              </form>
+
+              <div className="management-card">
+                <h2>Profiler</h2>
+                {selected.profiles.map((profile) => (
+                  <form className="profile-admin-row" key={profile.id} onSubmit={(event) => {
+                    event.preventDefault();
+                    const form = new FormData(event.currentTarget);
+                    void run(() => api(`/profiles/${profile.id}`, {
+                      method: 'PATCH',
+                      body: JSON.stringify({
+                        name: form.get('name'),
+                        language: form.get('language'),
+                        isChildProfile: form.get('isChildProfile') === 'on',
+                        pin: form.get('pin') || undefined,
+                        clearPin: form.get('clearPin') === 'on',
+                      }),
+                    }), 'Profilen er opdateret.');
+                  }}>
+                    <input name="name" defaultValue={profile.name} required disabled={!canWrite || busy} />
+                    <input name="language" defaultValue={profile.language} pattern="[a-z]{2}(-[A-Z]{2})?" required disabled={!canWrite || busy} />
+                    <input name="pin" type="password" inputMode="numeric" pattern="\d{4,8}" placeholder={profile.hasPin ? 'Ny PIN' : 'Valgfri PIN'} disabled={!canWrite || busy} />
+                    <label><input name="isChildProfile" type="checkbox" defaultChecked={profile.isChildProfile} disabled={!canWrite || busy} /> Barn</label>
+                    {profile.hasPin && <label><input name="clearPin" type="checkbox" disabled={!canWrite || busy} /> Fjern PIN</label>}
+                    <div className="row-actions"><button disabled={!canWrite || busy}>Gem</button><button type="button" disabled={!canWrite || busy} onClick={() => void run(
+                      () => api(`/profiles/${profile.id}/archive`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ archived: !profile.archivedAt }),
+                      }),
+                      profile.archivedAt ? 'Profilen er gendannet.' : 'Profilen er arkiveret.',
+                    )}>{profile.archivedAt ? 'Gendan' : 'Arkivér'}</button></div>
+                  </form>
+                ))}
+                <form className="profile-admin-row profile-create-row" onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = new FormData(event.currentTarget);
+                  void run(() => api('/profiles', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      userId: selected.id,
+                      name: form.get('name'),
+                      language: form.get('language'),
+                      pin: form.get('pin') || undefined,
+                      isChildProfile: form.get('isChildProfile') === 'on',
+                    }),
+                  }), 'Profilen er oprettet.');
+                  event.currentTarget.reset();
+                }}>
+                  <input name="name" placeholder="Ny profil" required disabled={!canWrite || busy} />
+                  <input name="language" defaultValue="da" required disabled={!canWrite || busy} />
+                  <input name="pin" type="password" inputMode="numeric" pattern="\d{4,8}" placeholder="Valgfri PIN" disabled={!canWrite || busy} />
+                  <label><input name="isChildProfile" type="checkbox" disabled={!canWrite || busy} /> Barn</label>
+                  <button disabled={!canWrite || busy}>Opret profil</button>
+                </form>
+              </div>
+
+              <div className="management-card">
+                <h2>Abonnement</h2>
+                <p>{activeSubscription ? `${activeSubscription.planVersion.plan.name} · ${activeSubscription.status}` : 'Intet aktivt abonnement'}</p>
+                <label className="inline-select">Plan<select defaultValue={activeSubscription?.planVersionId ?? ''} id={`plan-${selected.id}`} disabled={!canWrite || busy}><option value="">Vælg plan</option>{planVersions.map((plan) => <option value={plan.id} key={plan.id}>{plan.label}</option>)}</select></label>
+                <div className="row-actions">
+                  <button disabled={!canWrite || busy} onClick={() => {
+                    const planVersionId = (document.getElementById(`plan-${selected.id}`) as HTMLSelectElement | null)?.value;
+                    if (!planVersionId) return;
+                    void run(
+                      () => activeSubscription
+                        ? api(`/subscriptions/${activeSubscription.id}/change-plan`, { method: 'PATCH', body: JSON.stringify({ planVersionId }) })
+                        : api('/subscriptions', { method: 'POST', body: JSON.stringify({ userId: selected.id, planVersionId, status: 'active' }) }),
+                      'Abonnementet er opdateret.',
+                    );
+                  }}>{activeSubscription ? 'Skift plan' : 'Aktivér abonnement'}</button>
+                  {activeSubscription && <button disabled={!canWrite || busy} onClick={() => void run(
+                    () => api(`/subscriptions/${activeSubscription.id}/cancel`, { method: 'PATCH' }),
+                    'Abonnementet er annulleret.',
+                  )}>Annuller abonnement</button>}
+                </div>
+              </div>
+
+              <div className="management-card">
+                <h2>Enheder</h2>
+                {devices.filter((device) => device.userId === selected.id).map((device) => (
+                  <div className="data-row" key={device.id}><div><strong>{device.name}</strong><small>{device.platform ?? device.type} · {device.appVersion ?? 'ukendt version'}</small><small>Senest set {new Date(device.lastSeenAt).toLocaleString('da-DK')}</small></div><button disabled={!canWrite || busy || device.isRevoked} onClick={() => void run(() => api(`/devices/${device.id}`, { method: 'DELETE' }), 'Enheden er tilbagekaldt.')}>{device.isRevoked ? 'Tilbagekaldt' : 'Tilbagekald'}</button></div>
+                ))}
+              </div>
+
+              <div className="management-card">
+                <h2>Entitlement-overrides</h2>
+                {overrides.filter((override) => override.userId === selected.id).map((override) => (
+                  <div className="data-row" key={override.id}><div><strong>{override.reason}</strong><small>{JSON.stringify(override.values)}</small><small>{override.expiresAt ? `Udløber ${new Date(override.expiresAt).toLocaleString('da-DK')}` : 'Ingen udløbsdato'}</small></div><button disabled={!canWrite || busy} onClick={() => void run(() => api(`/entitlement-overrides/${override.id}`, { method: 'DELETE' }), 'Override er fjernet.')}>Fjern</button></div>
+                ))}
+                <form className="management-form" onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = new FormData(event.currentTarget);
+                  let values: Record<string, unknown>;
+                  try { values = JSON.parse(String(form.get('values'))) as Record<string, unknown>; } catch { setMessage('Override-værdier skal være gyldig JSON.'); return; }
+                  void run(() => api('/entitlement-overrides', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      userId: selected.id,
+                      profileId: form.get('profileId') || undefined,
+                      values,
+                      reason: form.get('reason'),
+                      expiresAt: form.get('expiresAt') ? new Date(String(form.get('expiresAt'))).toISOString() : undefined,
+                    }),
+                  }), 'Override er oprettet.');
+                  event.currentTarget.reset();
+                }}>
+                  <label>Profil<select name="profileId" disabled={!canWrite || busy}><option value="">Hele kontoen</option>{selected.profiles.filter((profile) => !profile.archivedAt).map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></label>
+                  <label>Værdier (JSON)<input name="values" defaultValue='{"maxConcurrentStreams":2}' required disabled={!canWrite || busy} /></label>
+                  <label>Begrundelse<input name="reason" minLength={3} required disabled={!canWrite || busy} /></label>
+                  <label>Udløber<input name="expiresAt" type="datetime-local" disabled={!canWrite || busy} /></label>
+                  <button disabled={!canWrite || busy}>Opret override</button>
+                </form>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+      {!canWrite && <div className="update-message">Operator-adgang er skrivebeskyttet.</div>}
+      {message && <div className="update-message">{message}</div>}
+    </section>
+  );
 }
 
 function PlansView() {
@@ -283,6 +589,107 @@ function PlansView() {
   );
 }
 
+function ServerSettingsCard() {
+  const [settings, setSettings] = useState<{
+    serverName: string;
+    externalUrl: string | null;
+    language: string;
+    timezone: string;
+    effectivePublicUrl: string | null;
+    publicUrlSource: 'environment' | 'account' | 'unset';
+    httpsReady: boolean;
+    castReady: boolean;
+    corsOrigins: string[];
+  } | null>(null);
+  const [canWrite, setCanWrite] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const load = async () => {
+    const [nextSettings, me] = await Promise.all([
+      api<NonNullable<typeof settings>>('/system/server-settings'),
+      api<{ roles: string[] }>('/auth/me'),
+    ]);
+    setSettings(nextSettings);
+    setCanWrite(me.roles.includes('admin'));
+  };
+
+  useEffect(() => {
+    void load().catch((error) => setMessage(error instanceof Error ? error.message : 'Serverindstillinger kunne ikke hentes'));
+  }, []);
+
+  if (!settings) {
+    return (
+      <div className="management-card">
+        <p>{message ?? 'Henter serverindstillinger...'}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="management-card">
+      <div className="management-card-header">
+        <div>
+          <span className="eyebrow">Domæne og streaming</span>
+          <h2>Offentlig serveradresse</h2>
+        </div>
+        <span className={`status-pill ${settings.httpsReady && settings.castReady ? 'success' : 'warning'}`}>
+          {settings.httpsReady && settings.castReady ? 'HTTPS og Cast klar' : 'Kræver HTTPS-konfiguration'}
+        </span>
+      </div>
+      <form
+        className="management-form-grid"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void api('/system/server-settings', {
+            method: 'PATCH',
+            body: JSON.stringify({
+              serverName: form.get('serverName'),
+              externalUrl: form.get('externalUrl'),
+              language: form.get('language'),
+              timezone: form.get('timezone'),
+            }),
+          })
+            .then(() => load())
+            .then(() => setMessage('Serverindstillingerne er gemt.'))
+            .catch((error) => setMessage(error instanceof Error ? error.message : 'Serverindstillingerne kunne ikke gemmes'));
+        }}
+      >
+        <label>
+          Servernavn
+          <input name="serverName" defaultValue={settings.serverName} disabled={!canWrite} required />
+        </label>
+        <label>
+          Ekstern URL
+          <input
+            name="externalUrl"
+            type="url"
+            defaultValue={settings.externalUrl ?? ''}
+            placeholder="https://media.boltbytes.com"
+            disabled={!canWrite}
+            required
+          />
+        </label>
+        <label>
+          Sprog
+          <input name="language" defaultValue={settings.language} disabled={!canWrite} required />
+        </label>
+        <label>
+          Tidszone
+          <input name="timezone" defaultValue={settings.timezone} disabled={!canWrite} required />
+        </label>
+        {canWrite ? <button type="submit">Gem serverindstillinger</button> : null}
+      </form>
+      <div className="server-settings-status">
+        <span><strong>Effektiv URL:</strong> {settings.effectivePublicUrl ?? 'Ikke konfigureret'}</span>
+        <span><strong>Kilde:</strong> {settings.publicUrlSource}</span>
+        <span><strong>CORS:</strong> {settings.corsOrigins.join(', ') || 'Ingen origins'}</span>
+      </div>
+      {message ? <p className="form-message">{message}</p> : null}
+    </div>
+  );
+}
+
 function SettingsView() {
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
   const [metadata, setMetadata] = useState<MetadataStatus | null>(null);
@@ -337,6 +744,7 @@ function SettingsView() {
   return (
     <section className="management-page">
       <span className="eyebrow">SERVER CONTROL</span><h1>Indstillinger</h1><p>Driftsstatus, vedligeholdelse og durable fejl fra serveren.</p>
+      <ServerSettingsCard />
       <div className="management-card">
         <h2><Server size={18} /> Serveropdatering</h2>
         <div className="data-row"><div><strong>{update?.enabled ? 'Updater aktiveret' : 'Updater deaktiveret'}</strong><small>Branch: {update?.branch ?? '...'}</small><small>Genstart: {update?.restartMode ?? '...'}</small></div><Link className="inline-action" href="/update">Åbn updater</Link></div>

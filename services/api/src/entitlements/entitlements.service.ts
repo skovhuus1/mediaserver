@@ -11,7 +11,7 @@ export class EntitlementsService {
 
   async evaluate(actor: AuthenticatedUser, dto: EvaluateEntitlementDto): Promise<EntitlementDecision> {
     const profile = await this.prisma.profile.findFirst({
-      where: { id: dto.profileId, accountId: actor.accountId },
+      where: { id: dto.profileId, accountId: actor.accountId, archivedAt: null },
       include: {
         user: {
           include: {

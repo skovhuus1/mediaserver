@@ -1,12 +1,13 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
-import { compare } from 'bcryptjs';
+import { compare, hash as hashPassword } from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { readEnvironment } from '../config/environment';
 import { PrismaService } from '../prisma/prisma.service';
-import { LoginDto, RefreshDto } from './auth.dto';
+import { CompletePasswordChangeDto, LoginDto, RefreshDto } from './auth.dto';
+import { createPasswordChangeToken, verifyPasswordChangeToken } from './password-change-token';
 
 type TokenPair = {
   accessToken: string;
@@ -22,13 +23,13 @@ export class AuthService {
 
   constructor(private readonly prisma: PrismaService, private readonly jwt: JwtService) {}
 
-  async login(dto: LoginDto): Promise<TokenPair & { user: object }> {
+  async login(dto: LoginDto) {
     const user = await this.prisma.user.findFirst({
       where: { email: dto.email },
       include: {
         account: true,
         roles: { include: { role: true } },
-        profiles: { orderBy: { createdAt: 'asc' } },
+        profiles: { where: { archivedAt: null }, orderBy: { createdAt: 'asc' } },
       },
     });
     if (!user || !await compare(dto.password, user.passwordHash)) {
@@ -36,6 +37,17 @@ export class AuthService {
     }
     if (user.status !== 'active' || user.account.status !== 'active') {
       throw new UnauthorizedException({ code: 'account_inactive', message: 'The user or account is not active' });
+    }
+    if (user.mustChangePassword) {
+      return {
+        passwordChangeRequired: true as const,
+        passwordChangeToken: createPasswordChangeToken(
+          user.id,
+          user.accountId,
+          user.passwordHash,
+          this.environment.jwtSecret,
+        ),
+      };
     }
 
     const device = await this.prisma.device.upsert({
@@ -60,7 +72,7 @@ export class AuthService {
       },
     });
     const roles = user.roles.map(({ role }) => role.code);
-    const profileId = user.profiles[0]?.id ?? null;
+    const profileId = user.profiles.find((profile) => !profile.pinHash)?.id ?? null;
     const tokens = await this.issueTokens(user.id, user.accountId, device.id, profileId, roles);
     return {
       ...tokens,
@@ -84,7 +96,7 @@ export class AuthService {
           include: {
             account: true,
             roles: { include: { role: true } },
-            profiles: true,
+            profiles: { where: { archivedAt: null } },
           },
         },
         device: true,
@@ -105,10 +117,25 @@ export class AuthService {
       existing.device.isRevoked
     ) throw this.invalidRefresh();
 
-    const profileId = dto.profileId ?? existing.user.profiles[0]?.id ?? null;
-    if (profileId && !existing.user.profiles.some((profile) => profile.id === profileId)) {
+    const requestedProfile = dto.profileId
+      ? existing.user.profiles.find((profile) => profile.id === dto.profileId)
+      : undefined;
+    if (dto.profileId && !requestedProfile) {
       throw new UnauthorizedException({ code: 'profile_not_owned', message: 'The selected profile does not belong to this user' });
     }
+    if (requestedProfile?.pinHash && !dto.profilePin) {
+      throw new UnauthorizedException({ code: 'profile_pin_required', message: 'The selected profile requires a PIN' });
+    }
+    if (requestedProfile?.pinHash && !await compare(dto.profilePin!, requestedProfile.pinHash)) {
+      throw new UnauthorizedException({ code: 'profile_pin_invalid', message: 'The profile PIN is invalid' });
+    }
+    const currentProfile = existing.profileId
+      ? existing.user.profiles.find((profile) => profile.id === existing.profileId)
+      : undefined;
+    const profileId = requestedProfile?.id
+      ?? currentProfile?.id
+      ?? existing.user.profiles.find((profile) => !profile.pinHash)?.id
+      ?? null;
     const roles = existing.user.roles.map(({ role }) => role.code);
     const accessToken = await this.signAccess(existing.userId, existing.accountId, existing.deviceId, profileId, roles);
     const refreshToken = randomBytes(48).toString('base64url');
@@ -127,6 +154,7 @@ export class AuthService {
           accountId: existing.accountId,
           userId: existing.userId,
           deviceId: existing.deviceId,
+          profileId,
           expiresAt,
         },
       });
@@ -145,6 +173,40 @@ export class AuthService {
     return { revoked: result.count === 1 };
   }
 
+  async completePasswordChange(dto: CompletePasswordChangeDto): Promise<{ completed: true }> {
+    const tokenParts = dto.token.split('.');
+    if (tokenParts.length !== 4) throw this.invalidPasswordChange();
+    let candidate: { sub?: string; accountId?: string } = {};
+    try {
+      candidate = JSON.parse(Buffer.from(tokenParts[2]!, 'base64url').toString('utf8')) as typeof candidate;
+    } catch {
+      throw this.invalidPasswordChange();
+    }
+    if (!candidate.sub || !candidate.accountId) throw this.invalidPasswordChange();
+    const user = await this.prisma.user.findFirst({
+      where: { id: candidate.sub, accountId: candidate.accountId, status: 'active' },
+      include: { account: true },
+    });
+    if (
+      !user
+      || user.account.status !== 'active'
+      || !user.mustChangePassword
+      || !verifyPasswordChangeToken(dto.token, user.passwordHash, this.environment.jwtSecret)
+    ) throw this.invalidPasswordChange();
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: await hashPassword(dto.newPassword, 12), mustChangePassword: false },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+    return { completed: true };
+  }
+
   async me(actor: AuthenticatedUser) {
     const user = await this.prisma.user.findFirst({
       where: { id: actor.sub, accountId: actor.accountId },
@@ -154,11 +216,20 @@ export class AuthService {
         email: true,
         displayName: true,
         status: true,
-        profiles: { select: { id: true, name: true, isChildProfile: true } },
+        mustChangePassword: true,
+        profiles: {
+          where: { archivedAt: null },
+          select: { id: true, name: true, isChildProfile: true, language: true, pinHash: true },
+        },
       },
     });
     if (!user) throw new UnauthorizedException({ code: 'user_missing', message: 'Authenticated user no longer exists' });
-    return { ...user, roles: actor.roles, activeProfileId: actor.profileId };
+    return {
+      ...user,
+      profiles: user.profiles.map(({ pinHash, ...profile }) => ({ ...profile, hasPin: Boolean(pinHash) })),
+      roles: actor.roles,
+      activeProfileId: actor.profileId,
+    };
   }
 
   private async issueTokens(
@@ -177,6 +248,7 @@ export class AuthService {
         accountId,
         userId,
         deviceId,
+        profileId,
         expiresAt: new Date(Date.now() + this.environment.jwtRefreshTtlDays * 86_400_000),
       },
     });
@@ -198,5 +270,12 @@ export class AuthService {
 
   private invalidRefresh(): UnauthorizedException {
     return new UnauthorizedException({ code: 'invalid_refresh', message: 'Refresh token is invalid or expired' });
+  }
+
+  private invalidPasswordChange(): UnauthorizedException {
+    return new UnauthorizedException({
+      code: 'password_change_token_invalid',
+      message: 'Password change token is invalid, expired or already used',
+    });
   }
 }

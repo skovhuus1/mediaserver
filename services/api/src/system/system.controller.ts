@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Header, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Header, Patch, Post, Put } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../infra/redis.service';
 import { CurrentUser, Public, Roles } from '../common/auth';
 import { UpdaterService } from './updater.service';
-import { SetUpdateBranchDto } from './system.dto';
+import { SetUpdateBranchDto, UpdateServerSettingsDto } from './system.dto';
 import { SaveMetadataSettingsDto } from './metadata-settings.dto';
 import { metadataSettingsStatus, saveMetadataSettings } from './metadata-settings';
 import { collectDefaultMetrics, register } from 'prom-client';
@@ -100,6 +100,53 @@ export class SystemController {
         },
       })),
     ].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp)).slice(0, 75);
+  }
+
+  @Get('server-settings')
+  @Roles('admin', 'operator')
+  async serverSettings(@CurrentUser() actor: AuthenticatedUser) {
+    const account = await this.prisma.account.findUnique({
+      where: { id: actor.accountId },
+      select: { serverName: true, externalUrl: true, language: true, timezone: true },
+    });
+    const environmentUrl = process.env.BB_MEDIA_PUBLIC_URL?.trim() || null;
+    const effectivePublicUrl = environmentUrl ?? account?.externalUrl ?? null;
+    return {
+      ...account,
+      effectivePublicUrl,
+      publicUrlSource: environmentUrl ? 'environment' : account?.externalUrl ? 'account' : 'unset',
+      httpsReady: effectivePublicUrl?.startsWith('https://') ?? false,
+      castReady: Boolean(effectivePublicUrl?.startsWith('https://') && !/localhost|127\.0\.0\.1/i.test(effectivePublicUrl)),
+      corsOrigins: (process.env.CORS_ORIGIN ?? '').split(',').map((value) => value.trim()).filter(Boolean),
+    };
+  }
+
+  @Patch('server-settings')
+  @Roles('admin')
+  async updateServerSettings(@CurrentUser() actor: AuthenticatedUser, @Body() dto: UpdateServerSettingsDto) {
+    const account = await this.prisma.account.update({
+      where: { id: actor.accountId },
+      data: {
+        ...(dto.serverName ? { serverName: dto.serverName.trim() } : {}),
+        ...(dto.externalUrl ? { externalUrl: dto.externalUrl.trim() } : {}),
+        ...(dto.language ? { language: dto.language } : {}),
+        ...(dto.timezone ? { timezone: dto.timezone.trim() } : {}),
+      },
+      select: { serverName: true, externalUrl: true, language: true, timezone: true },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        accountId: actor.accountId,
+        userId: actor.sub,
+        profileId: actor.profileId,
+        correlationId: 'system-settings',
+        action: 'system.server_settings_updated',
+        outcome: 'allowed',
+        code: 'server_settings_updated',
+        details: { fields: Object.keys(dto) },
+      },
+    });
+    return account;
   }
 
   @Get('metadata/settings')

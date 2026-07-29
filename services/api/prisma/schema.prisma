@@ -117,6 +117,7 @@ model User {
   passwordHash         String                @map("password_hash")
   displayName          String                @map("display_name")
   status               UserStatus            @default(active)
+  mustChangePassword   Boolean               @default(false) @map("must_change_password")
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")
   account              Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -143,6 +144,7 @@ model Profile {
   isChildProfile       Boolean               @default(false) @map("is_child_profile")
   pinHash              String?               @map("pin_hash")
   language             String                @default("da")
+  archivedAt           DateTime?             @map("archived_at")
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")
   account              Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -153,6 +155,7 @@ model Profile {
   auditLogs            AuditLog[]
 
   @@index([accountId, userId])
+  @@index([accountId, userId, archivedAt])
   @@map("profiles")
 }
 
@@ -228,6 +231,7 @@ model RefreshToken {
   accountId  String    @map("account_id")
   userId     String    @map("user_id")
   deviceId   String    @map("device_id")
+  profileId  String?   @map("profile_id")
   expiresAt  DateTime  @map("expires_at")
   revokedAt  DateTime? @map("revoked_at")
   lastUsedAt DateTime? @map("last_used_at")
@@ -238,6 +242,7 @@ model RefreshToken {
 
   @@index([familyId])
   @@index([userId, deviceId])
+  @@index([profileId, revokedAt])
   @@map("refresh_tokens")
 }
 

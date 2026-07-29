@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsOptional, IsString, IsUUID, Length, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, IsUUID, Length, Matches, MinLength } from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
@@ -41,10 +41,25 @@ export class RefreshDto {
   @IsOptional()
   @IsUUID()
   profileId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4,8}$/)
+  profilePin?: string;
 }
 
 export class LogoutDto {
   @IsString()
   @MinLength(64)
   refreshToken!: string;
+}
+
+export class CompletePasswordChangeDto {
+  @IsString()
+  @MinLength(80)
+  token!: string;
+
+  @IsString()
+  @MinLength(12)
+  newPassword!: string;
 }

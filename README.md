@@ -312,3 +312,19 @@ Web Sender-siden skal åbnes via HTTPS, og Chromecast skal kunne nå URL'en og s
 - Logout tilbagekalder refresh-tokenet på serveren, før den lokale session fjernes.
 - Beskadigede danske UI-strenge i katalog, planer og metadataindstillinger er rettet til korrekt UTF-8, herunder `æ`, `ø` og `å`.
 - Native vandrette scrollbars er skjult under kategori- og sæsonchips, mens touch-, muse- og touchpad-scroll fortsat virker.
+
+## Kundeadministration og offentligt domæne (2026-07-29)
+
+Denne leverance tilføjer komplet administrativ onboarding uden SMTP:
+
+- Nye kunder får en kryptografisk midlertidig adgangskode, som kun vises i svaret én gang.
+- Første login udsteder kun et 10-minutters engangstoken til tvunget passwordskifte.
+- Password-reset og suspension tilbagekalder refresh-tokens og aktive afspilninger.
+- Profiler kan redigeres, PIN-beskyttes med 4-8 cifre og arkiveres uden at slette historik.
+- Abonnement, planversion, enheder og entitlement-overrides kan administreres fra kundens detaljevisning.
+- Operators har læseadgang, mens ændringer kræver administratorrollen.
+- Serverindstillinger viser effektiv public URL, konfigurationskilde samt HTTPS/Cast-status.
+
+Produktionsdomænet er `https://media.boltbytes.com`, mens Docker fortsat bruger host-port `6555` som intern upstream. DNS, certifikat, Nginx Proxy Manager, firewall, Range-streaming, fejlsøgning og rollback er dokumenteret i [`docs/domain-nginx-proxy-manager.md`](docs/domain-nginx-proxy-manager.md).
+
+Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, planlagte scans/file-watcher, manuel metadata-match, hardware-transcoding, egen Chromecast receiver samt Android- og TV-klienter.

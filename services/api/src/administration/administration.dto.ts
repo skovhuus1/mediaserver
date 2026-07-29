@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsDateString,
   IsEmail,
   IsIn,
   IsInt,
@@ -9,6 +10,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  Matches,
   Max,
   Min,
   MinLength,
@@ -23,9 +25,30 @@ export class CreateUserDto {
   @Length(2, 100)
   displayName!: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(12)
-  password!: string;
+  password?: string;
+
+  @IsOptional()
+  @IsUUID()
+  planVersionId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  profileName?: string;
+}
+
+export class UpdateUserDto {
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(2, 100)
+  displayName?: string;
 }
 
 export class SuspendUserDto {
@@ -45,6 +68,46 @@ export class CreateProfileDto {
   @IsOptional()
   @IsBoolean()
   isChildProfile = false;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z]{2}(?:-[A-Z]{2})?$/)
+  language?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4,8}$/)
+  pin?: string;
+}
+
+export class UpdateProfileDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  name?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isChildProfile?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z]{2}(?:-[A-Z]{2})?$/)
+  language?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4,8}$/)
+  pin?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  clearPin?: boolean;
+}
+
+export class ArchiveProfileDto {
+  @IsBoolean()
+  archived!: boolean;
 }
 
 export class PlanEntitlementsDto {
@@ -135,6 +198,11 @@ export class CreateSubscriptionDto {
   status?: 'pending' | 'trialing' | 'active';
 }
 
+export class ChangeSubscriptionPlanDto {
+  @IsUUID()
+  planVersionId!: string;
+}
+
 export class CreateEntitlementOverrideDto {
   @IsUUID()
   userId!: string;
@@ -149,4 +217,8 @@ export class CreateEntitlementOverrideDto {
   @IsString()
   @Length(3, 500)
   reason!: string;
+
+  @IsOptional()
+  @IsDateString()
+  expiresAt?: string;
 }

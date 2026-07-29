@@ -16,9 +16,10 @@ export type SessionUser = {
   email: string;
   displayName: string;
   status: string;
+  mustChangePassword: boolean;
   roles: string[];
   activeProfileId: string | null;
-  profiles: Array<{ id: string; name: string; isChildProfile: boolean }>;
+  profiles: Array<{ id: string; name: string; isChildProfile: boolean; language: string; hasPin: boolean }>;
 };
 
 type RefreshOutcome =
@@ -66,7 +67,7 @@ export async function logoutSession(): Promise<void> {
   }
 }
 
-export async function selectProfile(profileId: string): Promise<void> {
+export async function selectProfile(profileId: string, profilePin?: string): Promise<void> {
   const currentRefreshToken = refreshToken();
   if (!currentRefreshToken) {
     throw { code: 'refresh_token_missing', message: 'Sessionen er udløbet. Log ind igen.' } satisfies ApiFailure;
@@ -75,7 +76,7 @@ export async function selectProfile(profileId: string): Promise<void> {
     method: 'POST',
     cache: 'no-store',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ refreshToken: currentRefreshToken, profileId }),
+    body: JSON.stringify({ refreshToken: currentRefreshToken, profileId, ...(profilePin ? { profilePin } : {}) }),
   });
   const tokens = await parseResponse<TokenPair>(response);
   saveSession(tokens.accessToken, tokens.refreshToken);
