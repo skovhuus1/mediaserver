@@ -20,7 +20,12 @@ FROM dependencies AS build
 COPY tsconfig.base.json eslint.config.mjs ./
 COPY shared/contracts shared/contracts
 COPY services/api services/api
-RUN npm run prisma:generate
+RUN for attempt in 1 2 3 4; do \
+      npm run prisma:generate && exit 0; \
+      if [ "$attempt" -eq 4 ]; then exit 1; fi; \
+      echo "Prisma engine download failed (attempt ${attempt}/4); retrying..." >&2; \
+      sleep $((attempt * 20)); \
+    done
 RUN npm run build --workspace=@boltbytes/contracts
 RUN npm run build --workspace=@boltbytes/api
 
