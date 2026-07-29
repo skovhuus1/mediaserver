@@ -24,6 +24,12 @@
 > abonnementet. WebVTT leveres direkte, mens PGS/VobSub/DVB bruger samme
 > logical session til burn-in, også når planens almindelige transcodeflag er
 > deaktiveret. Adgang, session, streamlimit og validering håndhæves fortsat.
+>
+> Docker-images tåler midlertidige npm-registry-udfald under opdatering.
+> Dependency-laget bruger fem fetch-retries, op til fem minutters fetch-timeout
+> og tre komplette `npm ci`-forsøg med stigende pause. En vedvarende
+> netværksfejl stopper fortsat opdateringen uden at erstatte de kørende
+> containere.
 
 BoltBytes Media Server er en selvhostet TypeScript-platform til administration og autoriseret afspilning af egne film og serier. Kodebasen er genopbygget fra bunden med server-side adgangskontrol, reproducerbar installation og en tydelig grænse mellem implementeret funktionalitet og kommende faser.
 
