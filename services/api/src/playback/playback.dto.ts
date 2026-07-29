@@ -59,3 +59,17 @@ export class CastHandoffDto {
   @Length(32, 512)
   streamToken!: string;
 }
+
+export class ReconfigurePlaybackDto {
+  @IsString()
+  @Length(32, 512)
+  streamToken!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  subtitleTrackId?: string;
+
+  @IsBoolean()
+  burnIn!: boolean;
+}

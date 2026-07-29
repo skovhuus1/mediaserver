@@ -359,6 +359,22 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     && payload.hdrMode !== 'force_sdr'
     && sourceVideo.hdr !== null
     && renditions.every((rendition) => rendition.hdr);
+  const subtitleTrackId =
+    typeof payload.subtitleTrackId === 'string' ? payload.subtitleTrackId : null;
+  const burnInStreamIndex = subtitleTrackId
+    ? finiteInteger(subtitleTrackId.match(/\d+/)?.[0])
+    : null;
+  if (
+    subtitleTrackId
+    && (
+      burnInStreamIndex === null
+      || !imageSubtitleStreamIndexes(file.probe).includes(burnInStreamIndex)
+    )
+  ) {
+    throw new Error(
+      'subtitle_burn_in_track_invalid: selected track is not a supported image subtitle',
+    );
+  }
   for (const streamIndex of textSubtitleStreamIndexes(file.probe)) {
     try {
       const subtitleCancelled = await runFfmpeg(job.id, session.id, [
@@ -393,14 +409,18 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
   const videoEncoder = preserveHdrRequested
     ? nvenc.hevc ? 'hevc_nvenc' : 'libx265'
     : nvenc.h264 ? 'h264_nvenc' : 'libx264';
+  const subtitleInput = burnInStreamIndex === null
+    ? '[0:v:0]null[subtitlePrepared]'
+    : `[0:v:0][0:${burnInStreamIndex}]overlay=eof_action=pass:shortest=0[subtitlePrepared]`;
   const inputLabel = sourceVideo.hdr && !preserveHdrRequested
-    ? '[0:v:0]zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p[prepared]'
-    : '[0:v:0]null[prepared]';
+    ? '[subtitlePrepared]zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p[prepared]'
+    : '[subtitlePrepared]null[prepared]';
   const splitOutputs = renditions.map((_, index) => `[split${index}]`).join('');
   const scaleOutputs = renditions.map((rendition, index) =>
     `[split${index}]scale=w=${rendition.width}:h=${rendition.height}:force_original_aspect_ratio=decrease,pad=${rendition.width}:${rendition.height}:(ow-iw)/2:(oh-ih)/2[v${index}]`,
   );
   const filterComplex = [
+    subtitleInput,
     inputLabel,
     `[prepared]split=${renditions.length}${splitOutputs}`,
     ...scaleOutputs,
@@ -462,6 +482,18 @@ function evenDimension(value: number): number {
   return Math.max(2, Math.floor(value / 2) * 2);
 }
 
+function imageSubtitleStreamIndexes(probe: Prisma.JsonValue | null): number[] {
+  const root = asJsonObject(probe);
+  const streams = Array.isArray(root.streams) ? root.streams.map(asJsonObject) : [];
+  const codecs = new Set(['dvb_subtitle', 'dvd_subtitle', 'hdmv_pgs_subtitle', 'pgssub', 'vobsub']);
+  return streams.flatMap((stream) => {
+    if (stream.codec_type !== 'subtitle' || typeof stream.codec_name !== 'string') return [];
+    if (!codecs.has(stream.codec_name.toLowerCase())) return [];
+    const index = finiteInteger(stream.index);
+    return index === null ? [] : [index];
+  });
+}
+
 let nvencEncoderCache: Promise<{ h264: boolean; hevc: boolean }> | null = null;
 
 function availableNvencEncoders(): Promise<{ h264: boolean; hevc: boolean }> {
@@ -518,12 +550,21 @@ async function runFfmpeg(jobId: string, sessionId: string, args: string[]): Prom
       checking = true;
       void Promise.all([
         renewJobLease(jobId),
+        prisma.systemJob.findUnique({
+          where: { id: jobId },
+          select: { status: true },
+        }),
         prisma.playbackSession.findUnique({
           where: { id: sessionId },
           select: { status: true, leaseExpiresAt: true },
         }),
-      ]).then(([, session]) => {
-        if (!session || !['reserving', 'active', 'paused'].includes(session.status) || session.leaseExpiresAt <= new Date()) {
+      ]).then(([, currentJob, session]) => {
+        if (
+          currentJob?.status !== 'running'
+          || !session
+          || !['reserving', 'active', 'paused'].includes(session.status)
+          || session.leaseExpiresAt <= new Date()
+        ) {
           cancelled = true;
           child.kill('SIGTERM');
         }

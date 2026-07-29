@@ -344,7 +344,7 @@ CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, s
 ### Rester i den samlede personalized-watch-ABR-leverance
 
 - Metadataworkeren udfylder genre-, top-15 credit- og provider-similar-felter fra TMDB. TVDB-serier krydslinkes best-effort til TMDB.
-- Dynamisk burn-in-rekonfiguration for PGS/VobSub er fortsat ikke afsluttet; tekstbaserede spor og den adaptive player er implementeret.
+- PGS/VobSub/DVB-billedspor vises som burn-in-valg og rekonfigurerer den eksisterende logical session uden en ekstra streamreservation.
 - Denne branch m? ikke merges til `main`, f?r de resterende dele samt alle lokale og GitHub-gates er gr?nne.
 
 
@@ -361,6 +361,16 @@ CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, s
 
 ### Fortsat rester
 
-- PGS/VobSub burn-in og `PATCH /playback/sessions/:id/configuration` mangler fortsat.
+- `PATCH /playback/sessions/:id/configuration` genbruger stream-token, session-id og logical session ved aktivering eller fjernelse af PGS/VobSub/DVB burn-in.
 - NVENC og HDR/SDR skal staging-smoketestes p? den faktiske NVIDIA-host med rigtige 4K HDR-filer.
 - Egen Chromecast receiver er fortsat en senere fase; Default Media Receiver-flowet er bevaret.
+
+
+## Burn-in og session-rekonfiguration (2026-07-29)
+
+- PGS, VobSub/DVD og DVB-billedspor klassificeres fra ffprobe og vises med stabilt `burnin-<streamIndex>`-id.
+- Kunden kan aktivere eller fjerne burn-in direkte i playerens undertekstmenu. API-et kr?ver den eksisterende stream-token og planens video-transcode samt subtitle-burn-in entitlement.
+- Reconfiguration beholder samme playback-session, logical session, lease, historik og streamreservation. Et superseded worker-job stoppes, f?r det nye job overtager outputmappen.
+- Workeren l?gger billedsporet oven p? videoen f?r HDR-bevarelse eller SDR tone mapping og bygger derefter alle adaptive renditions fra samme filtergraf.
+- Tekstspor leveres fortsat som WebVTT. Chromecast-tracklisten indeholder kun WebVTT; burn-in ligger allerede i videostr?mmen.
+- Unit-testen verificerer, at reconfiguration genbruger session og logical session og ikke opretter en ny reservation.

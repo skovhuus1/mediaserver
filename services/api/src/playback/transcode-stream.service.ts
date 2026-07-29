@@ -22,6 +22,7 @@ type TranscodeLimits = {
   preserveHdr: boolean;
   adaptiveQuality: AdaptiveQualityPlan;
   hdrMode: string;
+  subtitleTrackId?: string | null;
 };
 
 @Injectable()
@@ -43,6 +44,9 @@ export class TranscodeStreamService {
           preserveHdr: limits.preserveHdr,
           adaptiveQuality: limits.adaptiveQuality,
           hdrMode: limits.hdrMode,
+          ...(limits.subtitleTrackId
+            ? { subtitleTrackId: limits.subtitleTrackId }
+            : {}),
         },
         maxAttempts: 1,
       },

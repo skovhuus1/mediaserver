@@ -84,7 +84,14 @@ type TranscodeStatus = { state: 'queued' | 'running' | 'ready' | 'failed'; messa
 type PlayerMenu = 'playlist' | 'speed' | 'subtitles' | 'audio' | 'quality' | 'info' | null;
 type AudioTrack = { index: number; name: string; language: string };
 type QualityLevel = { index: number; label: string };
-type SubtitleTrack = { id: string; label: string; language: string; src: string; contentType: 'text/vtt' };
+type SubtitleTrack = {
+  id: string;
+  label: string;
+  language: string;
+  src: string | null;
+  contentType: 'text/vtt' | null;
+  delivery: 'webvtt' | 'burn_in';
+};
 type CastHandoff = {
   accepted: true;
   sessionId: string;
@@ -532,10 +539,12 @@ export function WebPlayer() {
       mediaInfo.metadata = metadata;
       mediaInfo.streamType = mediaApi.StreamType.BUFFERED;
       if (media.file?.durationMs) mediaInfo.duration = media.file.durationMs / 1000;
-      mediaInfo.tracks = handoff.subtitleTracks.map((subtitle, index) => {
+      mediaInfo.tracks = handoff.subtitleTracks
+        .filter((subtitle) => subtitle.delivery === 'webvtt' && subtitle.src)
+        .map((subtitle, index) => {
         const track = new mediaApi.Track(index + 1, mediaApi.TrackType.TEXT);
-        track.trackContentId = subtitle.src;
-        track.trackContentType = subtitle.contentType;
+        track.trackContentId = subtitle.src!;
+        track.trackContentType = subtitle.contentType!;
         track.subtype = mediaApi.TextTrackType.SUBTITLES;
         track.name = subtitle.label;
         if (subtitle.language !== 'und') track.language = subtitle.language;
@@ -661,7 +670,7 @@ export function WebPlayer() {
         if (textTracks[index]) {
           textTracks[index].mode = track.id === activeSubtitle ? 'showing' : 'disabled';
         }
-      });
+        });
     };
     video.addEventListener('loadedmetadata', applyTrackSelection);
     video.textTracks.addEventListener('addtrack', applyTrackSelection);
@@ -681,6 +690,61 @@ export function WebPlayer() {
   };
 
   const selectSubtitle = (id: string | null) => {
+    const selectedTrack = authorization?.subtitleTracks.find((track) => track.id === id);
+    const activeTrack = authorization?.subtitleTracks.find(
+      (track) => track.id === activeSubtitleRef.current,
+    );
+    if (
+      authorization
+      && (
+        selectedTrack?.delivery === 'burn_in'
+        || (!selectedTrack && activeTrack?.delivery === 'burn_in')
+      )
+    ) {
+      resumeRef.current = Math.round((videoRef.current?.currentTime ?? currentTime) * 1_000);
+      setSourceReady(false);
+      setStatus(selectedTrack ? 'Forbereder undertekster med burn-in...' : 'Fjerner burn-in...');
+      void api<{
+        method: 'transcode';
+        streamUrl: string;
+        transcodeStatusUrl: string;
+        adaptiveQuality: Authorization['adaptiveQuality'];
+      }>(`/playback/sessions/${authorization.sessionId}/configuration`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          streamToken: authorization.streamToken,
+          burnIn: Boolean(selectedTrack),
+          ...(selectedTrack ? { subtitleTrackId: selectedTrack.id } : {}),
+        }),
+      }).then(async (configuration) => {
+        for (let attempt = 0; attempt < 180; attempt += 1) {
+          const response = await fetch(configuration.transcodeStatusUrl, {
+            cache: 'no-store',
+          });
+          const transcode = await response.json() as TranscodeStatus;
+          if (transcode.state === 'failed') throw new Error(transcode.message);
+          if (transcode.state === 'ready') break;
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          if (attempt === 179) throw new Error('Transcode timed out');
+        }
+        setAuthorization({
+          ...authorization,
+          method: 'transcode',
+          streamUrl: configuration.streamUrl,
+          transcodeStatusUrl: configuration.transcodeStatusUrl,
+          adaptiveQuality: configuration.adaptiveQuality,
+        });
+        activeSubtitleRef.current = selectedTrack?.id ?? null;
+        setActiveSubtitle(selectedTrack?.id ?? null);
+        setSourceReady(true);
+        setStatus(selectedTrack ? 'Burn-in undertekster aktive' : 'Burn-in fjernet');
+      }).catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : 'Burn-in kunne ikke aktiveres.');
+        setControlsVisible(true);
+      });
+      setMenu(null);
+      return;
+    }
     if (castingRef.current) {
       const castWindow = window as CastWindow;
       const mediaApi = castWindow.chrome?.cast?.media;
@@ -741,11 +805,11 @@ export function WebPlayer() {
           if (sourceReady) setError('Browseren kunne ikke afspille den leverede stream.');
         }}
       >
-        {authorization?.subtitleTracks.map((track) => (
+        {authorization?.subtitleTracks.filter((track) => track.delivery === 'webvtt' && track.src).map((track) => (
           <track
             key={track.id}
             kind="subtitles"
-            src={track.src}
+            src={track.src ?? undefined}
             srcLang={track.language}
             label={track.label}
             default={track.id === activeSubtitle}

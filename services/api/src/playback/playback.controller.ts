@@ -5,7 +5,7 @@ import type { Response } from 'express';
 import { CurrentUser, Public } from '../common/auth';
 import { DirectStreamService } from './direct-stream.service';
 import { applyMediaCors } from './media-cors';
-import { AuthorizePlaybackDto, CastHandoffDto } from './playback.dto';
+import { AuthorizePlaybackDto, CastHandoffDto, ReconfigurePlaybackDto } from './playback.dto';
 import { PlaybackService } from './playback.service';
 import { StreamReservationService } from './stream-reservation.service';
 import { SubtitleStreamService } from './subtitle-stream.service';
@@ -40,6 +40,15 @@ export class PlaybackController {
   @Delete('sessions/:id')
   stop(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.reservations.release(actor, id);
+  }
+
+  @Patch('sessions/:id/configuration')
+  reconfigure(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ReconfigurePlaybackDto,
+  ) {
+    return this.playback.reconfigure(actor, id, dto);
   }
 
   @Post('sessions/:id/cast-handoff')
