@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { correlationId } from '../common/request-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../infra/redis.service';
 import { PreferenceActor } from '../preferences/preferences.service';
@@ -197,48 +198,91 @@ export class RecommendationsService {
         message: 'Media item was not found',
       });
     }
-    const result = await this.prisma.recommendationFeedback.upsert({
-      where: {
-        profileId_mediaId: { profileId: profile.id, mediaId },
-      },
-      create: {
-        accountId: actor.accountId,
-        profileId: profile.id,
-        mediaId,
-        type: input.type,
-      },
-      update: { type: input.type },
-    });
+    const [result] = await this.prisma.$transaction([
+      this.prisma.recommendationFeedback.upsert({
+        where: {
+          profileId_mediaId: { profileId: profile.id, mediaId },
+        },
+        create: {
+          accountId: actor.accountId,
+          profileId: profile.id,
+          mediaId,
+          type: input.type,
+        },
+        update: { type: input.type },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: profile.id,
+          correlationId: correlationId(),
+          action: 'recommendation.feedback_update',
+          outcome: 'allowed',
+          code: 'recommendation_feedback_updated',
+          details: { resourceId: mediaId, type: input.type },
+        },
+      }),
+    ]);
     await this.redis.delete(this.cacheKey(actor));
     return result;
   }
 
   async removeFeedback(actor: PreferenceActor, mediaId: string) {
     const profile = await this.requireProfile(actor);
-    await this.prisma.recommendationFeedback.deleteMany({
-      where: {
-        accountId: actor.accountId,
-        profileId: profile.id,
-        mediaId,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.recommendationFeedback.deleteMany({
+        where: {
+          accountId: actor.accountId,
+          profileId: profile.id,
+          mediaId,
+        },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: profile.id,
+          correlationId: correlationId(),
+          action: 'recommendation.feedback_remove',
+          outcome: 'allowed',
+          code: 'recommendation_feedback_removed',
+          details: { resourceId: mediaId },
+        },
+      }),
+    ]);
     await this.redis.delete(this.cacheKey(actor));
     return { removed: true };
   }
 
   async reset(actor: PreferenceActor) {
     const profile = await this.requireProfile(actor);
-    await this.prisma.profilePreferences.upsert({
-      where: { profileId: profile.id },
-      create: {
-        profileId: profile.id,
-        accountId: actor.accountId,
-        preferredAudioLanguages: ['da', 'en'],
-        preferredSubtitleLanguages: ['da', 'en'],
-        recommendationResetAt: new Date(),
-      },
-      update: { recommendationResetAt: new Date() },
-    });
+    const resetAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.profilePreferences.upsert({
+        where: { profileId: profile.id },
+        create: {
+          profileId: profile.id,
+          accountId: actor.accountId,
+          preferredAudioLanguages: ['da', 'en'],
+          preferredSubtitleLanguages: ['da', 'en'],
+          recommendationResetAt: resetAt,
+        },
+        update: { recommendationResetAt: resetAt },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: profile.id,
+          correlationId: correlationId(),
+          action: 'recommendation.reset',
+          outcome: 'allowed',
+          code: 'recommendation_reset',
+          details: { resourceId: profile.id, resetAt: resetAt.toISOString() },
+        },
+      }),
+    ]);
     await this.redis.delete(this.cacheKey(actor));
     return { reset: true };
   }

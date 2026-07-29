@@ -38,11 +38,11 @@ import { SystemModule } from './system/system.module';
     SetupModule,
     AuthModule,
     AdministrationModule,
+    RecommendationsModule,
     CatalogModule,
     EntitlementsModule,
     PlaybackModule,
     PreferencesModule,
-    RecommendationsModule,
     SystemModule,
   ],
   providers: [

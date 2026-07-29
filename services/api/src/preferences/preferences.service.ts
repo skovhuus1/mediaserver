@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import { correlationId } from '../common/request-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../infra/redis.service';
 import {
@@ -15,7 +16,7 @@ import {
 
 export interface PreferenceActor {
   accountId: string;
-  userId: string;
+  sub: string;
   profileId?: string | null;
   deviceId?: string | null;
 }
@@ -158,6 +159,18 @@ export class PreferencesService {
             : {}),
         },
       });
+      await tx.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: profile.id,
+          correlationId: correlationId(),
+          action: 'profile.preferences_update',
+          outcome: 'allowed',
+          code: 'profile_preferences_updated',
+          details: { resourceId: profile.id },
+        },
+      });
     });
 
     await this.redis.delete(this.recommendationKey(actor));
@@ -194,27 +207,41 @@ export class PreferencesService {
       });
     }
 
-    await this.prisma.device.update({
-      where: { id: device.id },
-      data: {
-        ...(input.qualityMode !== undefined
-          ? { qualityMode: input.qualityMode }
-          : {}),
-        ...(input.fixedQualityHeight !== undefined
-          ? { fixedQualityHeight: input.fixedQualityHeight }
-          : {}),
-        ...(input.allowUpscale !== undefined
-          ? { allowUpscale: input.allowUpscale }
-          : {}),
-        ...(input.dataSaver !== undefined
-          ? { dataSaver: input.dataSaver }
-          : {}),
-        ...(input.playbackRate !== undefined
-          ? { playbackRate: input.playbackRate }
-          : {}),
-        ...(input.hdrMode !== undefined ? { hdrMode: input.hdrMode } : {}),
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.device.update({
+        where: { id: device.id },
+        data: {
+          ...(input.qualityMode !== undefined
+            ? { qualityMode: input.qualityMode }
+            : {}),
+          ...(input.fixedQualityHeight !== undefined
+            ? { fixedQualityHeight: input.fixedQualityHeight }
+            : {}),
+          ...(input.allowUpscale !== undefined
+            ? { allowUpscale: input.allowUpscale }
+            : {}),
+          ...(input.dataSaver !== undefined
+            ? { dataSaver: input.dataSaver }
+            : {}),
+          ...(input.playbackRate !== undefined
+            ? { playbackRate: input.playbackRate }
+            : {}),
+          ...(input.hdrMode !== undefined ? { hdrMode: input.hdrMode } : {}),
+        },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: actor.profileId ?? null,
+          correlationId: correlationId(),
+          action: 'device.preferences_update',
+          outcome: 'allowed',
+          code: 'device_preferences_updated',
+          details: { resourceId: device.id },
+        },
+      }),
+    ]);
     return this.getDevicePreferences(actor);
   }
 
@@ -252,7 +279,7 @@ export class PreferencesService {
       where: {
         id: actor.deviceId,
         accountId: actor.accountId,
-        userId: actor.userId,
+        userId: actor.sub,
         isRevoked: false,
       },
     });
