@@ -335,20 +335,26 @@ export class CatalogService {
       metadataSettingsStatus(this.prisma, actor.accountId),
     ]);
     return {
-      enabled: settings.enabled,
-      provider: 'tmdb',
-      language: settings.language,
-      source: settings.source,
+      ...settings,
       latestJob,
     };
   }
 
   async queueMetadata(actor: AuthenticatedUser, dto: QueueMetadataDto = { mediaType: 'all' }) {
     const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
-    if (!settings.token) {
+    const supportsMovies = Boolean(settings.tmdbToken);
+    const supportsSeries = Boolean(settings.tvdbApiKey || settings.tmdbToken);
+    const supported = dto.mediaType === 'movie'
+      ? supportsMovies
+      : dto.mediaType === 'series'
+        ? supportsSeries
+        : supportsMovies || supportsSeries;
+    if (!supported) {
       throw new ConflictException({
         code: 'metadata_provider_disabled',
-        message: 'TMDB is not configured for this account',
+        message: dto.mediaType === 'movie'
+          ? 'TMDB is not configured for movie metadata'
+          : 'TVDB or TMDB is not configured for series metadata',
       });
     }
     return this.prisma.$transaction(async (tx) => {

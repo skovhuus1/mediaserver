@@ -117,6 +117,10 @@ export class CreatePlanVersionDto {
   @ValidateNested()
   @Type(() => PlanEntitlementsDto)
   entitlements!: PlanEntitlementsDto;
+
+  @IsOptional()
+  @IsBoolean()
+  migrateActiveSubscriptions = false;
 }
 
 export class CreateSubscriptionDto {
