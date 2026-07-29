@@ -1,5 +1,9 @@
 # BoltBytes Media Server
 
+> CI-smoke dækker både eksplicit Direct Play (`original`) og adaptiv HLS
+> (`auto`) med op til fire tokenbeskyttede renditions. Workflowet validerer de
+> aktuelle `stream_<n>.m3u8`- og `segment_<n>_<sekvens>.ts`-kontrakter.
+
 BoltBytes Media Server er en selvhostet TypeScript-platform til administration og autoriseret afspilning af egne film og serier. Kodebasen er genopbygget fra bunden med server-side adgangskontrol, reproducerbar installation og en tydelig grænse mellem implementeret funktionalitet og kommende faser.
 
 ## Hurtig installation med Docker

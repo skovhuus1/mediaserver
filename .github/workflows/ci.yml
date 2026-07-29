@@ -189,6 +189,13 @@ jobs:
           playback_context="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/playback/context")"
           profile_id="$(jq -er '.profileId' <<<"$playback_context")"
           device_id="$(jq -er '.deviceId' <<<"$playback_context")"
+          direct_play_preferences="$(curl --fail --silent --show-error \
+            -X PATCH \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d '{"qualityMode":"original"}' \
+            "$api_base/devices/me/preferences")"
+          test "$(jq -r '.qualityMode' <<<"$direct_play_preferences")" = "original"
           authorization="$(curl --fail --silent --show-error \
             -H "authorization: Bearer $token" \
             -H 'content-type: application/json' \
@@ -236,10 +243,17 @@ jobs:
             -H "authorization: Bearer $token" \
             "$api_base/playback/sessions/$session_id" >/dev/null
 
+          adaptive_preferences="$(curl --fail --silent --show-error \
+            -X PATCH \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d '{"qualityMode":"auto","allowUpscale":true,"dataSaver":false}' \
+            "$api_base/devices/me/preferences")"
+          test "$(jq -r '.qualityMode' <<<"$adaptive_preferences")" = "auto"
           transcode_authorization="$(curl --fail --silent --show-error \
             -H "authorization: Bearer $token" \
             -H 'content-type: application/json' \
-            -d "{\"profileId\":\"$profile_id\",\"mediaId\":\"$media_id\",\"deviceId\":\"$device_id\",\"capabilities\":{\"supportedCodecs\":[\"vp9\"],\"supportedContainers\":[\"webm\"]}}" \
+            -d "{\"profileId\":\"$profile_id\",\"mediaId\":\"$media_id\",\"deviceId\":\"$device_id\",\"capabilities\":{\"supportedCodecs\":[\"vp9\"],\"supportedContainers\":[\"webm\"],\"physicalScreenHeight\":1080,\"devicePixelRatio\":1,\"estimatedDownlinkMbps\":50}}" \
             "$api_base/playback/authorize")"
           transcode_session_id="$(jq -er '.sessionId' <<<"$transcode_authorization")"
           transcode_status_url="$(jq -er '.transcodeStatusUrl' <<<"$transcode_authorization")"
@@ -262,13 +276,16 @@ jobs:
             -o /tmp/bb-media-master.m3u8 \
             "http://127.0.0.1:6555$transcode_stream_url"
           grep -Eiq '^access-control-allow-origin: https://cast\.example\.test' /tmp/bb-media-master-headers
-          grep -Eq '^#EXT-X-STREAM-INF:.*BANDWIDTH=[1-9][0-9]*.*RESOLUTION=320x240' /tmp/bb-media-master.m3u8
-          variant_path="$(grep -E '^stream\.m3u8\?token=' /tmp/bb-media-master.m3u8 | head -n1)"
+          grep -Eq '^#EXT-X-STREAM-INF:.*BANDWIDTH=[1-9][0-9]*.*RESOLUTION=[1-9][0-9]*x[1-9][0-9]*' /tmp/bb-media-master.m3u8
+          variant_count="$(grep -Ec '^stream_[0-9]+\.m3u8\?token=' /tmp/bb-media-master.m3u8)"
+          test "$variant_count" -ge 1
+          test "$variant_count" -le 4
+          variant_path="$(grep -E '^stream_[0-9]+\.m3u8\?token=' /tmp/bb-media-master.m3u8 | head -n1)"
           test -n "$variant_path"
           curl --fail --silent --show-error \
             -o /tmp/bb-media-stream.m3u8 \
             "http://127.0.0.1:6555/api/v1/playback/sessions/$transcode_session_id/hls/$variant_path"
-          segment_path="$(grep -E '^segment[0-9]{5}\.ts\?token=' /tmp/bb-media-stream.m3u8 | head -n1)"
+          segment_path="$(grep -E '^segment_[0-9]+_[0-9]{5}\.ts\?token=' /tmp/bb-media-stream.m3u8 | head -n1)"
           test -n "$segment_path"
           curl --fail --silent --show-error \
             -o /tmp/bb-media-segment.ts \
