@@ -51,8 +51,10 @@ export function readUpdateProgress(value: unknown): UpdateProgress {
 
 export function parseRunnerProgress(log: string): Pick<UpdateProgress, 'state' | 'phase' | 'percent' | 'message' | 'updatedAt' | 'error'> | null {
   let latest: RegExpExecArray | null = null;
-  const pattern = /^BB_UPDATE_PROGRESS\|(\d{1,3})\|([a-z0-9-]+)\|([^|]+)\|(.*)$/gm;
-  for (let match = pattern.exec(log); match; match = pattern.exec(log)) latest = match;
+  const ansiPattern = new RegExp(String.raw`\u001b\[[0-?]*[ -/]*[@-~]`, 'g');
+  const sanitizedLog = log.replace(ansiPattern, '');
+  const pattern = /^[^\r\n]*?BB_UPDATE_PROGRESS\|(\d{1,3})\|([a-z0-9-]+)\|([^|]+)\|(.*)$/gm;
+  for (let match = pattern.exec(sanitizedLog); match; match = pattern.exec(sanitizedLog)) latest = match;
   if (!latest) return null;
   const phase = latest[2] ?? 'running';
   const message = latest[4] ?? '';
@@ -65,6 +67,12 @@ export function parseRunnerProgress(log: string): Pick<UpdateProgress, 'state' |
     updatedAt: latest[3] ?? new Date().toISOString(),
     error: state === 'failed' ? message : null,
   };
+}
+
+export function isActiveRunnerState(state: string | null | undefined): boolean {
+  return ['created', 'running', 'restarting', 'paused'].includes(
+    state?.trim().toLowerCase() ?? '',
+  );
 }
 
 function stringOrNull(value: unknown): string | null {

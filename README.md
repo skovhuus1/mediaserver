@@ -1,5 +1,11 @@
 # BoltBytes Media Server
 
+> Updateren kan nulstille en fastlåst persistent status direkte fra
+> adminpanelet. Nulstilling tillades kun, når Docker-runneren ikke længere er
+> aktiv. Runner-loggens statusmarkører håndterer også terminalfarvekoder, så en
+> fejlet Docker-build registreres som fejlet i stedet for at blive stående på
+> eksempelvis 65 procent.
+
 > CI-smoke dækker både eksplicit Direct Play (`original`) og adaptiv HLS
 > (`auto`) med op til fire tokenbeskyttede renditions. Workflowet validerer de
 > aktuelle `stream_<n>.m3u8`- og `segment_<n>_<sekvens>.ts`-kontrakter samt

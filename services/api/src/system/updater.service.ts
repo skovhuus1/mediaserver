@@ -7,9 +7,16 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { PrismaService } from '../prisma/prisma.service';
 import { classifyUpdateTransition, type UpdateTransition } from './update-transition';
-import { idleUpdateProgress, parseRunnerProgress, readUpdateProgress, type UpdateProgress } from './updater-progress';
+import {
+  idleUpdateProgress,
+  isActiveRunnerState,
+  parseRunnerProgress,
+  readUpdateProgress,
+  type UpdateProgress,
+} from './updater-progress';
 
 const execFileAsync = promisify(execFile);
+const DOCKER_RUNNER_NAME = 'boltbytes-media-updater-runner';
 type RestartMode = 'none' | 'systemd' | 'docker-compose';
 
 type CommandResult = {
@@ -287,6 +294,37 @@ export class UpdaterService {
     return stored;
   }
 
+  async reset(accountId: string): Promise<UpdateProgress> {
+    if (this.updateInProgress) {
+      throw new ConflictException({
+        code: 'update_in_progress',
+        message: 'Updateren arbejder stadig og kan ikke nulstilles endnu',
+      });
+    }
+
+    if (this.restartMode === 'docker-compose') {
+      const inspection = await this.runWithExitCode(
+        'docker',
+        ['inspect', '--format={{.State.Status}}', DOCKER_RUNNER_NAME],
+        5_000,
+      );
+      if (inspection.exitCode === 0) {
+        const runnerState = inspection.stdout.trim();
+        if (isActiveRunnerState(runnerState)) {
+          throw new ConflictException({
+            code: 'update_runner_active',
+            message: `Updater-runneren er stadig ${runnerState} og kan ikke nulstilles sikkert`,
+          });
+        }
+        await this.run('docker', ['rm', '--force', DOCKER_RUNNER_NAME], 10_000);
+      }
+    }
+
+    const idle = idleUpdateProgress();
+    await this.writeProgress(accountId, idle);
+    return idle;
+  }
+
   private isConfigured(): boolean {
     return existsSync(this.repositoryPath) && existsSync(join(this.repositoryPath, '.git'));
   }
@@ -328,13 +366,12 @@ export class UpdaterService {
         message: 'Updater could not identify its Docker image',
       });
     }
-    const runnerName = 'boltbytes-media-updater-runner';
-    await this.runWithExitCode('docker', ['rm', '--force', runnerName]);
+    await this.runWithExitCode('docker', ['rm', '--force', DOCKER_RUNNER_NAME]);
     await this.run('docker', [
       'run',
       '--detach',
       '--name',
-      runnerName,
+      DOCKER_RUNNER_NAME,
       '--label',
       `bb.media.update.run-id=${runId}`,
       '--env',
@@ -356,14 +393,17 @@ export class UpdaterService {
   }
 
   private async dockerRunnerProgress(): Promise<Partial<UpdateProgress> | null> {
-    const runnerName = 'boltbytes-media-updater-runner';
     const inspect = await this.runWithExitCode('docker', [
       'inspect',
       '--format={{.State.Status}}|{{.State.ExitCode}}|{{index .Config.Labels "bb.media.update.run-id"}}',
-      runnerName,
+      DOCKER_RUNNER_NAME,
     ], 5_000);
     if (inspect.exitCode !== 0) return null;
-    const logs = await this.runWithExitCode('docker', ['logs', '--tail', '80', runnerName], 5_000);
+    const logs = await this.runWithExitCode(
+      'docker',
+      ['logs', '--tail', '80', DOCKER_RUNNER_NAME],
+      5_000,
+    );
     const combinedLogs = [logs.stdout, logs.stderr].filter(Boolean).join('\n');
     const parsed = parseRunnerProgress(combinedLogs);
     const [containerState, exitCodeText, runId] = inspect.stdout.trim().split('|');
