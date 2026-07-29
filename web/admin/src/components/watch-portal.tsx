@@ -16,6 +16,8 @@ type WatchItem = {
   title: string;
   type: string;
   seriesTitle: string | null;
+  seriesDisplayTitle?: string | null;
+  seriesMetadataProviderId?: string | null;
   releaseYear: number | null;
   posterPath: string | null;
   width?: number | null;
@@ -73,7 +75,7 @@ function DiscoveryRow({ title, items, allHref }: { title: string; items: WatchIt
       <div>
         {items.slice(0, 6).map((item) => {
           const href = item.type === 'series'
-            ? `/watch?type=series&q=${encodeURIComponent(item.seriesTitle ?? item.title)}`
+            ? `/watch?type=series&media=${encodeURIComponent(item.id)}`
             : `/watch?type=movie&media=${encodeURIComponent(item.id)}`;
           return <Link className="watch-card" href={href} key={`${item.type}-${item.id}`}><span className="watch-poster" style={posterStyle(item.posterPath)}><PosterQualityBadges media={item} /></span><strong>{item.title}</strong><small>{item.releaseYear ?? (item.type === 'series' ? 'Serie' : 'Film')}</small></Link>;
         })}

@@ -81,6 +81,16 @@ export class CatalogQueryDto {
   seriesTitle?: string;
 
   @IsOptional()
+  @IsString()
+  @Length(1, 240)
+  seriesDisplayTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  seriesMetadataProviderId?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)

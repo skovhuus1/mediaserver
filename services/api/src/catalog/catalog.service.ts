@@ -1,5 +1,10 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { detectVideoSignalProfile, type AuthenticatedUser } from '@boltbytes/contracts';
+import {
+  detectVideoSignalProfile,
+  groupBySeriesIdentity,
+  sanitizeMediaTitle,
+  type AuthenticatedUser,
+} from '@boltbytes/contracts';
 import { Prisma } from '@prisma/client';
 import { readdir, realpath } from 'node:fs/promises';
 import { posix } from 'node:path';
@@ -216,65 +221,57 @@ export class CatalogService {
     };
 
     if (query.type === 'series') {
-      const orderBy: Prisma.MediaItemOrderByWithAggregationInput =
-        query.sort === 'title'
-          ? { seriesTitle: 'asc' }
-          : query.sort === 'year'
-            ? { _max: { releaseYear: 'desc' } }
-            : { _max: { updatedAt: 'desc' } };
-      const [groups, allGroups] = await this.prisma.$transaction([
-        this.prisma.mediaItem.groupBy({
-          by: ['seriesTitle'],
-          where,
-          _count: { _all: true },
-          _max: {
-            id: true,
-            category: true,
-            seriesDisplayTitle: true,
-            seriesOverview: true,
-            seriesMetadataProviderId: true,
-            posterPath: true,
-            backdropPath: true,
-            metadataProvider: true,
-            releaseYear: true,
-            seasonNumber: true,
-            episodeNumber: true,
-            updatedAt: true,
-          },
-          orderBy,
-          skip: (page - 1) * pageSize,
-          take: pageSize,
-        }),
-        this.prisma.mediaItem.findMany({
-          where,
-          distinct: ['seriesTitle'],
-          select: { seriesTitle: true },
-        }),
-      ]);
-      const total = allGroups.length;
+      const rows = await this.prisma.mediaItem.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          category: true,
+          seriesTitle: true,
+          seriesDisplayTitle: true,
+          seriesOverview: true,
+          seriesMetadataProviderId: true,
+          posterPath: true,
+          backdropPath: true,
+          metadataProvider: true,
+          releaseYear: true,
+          updatedAt: true,
+        },
+      });
+      const grouped = groupBySeriesIdentity(rows).map((episodes) => {
+        const representative = [...episodes].sort(
+          (left, right) => seriesMetadataScore(right) - seriesMetadataScore(left),
+        )[0]!;
+        const releaseYears = episodes.flatMap((episode) =>
+          episode.releaseYear === null ? [] : [episode.releaseYear],
+        );
+        return {
+          id: representative.id,
+          title: representative.seriesDisplayTitle
+            ?? sanitizeMediaTitle(representative.seriesTitle ?? representative.title),
+          type: 'series',
+          seriesTitle: representative.seriesTitle,
+          seriesDisplayTitle: representative.seriesDisplayTitle,
+          seriesMetadataProviderId: representative.seriesMetadataProviderId,
+          category: episodes.find((episode) => episode.category)?.category ?? null,
+          overview: episodes.find((episode) => episode.seriesOverview)?.seriesOverview ?? null,
+          metadataProvider: episodes.find((episode) => episode.metadataProvider)?.metadataProvider ?? null,
+          posterPath: episodes.find((episode) => episode.posterPath)?.posterPath ?? null,
+          backdropPath: episodes.find((episode) => episode.backdropPath)?.backdropPath ?? null,
+          releaseYear: releaseYears.length ? Math.min(...releaseYears) : null,
+          episodeCount: episodes.length,
+          updatedAt: new Date(Math.max(...episodes.map((episode) => episode.updatedAt.getTime()))),
+        };
+      });
+      grouped.sort((left, right) => {
+        if (query.sort === 'title') return left.title.localeCompare(right.title, 'da');
+        if (query.sort === 'year') return (right.releaseYear ?? 0) - (left.releaseYear ?? 0)
+          || left.title.localeCompare(right.title, 'da');
+        return right.updatedAt.getTime() - left.updatedAt.getTime();
+      });
+      const total = grouped.length;
       return {
-        items: groups.flatMap((group) => {
-          const maximums = group._max;
-          const counts = group._count;
-          if (!group.seriesTitle || !maximums?.id || typeof counts !== 'object') return [];
-          return [{
-            id: maximums.id,
-            title: maximums.seriesDisplayTitle ?? group.seriesTitle,
-            type: 'series',
-            seriesTitle: group.seriesTitle,
-            category: maximums.category,
-            overview: maximums.seriesOverview,
-            metadataProvider: maximums.metadataProvider,
-            metadataProviderId: maximums.seriesMetadataProviderId,
-            posterPath: maximums.posterPath,
-            backdropPath: maximums.backdropPath,
-            releaseYear: maximums.releaseYear,
-            seasonNumber: maximums.seasonNumber,
-            episodeNumber: maximums.episodeNumber,
-            episodeCount: counts._all ?? 0,
-            updatedAt: maximums.updatedAt,
-          }];
-        }),
+        items: grouped.slice((page - 1) * pageSize, page * pageSize),
         page,
         pageSize,
         total,
@@ -480,6 +477,8 @@ export class CatalogService {
       ...(query.libraryId ? { libraryId: query.libraryId } : {}),
       ...(query.category ? { category: { equals: query.category, mode: 'insensitive' } } : {}),
       ...(query.seriesTitle ? { seriesTitle: { equals: query.seriesTitle, mode: 'insensitive' } } : {}),
+      ...(query.seriesDisplayTitle ? { seriesDisplayTitle: { equals: query.seriesDisplayTitle, mode: 'insensitive' } } : {}),
+      ...(query.seriesMetadataProviderId ? { seriesMetadataProviderId: query.seriesMetadataProviderId } : {}),
       ...(query.q ? {
         OR: [
           { title: { contains: query.q, mode: 'insensitive' } },
@@ -529,4 +528,18 @@ export class CatalogService {
       throw error;
     }
   }
+}
+
+function seriesMetadataScore(item: {
+  seriesMetadataProviderId: string | null;
+  seriesDisplayTitle: string | null;
+  seriesOverview: string | null;
+  posterPath: string | null;
+  backdropPath: string | null;
+}) {
+  return Number(Boolean(item.seriesMetadataProviderId)) * 8
+    + Number(Boolean(item.seriesDisplayTitle)) * 4
+    + Number(Boolean(item.seriesOverview)) * 3
+    + Number(Boolean(item.posterPath)) * 2
+    + Number(Boolean(item.backdropPath));
 }
