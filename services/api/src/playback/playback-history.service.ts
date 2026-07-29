@@ -133,14 +133,32 @@ export class PlaybackHistoryService {
     });
   }
 
-  async nextEpisode(actor: AuthenticatedUser, seriesTitle: string) {
-    const normalizedTitle = seriesTitle?.trim();
-    if (!actor.profileId || !normalizedTitle || normalizedTitle.length > 240) return null;
+  async nextEpisode(
+    actor: AuthenticatedUser,
+    identity: string | {
+      seriesTitle?: string;
+      seriesDisplayTitle?: string;
+      seriesMetadataProviderId?: string;
+    },
+  ) {
+    const request = typeof identity === 'string' ? { seriesTitle: identity } : identity;
+    const providerId = request.seriesMetadataProviderId?.trim();
+    const displayTitle = request.seriesDisplayTitle?.trim();
+    const normalizedTitle = request.seriesTitle?.trim();
+    if (
+      !actor.profileId
+      || (!providerId && !displayTitle && !normalizedTitle)
+      || [providerId, displayTitle, normalizedTitle].some((value) => (value?.length ?? 0) > 240)
+    ) return null;
     const episodes = await this.prisma.mediaItem.findMany({
       where: {
         accountId: actor.accountId,
         type: 'episode',
-        seriesTitle: { equals: normalizedTitle, mode: 'insensitive' },
+        ...(providerId
+          ? { seriesMetadataProviderId: providerId }
+          : displayTitle
+            ? { seriesDisplayTitle: { equals: displayTitle, mode: 'insensitive' as const } }
+            : { seriesTitle: { equals: normalizedTitle!, mode: 'insensitive' as const } }),
       },
       include: {
         file: true,

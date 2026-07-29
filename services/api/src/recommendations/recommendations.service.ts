@@ -17,7 +17,11 @@ import { sanitizeMediaTitle } from '@boltbytes/contracts';
 
 interface RecommendationCard {
   id: string;
+  mediaType: 'movie' | 'series';
   title: string;
+  seriesTitle: string | null;
+  seriesDisplayTitle: string | null;
+  seriesMetadataProviderId: string | null;
   category: string;
   summary: string | null;
   posterPath: string | null;
@@ -161,7 +165,11 @@ export class RecommendationsService {
         const title = sanitizeMediaTitle(media.seriesTitle ?? media.title);
         return {
           id: media.id,
+          mediaType: media.type === 'episode' ? 'series' : 'movie',
           title,
+          seriesTitle: media.seriesTitle,
+          seriesDisplayTitle: media.seriesDisplayTitle,
+          seriesMetadataProviderId: media.seriesMetadataProviderId,
           category: media.category ?? 'uncategorized',
           summary: media.overview,
           posterPath: media.posterPath,

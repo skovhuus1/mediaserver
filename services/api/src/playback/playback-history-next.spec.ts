@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PlaybackHistoryService } from './playback-history.service';
 
 describe('next series episode', () => {
-  it('skips completed episodes and returns the first remaining episode', async () => {
+  it('groups by provider id, skips completed episodes and returns the first remaining episode', async () => {
     const first = episode('episode-1', 1, 1);
     const second = episode('episode-2', 1, 2);
     const prisma = {
@@ -19,7 +19,11 @@ describe('next series episode', () => {
       accountId: 'account-id',
       sub: 'user-id',
       profileId: 'profile-id',
-    } as never, 'Foundation');
+    } as never, {
+      seriesTitle: 'different scanner title',
+      seriesDisplayTitle: 'Foundation',
+      seriesMetadataProviderId: '366972',
+    });
 
     expect(result).toMatchObject({
       media: {
@@ -32,6 +36,11 @@ describe('next series episode', () => {
       resumePositionMs: 0,
     });
     expect(result?.media.file).not.toHaveProperty('probe');
+    expect(prisma.mediaItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ seriesMetadataProviderId: '366972' }),
+      }),
+    );
   });
 });
 

@@ -98,11 +98,19 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
   }, [queryKey, searchParams]);
 
   useEffect(() => {
-    const mediaId = searchParams.get('media');
+    const mediaId = searchParams.get('media') ?? searchParams.get('info') ?? searchParams.get('play');
     if (!mediaId) return;
     setDetailLoading(true);
     void api<CatalogItem>(`/media/${encodeURIComponent(mediaId)}`)
-      .then((item) => setDetail({ kind: 'media', item }))
+      .then(async (item) => {
+        if (searchParams.get('play') && item.type !== 'series') {
+          requestPlayback(item);
+          return;
+        }
+        setDetail(item.type === 'episode' || item.type === 'series'
+          ? await fetchSeriesDetail(item)
+          : { kind: 'media', item });
+      })
       .catch((failure) => setError(errorMessage(failure)))
       .finally(() => setDetailLoading(false));
   }, [queryKey, searchParams]);
@@ -119,18 +127,8 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
     setDetailLoading(true);
     setError(null);
     try {
-      if (item.type === 'series') {
-        const params = new URLSearchParams({
-          type: 'episode',
-          seriesTitle: item.seriesTitle ?? item.title,
-          pageSize: '100',
-          sort: 'title',
-        });
-        const [episodes, next] = await Promise.all([
-          api<CatalogResponse>(`/media/catalog?${params.toString()}`),
-          api<SeriesNext | null>(`/playback/history/series-next?seriesTitle=${encodeURIComponent(item.seriesTitle ?? item.title)}`),
-        ]);
-        setDetail({ kind: 'series', item, episodes: episodes.items, next });
+      if (item.type === 'series' || item.type === 'episode') {
+        setDetail(await fetchSeriesDetail(item));
       } else {
         setDetail({ kind: 'media', item: await api<CatalogItem>(`/media/${encodeURIComponent(item.id)}`) });
       }
@@ -200,7 +198,7 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
       </nav>
       {(detail || detailLoading) && (
         <div className="detail-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setDetail(null)}>
-          <aside className="media-detail" role="dialog" aria-modal="true" aria-label="Mediedetaljer">
+          <aside className={`media-detail${detail?.kind === 'series' ? ' series-detail' : ''}`} role="dialog" aria-modal="true" aria-label="Mediedetaljer">
             <button className="detail-close" onClick={() => setDetail(null)} aria-label="Luk"><X size={18} /></button>
             {detailLoading && !detail ? <p>Henter mediedetaljer...</p> : detail && <DetailContent detail={detail} />}
           </aside>
@@ -250,6 +248,7 @@ function SeriesEpisodes({ episodes, next }: { episodes: CatalogItem[]; next: Ser
       <nav className="season-tabs" aria-label="Sæsoner">
         {seasons.map((value) => <button className={season === value ? 'active' : ''} onClick={() => setSeason(value)} key={value}>{value === 0 ? 'Specials' : `Sæson ${value}`}</button>)}
       </nav>
+      <header className="series-episode-heading"><strong>{season === 0 ? 'Specials' : `Sæson ${season}`}</strong><span>{visible.length} afsnit</span></header>
       {visible.map((episode) => (
         <button className={`${playerStyles.episodeButton} ${playerStyles.episodeRich}`} onClick={() => requestPlayback(episode)} key={episode.id}>
           <span className={playerStyles.episodeStill} style={imageStyle(episode.episodeStillPath ?? episode.seasonPosterPath, 'w500')} />
@@ -260,6 +259,48 @@ function SeriesEpisodes({ episodes, next }: { episodes: CatalogItem[]; next: Ser
       ))}
     </div>
   );
+}
+
+async function fetchSeriesDetail(item: CatalogItem): Promise<DetailState> {
+  const catalogParams = new URLSearchParams({
+    type: 'episode',
+    pageSize: '100',
+    sort: 'title',
+  });
+  appendSeriesIdentity(catalogParams, item);
+  const historyParams = new URLSearchParams();
+  appendSeriesIdentity(historyParams, item);
+  const [episodes, next] = await Promise.all([
+    api<CatalogResponse>(`/media/catalog?${catalogParams.toString()}`),
+    api<SeriesNext | null>(`/playback/history/series-next?${historyParams.toString()}`),
+  ]);
+  const representative = episodes.items[0] ?? item;
+  return {
+    kind: 'series',
+    item: {
+      ...representative,
+      ...item,
+      type: 'series',
+      title: item.seriesDisplayTitle ?? representative.seriesDisplayTitle
+        ?? item.seriesTitle ?? representative.seriesTitle ?? item.title,
+      overview: item.seriesOverview ?? representative.seriesOverview
+        ?? item.overview ?? representative.overview ?? null,
+      posterPath: item.posterPath ?? representative.posterPath ?? null,
+      backdropPath: item.backdropPath ?? representative.backdropPath ?? null,
+    },
+    episodes: episodes.items,
+    next,
+  };
+}
+
+function appendSeriesIdentity(params: URLSearchParams, item: CatalogItem) {
+  if (item.seriesMetadataProviderId) {
+    params.set('seriesMetadataProviderId', item.seriesMetadataProviderId);
+  } else if (item.seriesDisplayTitle) {
+    params.set('seriesDisplayTitle', item.seriesDisplayTitle);
+  } else {
+    params.set('seriesTitle', item.seriesTitle ?? item.title);
+  }
 }
 
 function episodeLabel(item: CatalogItem): string {

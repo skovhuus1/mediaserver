@@ -35,6 +35,11 @@
 > formularsystem med tydelige labels, fokus-state, statusdiagnostik og
 > ensartede handlingsknapper. Native hvide felter bruges ikke i
 > indstillingsvisningen.
+>
+> Kundeportalens seriehylder grupperer episoder efter TVDB/TMDB-provider-id,
+> derefter metadataens serienavn og først til sidst scannerens rensede titel.
+> Et klik på en anbefaling åbner den valgte film eller den samlede serie med
+> sæsonfaner, strukturerede episoder og profilens næste/ufærdige afsnit.
 
 BoltBytes Media Server er en selvhostet TypeScript-platform til administration og autoriseret afspilning af egne film og serier. Kodebasen er genopbygget fra bunden med server-side adgangskontrol, reproducerbar installation og en tydelig grænse mellem implementeret funktionalitet og kommende faser.
 

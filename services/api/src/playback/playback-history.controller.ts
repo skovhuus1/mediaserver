@@ -21,8 +21,17 @@ export class PlaybackHistoryController {
   }
 
   @Get('history/series-next')
-  nextEpisode(@CurrentUser() actor: AuthenticatedUser, @Query('seriesTitle') seriesTitle: string) {
-    return this.history.nextEpisode(actor, seriesTitle);
+  nextEpisode(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query('seriesTitle') seriesTitle?: string,
+    @Query('seriesDisplayTitle') seriesDisplayTitle?: string,
+    @Query('seriesMetadataProviderId') seriesMetadataProviderId?: string,
+  ) {
+    return this.history.nextEpisode(actor, {
+      ...(seriesTitle ? { seriesTitle } : {}),
+      ...(seriesDisplayTitle ? { seriesDisplayTitle } : {}),
+      ...(seriesMetadataProviderId ? { seriesMetadataProviderId } : {}),
+    });
   }
 
   @Patch('sessions/:id/progress')

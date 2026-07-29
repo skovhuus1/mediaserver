@@ -244,6 +244,8 @@ a { color: inherit; text-decoration: none; }
 .catalog-pagination span { color: var(--muted); font-size: 9px; }
 .detail-backdrop { position: fixed; inset: 0; z-index: 20; display: flex; justify-content: flex-end; background: rgba(2,4,7,.72); backdrop-filter: blur(7px); }
 .media-detail { width: min(470px, 100%); height: 100%; overflow-y: auto; padding: 42px 28px; position: relative; border-left: 1px solid rgba(177,104,255,.2); background: linear-gradient(155deg, #171d24, #0d1116 72%); box-shadow: -24px 0 70px rgba(0,0,0,.42); animation: detail-in .22s ease-out; }
+.media-detail.series-detail { width: min(780px, 100%); }
+.series-detail .detail-art { height: 240px; }
 @keyframes detail-in { from { transform: translateX(30px); opacity: 0; } }
 .detail-close { position: absolute; top: 16px; right: 16px; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: white; background: #20262d; cursor: pointer; }
 .detail-art { height: 180px; margin-bottom: 25px; display: grid; place-items: center; border-radius: 9px; color: rgba(255,255,255,.8); background: radial-gradient(circle at 68% 28%, #8e4de8, transparent 22%), linear-gradient(145deg, #2b1c3f, #111820); }
@@ -256,6 +258,9 @@ a { color: inherit; text-decoration: none; }
 .detail-facts dt { color: var(--muted); font-size: 9px; text-transform: uppercase; }
 .detail-facts dd { margin: 0; display: flex; gap: 6px; overflow-wrap: anywhere; font-size: 10px; }
 .episode-list { margin-top: 24px; }
+.series-episode-heading { display: flex; align-items: center; justify-content: space-between; margin: 15px 0 8px; padding-bottom: 9px; border-bottom: 1px solid var(--line); }
+.series-episode-heading strong { font: 650 15px var(--font-display), sans-serif; }
+.series-episode-heading span { color: var(--muted); font-size: 9px; }
 .episode-list > div { display: grid; grid-template-columns: 58px 1fr auto; gap: 9px; padding: 11px 0; border-top: 1px solid var(--line); }
 .episode-list strong { color: var(--accent-bright); font-size: 9px; }
 .episode-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
