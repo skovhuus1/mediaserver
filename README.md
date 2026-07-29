@@ -9,6 +9,8 @@
 > bitrate, opløsning og buffer. Notifikationer kan ryddes uden at slette
 > scanner-/jobhistorik. Kundeportalens topmenu skifter nu synligt mellem hjem,
 > film, serier og fortsæt, og tekniske release-tags skjules fra titler.
+> Admin-containeren bygger den delte kontraktspakke eksplicit, så samme
+> titelrensning bruges i scanner, API og browser.
 
 BoltBytes Media Server er en selvhostet TypeScript-platform til administration og autoriseret afspilning af egne film og serier. Kodebasen er genopbygget fra bunden med server-side adgangskontrol, reproducerbar installation og en tydelig grænse mellem implementeret funktionalitet og kommende faser.
 
