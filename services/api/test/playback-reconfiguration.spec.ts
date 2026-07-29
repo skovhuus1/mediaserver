@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PlaybackService } from '../src/playback/playback.service';
 
 describe('playback session reconfiguration', () => {
-  it('reuses the existing session and logical reservation for burn-in', async () => {
+  it('provides burn-in independently of plan transcode flags and reuses the reservation', async () => {
     const streamToken = 'a'.repeat(48);
     const session = {
       id: 'session-1',
@@ -64,8 +64,8 @@ describe('playback session reconfiguration', () => {
         effective: {
           maxVideoResolution: 2160,
           maxVideoBitrate: 20_000,
-          allowVideoTranscode: true,
-          allowSubtitleBurnIn: true,
+          allowVideoTranscode: false,
+          allowSubtitleBurnIn: false,
         },
       }),
     };

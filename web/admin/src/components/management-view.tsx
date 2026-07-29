@@ -556,13 +556,12 @@ function PlansView() {
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId);
   const flags: Array<[keyof PlanEntitlements, string]> = [
     ['allowDirectPlay', 'Direct Play'], ['allowDirectStream', 'Direct Stream'], ['allowVideoTranscode', 'Video-transcoding'],
-    ['allowAudioTranscode', 'Audio-transcoding'], ['allowSubtitleBurnIn', 'Indbrændte undertekster'],
-    ['allowChromecast', 'Chromecast'], ['allowOfflineDownload', 'Offline-download'],
+    ['allowAudioTranscode', 'Audio-transcoding'], ['allowChromecast', 'Chromecast'], ['allowOfflineDownload', 'Offline-download'],
   ];
 
   return (
     <section className="management-page">
-      <span className="eyebrow">ENTITLEMENTS</span><h1>Planer</h1><p>Opret immutable planversioner. 4K kræver 2160p, passende bitrate og en tilladt afspilningsmetode.</p>
+      <span className="eyebrow">ENTITLEMENTS</span><h1>Planer</h1><p>Opret immutable planversioner. 4K kræver 2160p, passende bitrate og en tilladt afspilningsmetode. Undertekster, inklusive nødvendigt burn-in, er altid tilgængelige.</p>
       <div className="management-grid">
         <div className="management-card">
           <h2><ShieldCheck size={18} /> Aktive planer</h2>

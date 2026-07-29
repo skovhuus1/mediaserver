@@ -1,7 +1,12 @@
 'use client';
 
 import Hls from 'hls.js';
-import { playbackResumeTargetSeconds, sanitizeMediaTitle } from '@boltbytes/contracts';
+import {
+  normalizePlaybackQualitySelection,
+  playbackResumeTargetSeconds,
+  presentPlaybackQualityLevel,
+  sanitizeMediaTitle,
+} from '@boltbytes/contracts';
 import {
   ArrowLeft,
   Captions,
@@ -84,7 +89,7 @@ type Authorization = {
 type TranscodeStatus = { state: 'queued' | 'running' | 'ready' | 'failed'; message: string };
 type PlayerMenu = 'playlist' | 'speed' | 'subtitles' | 'audio' | 'quality' | 'info' | null;
 type AudioTrack = { index: number; name: string; language: string };
-type QualityLevel = { index: number; label: string };
+type QualityLevel = ReturnType<typeof presentPlaybackQualityLevel> & { index: number };
 type SubtitleTrack = {
   id: string;
   label: string;
@@ -219,7 +224,9 @@ export function WebPlayer() {
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [activeAudioTrack, setActiveAudioTrack] = useState(0);
   const [qualities, setQualities] = useState<QualityLevel[]>([]);
-  const [activeQuality, setActiveQuality] = useState(-1);
+  const [qualitySelection, setQualitySelection] = useState(-1);
+  const [currentQuality, setCurrentQuality] = useState(-1);
+  const [qualitySwitching, setQualitySwitching] = useState<number | null>(null);
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -286,6 +293,10 @@ export function WebPlayer() {
     setCasting(false);
     activeSubtitleRef.current = null;
     setActiveSubtitle(null);
+    setQualities([]);
+    setQualitySelection(-1);
+    setCurrentQuality(-1);
+    setQualitySwitching(null);
   }, [saveProgress]);
 
   const togglePlay = useCallback(() => {
@@ -322,6 +333,10 @@ export function WebPlayer() {
         mediaRef.current = request.media;
         resumeRef.current = request.resumePositionMs;
         resumeAppliedRef.current = false;
+        setQualities([]);
+        setQualitySelection(-1);
+        setCurrentQuality(-1);
+        setQualitySwitching(null);
         setError('');
         setStatus('Autoriserer afspilning...');
         try {
@@ -419,14 +434,16 @@ export function WebPlayer() {
       hls.loadSource(authorization.streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      setQualities(hls.levels.map((level, index) => ({
+        setQualities(hls.levels.map((level, index) => ({
           index,
-          label: qualityLabel(
+          ...presentPlaybackQualityLevel(
             level.height,
             level.bitrate,
             authorization.adaptiveQuality.renditions[index],
           ),
         })));
+        setQualitySelection(hls.autoLevelEnabled ? -1 : hls.manualLevel);
+        setCurrentQuality(hls.currentLevel);
         setAudioTracks(hls.audioTracks.map((track, index) => ({
           index,
           name: track.name || `Lydspor ${index + 1}`,
@@ -443,9 +460,12 @@ export function WebPlayer() {
         }
         start();
       });
+      hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => {
+        setQualitySwitching(data.level);
+      });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
-        if (hls.autoLevelEnabled) setActiveQuality(-1);
-        else setActiveQuality(data.level);
+        setCurrentQuality(data.level);
+        setQualitySwitching(null);
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
@@ -667,10 +687,20 @@ export function WebPlayer() {
   };
 
   const selectQuality = (index: number) => {
-    if (hlsRef.current) hlsRef.current.currentLevel = index;
-    setActiveQuality(index);
+    const hls = hlsRef.current;
+    if (!hls) return;
+    const selected = normalizePlaybackQualitySelection(index, hls.levels.length);
+    setQualitySelection(selected);
+    setQualitySwitching(selected === -1 || selected === hls.currentLevel ? null : selected);
+    hls.nextLevel = selected;
     setMenu(null);
   };
+
+  const subtitleTracks = sortSubtitleTracks(
+    authorization?.subtitleTracks ?? [],
+    authorization?.playbackPreferences.preferredSubtitleLanguages ?? [],
+  );
+  const activeSubtitleTrack = subtitleTracks.find((track) => track.id === activeSubtitle);
 
   const revealControls = useCallback(() => {
     setControlsVisible(true);
@@ -919,20 +949,52 @@ export function WebPlayer() {
             </button>
           ))}
           {menu === 'subtitles' && (
-            <>
-              <button className={styles.menuRow} onClick={() => selectSubtitle(null)}>
-                <span>Fra</span>{activeSubtitle === null && <Check size={17} />}
+            <div className={styles.subtitleMenu}>
+              <div className={styles.subtitleNow}>
+                <span>Aktive undertekster</span>
+                <strong>{activeSubtitleTrack ? subtitleLanguageName(activeSubtitleTrack.language) : 'Fra'}</strong>
+                <small>
+                  {activeSubtitleTrack
+                    ? subtitleDescription(activeSubtitleTrack)
+                    : 'Videoen vises uden undertekster'}
+                </small>
+              </div>
+              <button
+                className={`${styles.menuRow} ${styles.subtitleRow} ${activeSubtitle === null ? styles.subtitleSelected : ''}`}
+                aria-pressed={activeSubtitle === null}
+                onClick={() => selectSubtitle(null)}
+              >
+                <span className={styles.subtitleChoice}>
+                  <span className={styles.subtitleLanguageBadge}>OFF</span>
+                  <span><strong>Fra</strong><small>Vis ingen undertekster</small></span>
+                </span>
+                {activeSubtitle === null && <Check size={18} />}
               </button>
-              {authorization?.subtitleTracks.map((track) => (
-                <button className={styles.menuRow} key={track.id} onClick={() => selectSubtitle(track.id)}>
-                  <span><strong>{track.label}</strong><small>{track.language === 'und' ? 'Ukendt sprog' : track.language}</small></span>
-                  {activeSubtitle === track.id && <Check size={17} />}
+              {subtitleTracks.map((track) => (
+                <button
+                  className={`${styles.menuRow} ${styles.subtitleRow} ${activeSubtitle === track.id ? styles.subtitleSelected : ''}`}
+                  aria-pressed={activeSubtitle === track.id}
+                  key={track.id}
+                  onClick={() => selectSubtitle(track.id)}
+                >
+                  <span className={styles.subtitleChoice}>
+                    <span className={styles.subtitleLanguageBadge}>{subtitleLanguageCode(track.language)}</span>
+                    <span>
+                      <strong>{subtitleLanguageName(track.language)}</strong>
+                      <small>{subtitleDescription(track)}</small>
+                    </span>
+                  </span>
+                  <span className={styles.subtitleTags}>
+                    <i>{subtitleFormat(track)}</i>
+                    {track.delivery === 'burn_in' && <em>Burn-in</em>}
+                    {activeSubtitle === track.id && <Check size={18} />}
+                  </span>
                 </button>
               ))}
-              {!authorization?.subtitleTracks.length && (
-                <div className={styles.emptyMenu}>Der blev ikke fundet kompatible tekstundertekster til denne fil.</div>
+              {!subtitleTracks.length && (
+                <div className={styles.emptyMenu}>Der blev ikke fundet undertekstspor til denne fil.</div>
               )}
-            </>
+            </div>
           )}
           {menu === 'audio' && (audioTracks.length ? audioTracks.map((track) => (
             <button className={styles.menuRow} key={track.index} onClick={() => selectAudioTrack(track.index)}>
@@ -941,13 +1003,55 @@ export function WebPlayer() {
             </button>
           )) : <div className={styles.emptyMenu}>Browseren eksponerer ikke separate lydspor for denne stream.</div>)}
           {menu === 'quality' && (
-            <>
-              <button className={styles.menuRow} onClick={() => selectQuality(-1)}>
-                <span>Automatisk</span>{activeQuality === -1 && <Check size={17} />}
+            <div className={styles.qualityMenu}>
+              <div className={styles.qualityNow}>
+                <span>Afspiller nu</span>
+                <strong>
+                  {currentQuality >= 0
+                    ? qualities.find((quality) => quality.index === currentQuality)?.resolution ?? 'Forbereder'
+                    : 'Forbereder'}
+                </strong>
+                <small>
+                  {currentQuality >= 0
+                    ? qualitySummary(qualities.find((quality) => quality.index === currentQuality))
+                    : 'Venter på første videosegment'}
+                </small>
+              </div>
+              <button
+                className={`${styles.menuRow} ${styles.qualityRow} ${qualitySelection === -1 ? styles.qualitySelected : ''}`}
+                aria-pressed={qualitySelection === -1}
+                onClick={() => selectQuality(-1)}
+              >
+                <span className={styles.qualityChoice}>
+                  <Gauge size={19} />
+                  <span>
+                    <strong>Automatisk</strong>
+                    <small>Tilpasser løbende kvaliteten til forbindelsen</small>
+                  </span>
+                </span>
+                {qualitySelection === -1 && <Check size={18} />}
               </button>
               {qualities.map((quality) => (
-                <button className={styles.menuRow} key={quality.index} onClick={() => selectQuality(quality.index)}>
-                  <span>{quality.label}</span>{activeQuality === quality.index && <Check size={17} />}
+                <button
+                  className={`${styles.menuRow} ${styles.qualityRow} ${qualitySelection === quality.index ? styles.qualitySelected : ''}`}
+                  aria-pressed={qualitySelection === quality.index}
+                  key={quality.index}
+                  onClick={() => selectQuality(quality.index)}
+                >
+                  <span className={styles.qualityChoice}>
+                    <span className={styles.resolutionBadge}>{quality.resolution}</span>
+                    <span>
+                      <strong>{quality.resolution}</strong>
+                      <small>{quality.bitrate ?? 'Variabel bitrate'}</small>
+                    </span>
+                  </span>
+                  <span className={styles.qualityTags}>
+                    {quality.dynamicRange && <i>{quality.dynamicRange}</i>}
+                    {quality.upscaled && <i className={styles.upscaledTag}>Opskaleret</i>}
+                    {qualitySwitching === quality.index
+                      ? <em>Skifter...</em>
+                      : qualitySelection === quality.index && <Check size={18} />}
+                  </span>
                 </button>
               ))}
               {!qualities.length && (
@@ -955,7 +1059,7 @@ export function WebPlayer() {
                   Original kvalitet · {authorization ? formatVideoProfile(authorization) || 'Direct Play' : 'Direct Play'}
                 </div>
               )}
-            </>
+            </div>
           )}
           {menu === 'info' && (
             <dl className={styles.infoGrid}>
@@ -1011,9 +1115,21 @@ export function WebPlayer() {
             </div>
             <div className={styles.optionControls}>
               <button onClick={() => setMenu(menu === 'speed' ? null : 'speed')}><Gauge /><small>{playbackRate}x</small><span>Hastighed</span></button>
-              <button onClick={() => setMenu(menu === 'subtitles' ? null : 'subtitles')}><Captions /><span>Undertekster</span></button>
+              <button onClick={() => setMenu(menu === 'subtitles' ? null : 'subtitles')}>
+                <Captions />
+                <small>{activeSubtitleTrack ? subtitleLanguageCode(activeSubtitleTrack.language) : 'Fra'}</small>
+                <span>Undertekster</span>
+              </button>
               <button onClick={() => setMenu(menu === 'audio' ? null : 'audio')}><Volume2 /><span>Lydspor</span></button>
-              <button onClick={() => setMenu(menu === 'quality' ? null : 'quality')}><Settings2 /><span>Kvalitet</span></button>
+              <button onClick={() => setMenu(menu === 'quality' ? null : 'quality')}>
+                <Settings2 />
+                <small>
+                  {qualitySelection === -1
+                    ? 'Auto'
+                    : qualities.find((quality) => quality.index === qualitySelection)?.resolution ?? 'Original'}
+                </small>
+                <span>Kvalitet</span>
+              </button>
               <button onClick={() => void toggleFullscreen()}><Maximize /><span>{isFullscreen ? 'Afslut fuld skærm' : 'Fuld skærm'}</span></button>
             </div>
           </div>
@@ -1180,16 +1296,82 @@ function menuTitle(menu: Exclude<PlayerMenu, null>) {
   } as const)[menu];
 }
 
-function qualityLabel(
-  height: number,
-  bitrate: number,
-  rendition?: { upscaled: boolean; hdr: boolean },
-) {
-  const resolution = height ? (height === 2160 ? '4K' : `${height}p`) : 'Transcoded';
-  const speed = bitrate > 0 ? ` ? ${(bitrate / 1_000_000).toFixed(1)} Mbps` : '';
-  const signal = rendition ? ` ? ${rendition.hdr ? 'HDR' : 'SDR'}` : '';
-  const upscale = rendition?.upscaled ? ' ? Opskaleret' : '';
-  return `${resolution}${speed}${signal}${upscale}`;
+function qualitySummary(quality?: QualityLevel) {
+  if (!quality) return 'Ukendt kvalitet';
+  return [
+    quality.bitrate,
+    quality.dynamicRange,
+    quality.upscaled ? 'Opskaleret' : null,
+  ].filter(Boolean).join(' · ');
+}
+
+const subtitleLanguages: Record<string, { code: string; name: string }> = {
+  chi: { code: 'ZH', name: 'Kinesisk' },
+  dan: { code: 'DA', name: 'Dansk' },
+  da: { code: 'DA', name: 'Dansk' },
+  deu: { code: 'DE', name: 'Tysk' },
+  dut: { code: 'NL', name: 'Hollandsk' },
+  eng: { code: 'EN', name: 'Engelsk' },
+  en: { code: 'EN', name: 'Engelsk' },
+  fin: { code: 'FI', name: 'Finsk' },
+  fra: { code: 'FR', name: 'Fransk' },
+  fre: { code: 'FR', name: 'Fransk' },
+  ger: { code: 'DE', name: 'Tysk' },
+  ita: { code: 'IT', name: 'Italiensk' },
+  jpn: { code: 'JA', name: 'Japansk' },
+  kor: { code: 'KO', name: 'Koreansk' },
+  nld: { code: 'NL', name: 'Hollandsk' },
+  nor: { code: 'NO', name: 'Norsk' },
+  spa: { code: 'ES', name: 'Spansk' },
+  swe: { code: 'SV', name: 'Svensk' },
+  zho: { code: 'ZH', name: 'Kinesisk' },
+};
+
+function subtitleLanguage(language: string) {
+  return subtitleLanguages[language.toLowerCase()] ?? {
+    code: language === 'und' ? '?' : language.slice(0, 2).toUpperCase(),
+    name: language === 'und' ? 'Ukendt sprog' : language.toUpperCase(),
+  };
+}
+
+function subtitleLanguageCode(language: string) {
+  return subtitleLanguage(language).code;
+}
+
+function subtitleLanguageName(language: string) {
+  return subtitleLanguage(language).name;
+}
+
+function subtitleFormat(track: SubtitleTrack) {
+  const codec = track.label.match(/\(([^)]+)\)/)?.[1]?.toLowerCase();
+  if (codec === 'hdmv_pgs_subtitle') return 'PGS';
+  if (codec === 'dvd_subtitle') return 'VobSub';
+  if (codec === 'dvb_subtitle') return 'DVB';
+  if (codec === 'subrip') return 'SRT';
+  if (codec === 'ass') return 'ASS';
+  return track.delivery === 'burn_in' ? 'Billede' : 'WebVTT';
+}
+
+function subtitleDescription(track: SubtitleTrack) {
+  const attributes = [
+    /forced|tvungen/i.test(track.label) ? 'Tvungen' : null,
+    /sdh|hearing/i.test(track.label) ? 'SDH' : null,
+    track.delivery === 'burn_in' ? 'Billedbaseret undertekst' : 'Tekstundertekst',
+  ];
+  return attributes.filter(Boolean).join(' · ');
+}
+
+function sortSubtitleTracks(tracks: SubtitleTrack[], preferredLanguages: string[]) {
+  const preference = preferredLanguages.map((language) => subtitleLanguageCode(language));
+  return [...tracks].sort((left, right) => {
+    const leftPreference = preference.indexOf(subtitleLanguageCode(left.language));
+    const rightPreference = preference.indexOf(subtitleLanguageCode(right.language));
+    const leftRank = leftPreference === -1 ? Number.MAX_SAFE_INTEGER : leftPreference;
+    const rightRank = rightPreference === -1 ? Number.MAX_SAFE_INTEGER : rightPreference;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    if (left.delivery !== right.delivery) return left.delivery === 'webvtt' ? -1 : 1;
+    return subtitleLanguageName(left.language).localeCompare(subtitleLanguageName(right.language), 'da');
+  });
 }
 
 function formatTime(seconds: number) {

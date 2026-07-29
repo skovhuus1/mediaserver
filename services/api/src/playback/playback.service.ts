@@ -270,20 +270,12 @@ export class PlaybackService {
         supportedCodecs: [],
       },
     });
-    if (!entitlement.allowed || !entitlement.effective.allowVideoTranscode) {
+    if (!entitlement.allowed) {
       throw new ForbiddenException({
-        code: entitlement.allowed
-          ? 'video_transcode_not_allowed'
-          : entitlement.code,
+        code: entitlement.code,
         message:
           entitlement.reasons[0]
-          ?? 'The active plan does not allow stream reconfiguration',
-      });
-    }
-    if (dto.burnIn && !entitlement.effective.allowSubtitleBurnIn) {
-      throw new ForbiddenException({
-        code: 'subtitle_burn_in_not_allowed',
-        message: 'The active plan does not allow subtitle burn-in',
+          ?? 'Playback access is not allowed',
       });
     }
 
