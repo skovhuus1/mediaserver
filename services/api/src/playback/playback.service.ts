@@ -1,5 +1,5 @@
 import { ForbiddenException, HttpException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { detectVideoSignalProfile, isHevcCodec, type AuthenticatedUser } from '@boltbytes/contracts';
+import { buildAdaptiveQualityPlan, detectVideoSignalProfile, isHevcCodec, type AuthenticatedUser } from '@boltbytes/contracts';
 import { isPrivileged } from '../common/auth';
 import { correlationId } from '../common/request-context';
 import { EntitlementsService } from '../entitlements/entitlements.service';
@@ -52,8 +52,44 @@ export class PlaybackService {
         message: 'The media item has no readable scanned file',
       });
     }
+    const [device, profilePreferences] = await Promise.all([
+      this.prisma.device.findFirst({
+        where: {
+          id: dto.deviceId,
+          accountId: actor.accountId,
+          userId: actor.sub,
+          isRevoked: false,
+        },
+      }),
+      this.prisma.profilePreferences.findUnique({
+        where: { profileId: dto.profileId },
+      }),
+    ]);
+    if (!device) {
+      throw new NotFoundException({
+        code: 'device_not_found',
+        message: 'The active playback device was not found',
+      });
+    }
     const sourceVideo = detectVideoSignalProfile(media.file.probe);
-    const decision = choosePlaybackMethod({
+    const adaptiveQuality = buildAdaptiveQualityPlan({
+      sourceWidth: media.width,
+      sourceHeight: media.height,
+      sourceBitrate: media.bitrate,
+      sourceHdr: Boolean(sourceVideo.hdr),
+      planMaxHeight: entitlement.effective.maxVideoResolution,
+      planMaxBitrate: entitlement.effective.maxVideoBitrate * 1_000,
+      serverMaxHeight: Number(process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT ?? 2160),
+      screenHeight: dto.capabilities.screenHeight ?? null,
+      devicePixelRatio: dto.capabilities.devicePixelRatio ?? null,
+      estimatedDownlinkMbps: dto.capabilities.estimatedDownlinkMbps ?? null,
+      qualityMode: device.qualityMode as 'auto' | 'fixed' | 'original',
+      fixedQualityHeight: device.fixedQualityHeight,
+      allowUpscale: device.allowUpscale,
+      dataSaver: device.dataSaver,
+      hdrMode: device.hdrMode as 'auto' | 'prefer_hdr' | 'force_sdr',
+    });
+    const normalDecision = choosePlaybackMethod({
       codec: media.codec,
       container: media.container,
       height: media.height,
@@ -64,6 +100,18 @@ export class PlaybackService {
       supportedContainers: dto.capabilities.supportedContainers,
       entitlements: entitlement.effective,
     });
+    const decision =
+      normalDecision.allowed
+      && normalDecision.method === 'direct_play'
+      && device.qualityMode !== 'original'
+      && entitlement.effective.allowVideoTranscode
+        ? {
+            allowed: true as const,
+            method: 'transcode' as const,
+            code: 'adaptive_transcode',
+            reason: 'Adaptive quality is enabled for this device',
+          }
+        : normalDecision;
     if (!decision.allowed) {
       await this.audit(actor, dto, 'denied', decision.code, { reason: decision.reason });
       throw new ForbiddenException({ code: decision.code, message: decision.reason });
@@ -89,6 +137,8 @@ export class PlaybackService {
               && dto.capabilities.supportsHdr
               && dto.capabilities.supportedCodecs.some((codec) => isHevcCodec(codec)),
             ),
+            adaptiveQuality,
+            hdrMode: device.hdrMode,
           });
         } catch (error) {
           await this.reservations.release(actor, session.id, 'transcode_queue_failed');
@@ -114,6 +164,19 @@ export class PlaybackService {
         streamUrl,
         contentType: decision.method === 'transcode' ? 'application/x-mpegURL' : this.directContentType(media.container),
         subtitleTracks,
+        playbackPreferences: {
+          qualityMode: device.qualityMode,
+          fixedQualityHeight: device.fixedQualityHeight,
+          allowUpscale: device.allowUpscale,
+          dataSaver: device.dataSaver,
+          playbackRate: device.playbackRate,
+          hdrMode: device.hdrMode,
+          preferredAudioLanguages: profilePreferences?.preferredAudioLanguages ?? ['da', 'en'],
+          preferredSubtitleLanguages: profilePreferences?.preferredSubtitleLanguages ?? ['da', 'en'],
+          subtitleMode: profilePreferences?.subtitleMode ?? 'auto',
+          autoplayNext: profilePreferences?.autoplayNext ?? true,
+        },
+        adaptiveQuality,
         videoProfile: {
           source: {
             width: media.width,

@@ -1,7 +1,25 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, IsUUID, Length, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsNumber, IsOptional, IsString, IsUUID, Length, Max, Min, ValidateNested } from 'class-validator';
 
 export class PlaybackCapabilitiesDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(240)
+  @Max(4320)
+  screenHeight?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.5)
+  @Max(4)
+  devicePixelRatio?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.1)
+  @Max(1000)
+  estimatedDownlinkMbps?: number;
+
   @IsArray()
   @ArrayMaxSize(40)
   @IsString({ each: true })

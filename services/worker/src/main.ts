@@ -1,8 +1,8 @@
 import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
-import { classifyMediaPath, detectVideoSignalProfile, isHevcCodec } from '@boltbytes/contracts';
+import { classifyMediaPath, detectVideoSignalProfile } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { enrichLibraryMetadata, hasTmdbConfiguration } from './metadata.js';
@@ -319,19 +319,46 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
   await rm(outputPath, { recursive: true, force: true });
   await mkdir(outputPath, { recursive: true });
 
-  const resolution = Math.max(240, Math.min(2160, finiteInteger(payload.maxVideoResolution) ?? 1080));
-  const bitrateKbps = Math.max(500, Math.min(50_000, finiteInteger(payload.maxVideoBitrate) ?? 8_000));
   const sourceVideo = detectVideoSignalProfile(file.probe);
-  const preserveHdrRequested = payload.preserveHdr === true && sourceVideo.hdr !== null;
-  const sourceWithinResolution = file.height === null || file.height <= resolution;
-  const sourceWithinBitrate = file.bitrate === null || file.bitrate <= bitrateKbps * 1_000;
-  const copyHdrVideo = preserveHdrRequested
-    && isHevcCodec(sourceVideo.codec)
-    && sourceWithinResolution
-    && sourceWithinBitrate;
-  const encodeHdrVideo = preserveHdrRequested
-    && !copyHdrVideo
-    && (sourceVideo.hdr === 'hdr10' || sourceVideo.hdr === 'hlg');
+  const adaptive = asJsonObject(payload.adaptiveQuality);
+  const requestedRenditions = Array.isArray(adaptive.renditions)
+    ? adaptive.renditions.map(asJsonObject).flatMap((rendition) => {
+        const width = finiteInteger(rendition.width);
+        const height = finiteInteger(rendition.height);
+        const bitrate = finiteInteger(rendition.bitrate);
+        if (!width || !height || !bitrate) return [];
+        return [{
+          width: evenDimension(width),
+          height: evenDimension(height),
+          bitrate: Math.max(500_000, Math.min(50_000_000, bitrate)),
+          hdr: rendition.hdr === true,
+        }];
+      })
+    : [];
+  const fallbackHeight = Math.max(
+    240,
+    Math.min(2160, finiteInteger(payload.maxVideoResolution) ?? 1080),
+  );
+  const renditions = (requestedRenditions.length > 0
+    ? requestedRenditions
+    : [{
+        height: evenDimension(Math.min(file.height ?? fallbackHeight, fallbackHeight)),
+        width: evenDimension(
+          file.width && file.height
+            ? file.width * (Math.min(file.height, fallbackHeight) / file.height)
+            : fallbackHeight * (16 / 9),
+        ),
+        bitrate: Math.max(
+          500_000,
+          Math.min(50_000_000, (finiteInteger(payload.maxVideoBitrate) ?? 8_000) * 1_000),
+        ),
+        hdr: payload.preserveHdr === true && sourceVideo.hdr !== null,
+      }]).slice(0, 4);
+  const preserveHdrRequested =
+    payload.preserveHdr === true
+    && payload.hdrMode !== 'force_sdr'
+    && sourceVideo.hdr !== null
+    && renditions.every((rendition) => rendition.hdr);
   for (const streamIndex of textSubtitleStreamIndexes(file.probe)) {
     try {
       const subtitleCancelled = await runFfmpeg(job.id, session.id, [
@@ -362,89 +389,59 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     }
   }
 
-  const outputHeight = evenDimension(Math.min(file.height ?? resolution, resolution));
-  const outputWidth = evenDimension(
-    file.width && file.height
-      ? file.width * (outputHeight / file.height)
-      : outputHeight * (16 / 9),
+  const nvenc = await availableNvencEncoders();
+  const videoEncoder = preserveHdrRequested
+    ? nvenc.hevc ? 'hevc_nvenc' : 'libx265'
+    : nvenc.h264 ? 'h264_nvenc' : 'libx264';
+  const inputLabel = sourceVideo.hdr && !preserveHdrRequested
+    ? '[0:v:0]zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p[prepared]'
+    : '[0:v:0]null[prepared]';
+  const splitOutputs = renditions.map((_, index) => `[split${index}]`).join('');
+  const scaleOutputs = renditions.map((rendition, index) =>
+    `[split${index}]scale=w=${rendition.width}:h=${rendition.height}:force_original_aspect_ratio=decrease,pad=${rendition.width}:${rendition.height}:(ow-iw)/2:(oh-ih)/2[v${index}]`,
   );
-  const peakBandwidth = (bitrateKbps + 160) * 1_000;
-  const averageBandwidth = Math.max(1, Math.round(peakBandwidth * 0.82));
-  const outputCodec = copyHdrVideo || encodeHdrVideo ? 'hvc1.2.4.L153.B0' : 'avc1.640028';
-  const master = [
-    '#EXTM3U',
-    '#EXT-X-VERSION:3',
-    `#EXT-X-STREAM-INF:BANDWIDTH=${peakBandwidth},AVERAGE-BANDWIDTH=${averageBandwidth},RESOLUTION=${outputWidth}x${outputHeight},CODECS="${outputCodec},mp4a.40.2"`,
-    'stream.m3u8',
-    '',
-  ].join('\n');
-  const temporaryMaster = resolve(outputPath, 'master.m3u8.tmp');
-  await writeFile(temporaryMaster, master, 'utf8');
-  await rename(temporaryMaster, resolve(outputPath, 'master.m3u8'));
-
-  const scaleFilter = `scale=w=-2:h=trunc(min(ih\\,${resolution})/2)*2`;
-  const sdrVideoArguments = sourceVideo.hdr
-    ? [
-        '-vf',
-        `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,${scaleFilter},format=yuv420p`,
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-crf', '20',
-        '-pix_fmt', 'yuv420p',
-        '-maxrate', `${bitrateKbps}k`,
-        '-bufsize', `${bitrateKbps * 2}k`,
-        '-color_primaries', 'bt709',
-        '-color_trc', 'bt709',
-        '-colorspace', 'bt709',
-        '-force_key_frames', 'expr:gte(t,n_forced*4)',
-      ]
-    : [
-        '-vf', scaleFilter,
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-crf', '22',
-        '-pix_fmt', 'yuv420p',
-        '-maxrate', `${bitrateKbps}k`,
-        '-bufsize', `${bitrateKbps * 2}k`,
-        '-force_key_frames', 'expr:gte(t,n_forced*4)',
-      ];
-  const hdrVideoArguments = [
-    '-vf', scaleFilter,
-    '-c:v', 'libx265',
-    '-preset', 'fast',
-    '-pix_fmt', 'yuv420p10le',
-    '-maxrate', `${bitrateKbps}k`,
-    '-bufsize', `${bitrateKbps * 2}k`,
-    '-x265-params', 'hdr-opt=1:repeat-headers=1',
-    '-color_primaries', 'bt2020',
-    '-color_trc', sourceVideo.hdr === 'hlg' ? 'arib-std-b67' : 'smpte2084',
-    '-colorspace', 'bt2020nc',
-    '-force_key_frames', 'expr:gte(t,n_forced*4)',
-  ];
-  const videoArguments = copyHdrVideo
-    ? ['-c:v', 'copy']
-    : encodeHdrVideo
-      ? hdrVideoArguments
-      : sdrVideoArguments;
+  const filterComplex = [
+    inputLabel,
+    `[prepared]split=${renditions.length}${splitOutputs}`,
+    ...scaleOutputs,
+  ].join(';');
+  const streamMaps = renditions.flatMap((_, index) => [
+    '-map', `[v${index}]`,
+    '-map', '0:a:0?',
+  ]);
+  const streamArguments = renditions.flatMap((rendition, index) => {
+    const bitrateKbps = Math.round(rendition.bitrate / 1_000);
+    return [
+      `-c:v:${index}`, videoEncoder,
+      `-b:v:${index}`, `${bitrateKbps}k`,
+      `-maxrate:v:${index}`, `${bitrateKbps}k`,
+      `-bufsize:v:${index}`, `${bitrateKbps * 2}k`,
+      `-pix_fmt:v:${index}`, preserveHdrRequested ? 'p010le' : 'yuv420p',
+      `-force_key_frames:v:${index}`, 'expr:gte(t,n_forced*4)',
+      `-c:a:${index}`, 'aac',
+      `-b:a:${index}`, '160k',
+      `-ac:a:${index}`, '2',
+    ];
+  });
+  const variantMap = renditions.map((_, index) => `v:${index},a:${index},name:${index}`).join(' ');
   const cancelled = await runFfmpeg(job.id, session.id, [
     '-hide_banner',
     '-loglevel', 'warning',
     '-nostdin',
     '-y',
     '-i', inputPath,
-    '-map', '0:v:0',
-    '-map', '0:a:0?',
-    ...videoArguments,
-    '-c:a', 'aac',
-    '-b:a', '160k',
-    '-ac', '2',
+    '-filter_complex', filterComplex,
+    ...streamMaps,
+    ...streamArguments,
     '-f', 'hls',
     '-hls_time', '4',
     '-hls_list_size', '0',
     '-hls_playlist_type', 'event',
     '-hls_flags', 'independent_segments+temp_file',
-    '-hls_segment_filename', resolve(outputPath, 'segment%05d.ts'),
-    resolve(outputPath, 'stream.m3u8'),
+    '-var_stream_map', variantMap,
+    '-master_pl_name', 'master.m3u8',
+    '-hls_segment_filename', resolve(outputPath, 'segment_%v_%05d.ts'),
+    resolve(outputPath, 'stream_%v.m3u8'),
   ]);
   if (cancelled) await rm(outputPath, { recursive: true, force: true });
 }
@@ -463,6 +460,46 @@ function textSubtitleStreamIndexes(probe: Prisma.JsonValue | null): number[] {
 
 function evenDimension(value: number): number {
   return Math.max(2, Math.floor(value / 2) * 2);
+}
+
+let nvencEncoderCache: Promise<{ h264: boolean; hevc: boolean }> | null = null;
+
+function availableNvencEncoders(): Promise<{ h264: boolean; hevc: boolean }> {
+  if (nvencEncoderCache) return nvencEncoderCache;
+  nvencEncoderCache = new Promise((resolveEncoders) => {
+    const runtimeVisible =
+      Boolean(process.env.NVIDIA_VISIBLE_DEVICES)
+      && process.env.NVIDIA_VISIBLE_DEVICES !== 'void';
+    if (!runtimeVisible) {
+      resolveEncoders({ h264: false, hevc: false });
+      return;
+    }
+    const child = spawn('ffmpeg', ['-hide_banner', '-encoders'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      output = `${output}${chunk}`.slice(-250_000);
+    });
+    child.stderr.on('data', (chunk: string) => {
+      output = `${output}${chunk}`.slice(-250_000);
+    });
+    child.once('error', () => {
+      clearTimeout(timer);
+      resolveEncoders({ h264: false, hevc: false });
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      resolveEncoders({
+        h264: code === 0 && /\bh264_nvenc\b/.test(output),
+        hevc: code === 0 && /\bhevc_nvenc\b/.test(output),
+      });
+    });
+  });
+  return nvencEncoderCache;
 }
 
 async function runFfmpeg(jobId: string, sessionId: string, args: string[]): Promise<boolean> {

@@ -5,6 +5,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { AdaptiveQualityPlan } from '@boltbytes/contracts';
 import { createReadStream } from 'node:fs';
 import { access, readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -19,6 +20,8 @@ type TranscodeLimits = {
   maxVideoResolution: number;
   maxVideoBitrate: number;
   preserveHdr: boolean;
+  adaptiveQuality: AdaptiveQualityPlan;
+  hdrMode: string;
 };
 
 @Injectable()
@@ -38,6 +41,8 @@ export class TranscodeStreamService {
           maxVideoResolution: limits.maxVideoResolution,
           maxVideoBitrate: limits.maxVideoBitrate,
           preserveHdr: limits.preserveHdr,
+          adaptiveQuality: limits.adaptiveQuality,
+          hdrMode: limits.hdrMode,
         },
         maxAttempts: 1,
       },
@@ -48,11 +53,26 @@ export class TranscodeStreamService {
     const session = await this.validSession(sessionId, token);
     const manifestPath = this.assetPath(session.id, 'master.m3u8');
     try {
-      await Promise.all([
-        access(manifestPath),
-        access(this.assetPath(session.id, 'stream.m3u8')),
-        access(this.assetPath(session.id, 'segment00000.ts')),
-      ]);
+      const master = await readFile(manifestPath, 'utf8');
+      const variants = master
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#'));
+      if (variants.length === 0) throw new Error('HLS master has no variants');
+      for (const variant of variants) {
+        if (!isAllowedHlsAsset(variant) || !variant.endsWith('.m3u8')) {
+          throw new Error('HLS master contains an invalid variant');
+        }
+        const playlist = await readFile(this.assetPath(session.id, variant), 'utf8');
+        const firstSegment = playlist
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find((line) => line && !line.startsWith('#'));
+        if (!firstSegment || !isAllowedHlsAsset(firstSegment)) {
+          throw new Error('HLS variant has no playable segment');
+        }
+        await access(this.assetPath(session.id, firstSegment));
+      }
       return { state: 'ready', message: 'HLS stream is ready' };
     } catch {
       // The worker writes the manifest atomically after the first complete segment.

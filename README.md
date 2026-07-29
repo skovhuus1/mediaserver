@@ -343,6 +343,24 @@ CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, s
 
 ### Rester i den samlede personalized-watch-ABR-leverance
 
-- Metadataworkeren skal endnu udfylde de nye genre-, credit- og provider-similar-felter fra TMDB/TVDB.
-- Multi-rendition HLS, NVENC-health/fallback, dynamisk burn-in-rekonfiguration og den fulde player-overlay/fullscreen/track-binding er ikke afsluttet i denne chunk.
+- Metadataworkeren udfylder genre-, top-15 credit- og provider-similar-felter fra TMDB. TVDB-serier krydslinkes best-effort til TMDB.
+- Dynamisk burn-in-rekonfiguration for PGS/VobSub er fortsat ikke afsluttet; tekstbaserede spor og den adaptive player er implementeret.
 - Denne branch m? ikke merges til `main`, f?r de resterende dele samt alle lokale og GitHub-gates er gr?nne.
+
+
+## Adaptiv HLS og personlig player (2026-07-29)
+
+- Playback authorization beregner et serverstyret kvalitetsloft som minimum af abonnement, servermaksimum, fysisk sk?rmh?jde, enhedens kvalitetstilstand, databesparelse og upscaling-politik.
+- Den f?lles ladder indeholder 360p, 480p, 720p, 1080p, 1440p og 2160p og v?lger h?jst fire j?vnt fordelte renditions. Databesparelse begr?nser output til 720p og cirka 3 Mbps.
+- Workeren producerer renditions i ?n FFmpeg-dekodning med segmentjusterede streams, automatisk mastermanifest og nummererede playlists/segmenter. API-et markerer f?rst streamen klar, n?r alle variant-playlister har et l?sbart f?rste segment.
+- NVIDIA NVENC v?lges kun, n?r container-runtime er synlig og FFmpeg annoncerer den n?dvendige H.264/HEVC-encoder. Ellers bruges libx264/libx265.
+- HDR bevares som HEVC Main10, n?r klient, plan og HDR-mode tillader det. `force_sdr` bruger tone mapping; opskalerede niveauer m?rkes tydeligt og p?st?r ikke at skabe ny kildedetalje.
+- Hls.js starter i Auto med player-size- og FPS-drop-capping. Manuelle niveauer kan v?lges, og Auto gendannes med level `-1`.
+- Playeren bruger profilens lyd-/undertekstsprog, binder tekstspor efter `loadedmetadata` og `addtrack`, skjuler overlay efter tre sekunders afspilning og holder fullscreen-state synkron med `fullscreenchange`.
+- Det tidligere enkelt-rendition assetformat accepteres fortsat read-only under rullende opdatering; nye jobs producerer kun `stream_%v.m3u8` og `segment_%v_%05d.ts`.
+
+### Fortsat rester
+
+- PGS/VobSub burn-in og `PATCH /playback/sessions/:id/configuration` mangler fortsat.
+- NVENC og HDR/SDR skal staging-smoketestes p? den faktiske NVIDIA-host med rigtige 4K HDR-filer.
+- Egen Chromecast receiver er fortsat en senere fase; Default Media Receiver-flowet er bevaret.

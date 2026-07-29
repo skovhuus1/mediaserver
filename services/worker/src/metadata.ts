@@ -9,6 +9,9 @@ type ProviderCandidate = MetadataCandidate & {
   posterPath: string | null;
   backdropPath: string | null;
   releaseDate: Date | null;
+  genres: string[];
+  credits: Array<{ id: string; name: string; character: string | null }>;
+  similarProviderIds: string[];
 };
 
 type TvdbSeasonMetadata = {
@@ -95,6 +98,15 @@ export async function enrichLibraryMetadata(
         ? match.episodes.get(episodeKey(item.seasonNumber, item.episodeNumber)) ?? null
         : null;
       const season = item.seasonNumber !== null ? match.seasons.get(item.seasonNumber) ?? null : null;
+      const tmdbFeatures = settings.tmdbToken
+        ? await searchTmdb(
+            settings.tmdbToken,
+            settings.language,
+            'tv',
+            match.series.title,
+            match.series.releaseYear ?? null,
+          ).catch(() => null)
+        : null;
       await prisma.mediaItem.update({
         where: { id: item.id },
         data: {
@@ -114,6 +126,13 @@ export async function enrichLibraryMetadata(
           metadataUpdatedAt: new Date(),
           releaseYear: item.releaseYear ?? match.series.releaseYear ?? null,
           releaseDate: episode?.airedAt ?? item.releaseDate,
+          genres: tmdbFeatures?.genres ?? match.series.genres,
+          credits: tmdbFeatures?.credits ?? match.series.credits,
+          similarProviderIds:
+            tmdbFeatures
+              ? [`tmdb:${tmdbFeatures.id}`, ...tmdbFeatures.similarProviderIds]
+              : match.series.similarProviderIds,
+          recommendationUpdatedAt: new Date(),
         },
       });
       matched += 1;
@@ -158,6 +177,10 @@ export async function enrichLibraryMetadata(
         metadataUpdatedAt: new Date(),
         releaseYear: item.releaseYear ?? candidate.releaseYear ?? null,
         releaseDate: item.releaseDate ?? candidate.releaseDate,
+        genres: candidate.genres,
+        credits: candidate.credits,
+        similarProviderIds: candidate.similarProviderIds,
+        recommendationUpdatedAt: new Date(),
       },
     });
     matched += 1;
@@ -203,7 +226,15 @@ async function searchTmdb(
 ): Promise<ProviderCandidate | null> {
   const first = await requestTmdb(token, language, kind, title, year);
   const candidates = first.length || !year ? first : await requestTmdb(token, language, kind, title, null);
-  return selectMetadataCandidate(candidates, title, year);
+  const selected = selectMetadataCandidate(candidates, title, year);
+  if (!selected) return null;
+  const features = await requestTmdbRecommendationFeatures(
+    token,
+    language,
+    kind,
+    selected.id,
+  ).catch(() => ({ genres: [], credits: [], similarProviderIds: [] }));
+  return { ...selected, ...features };
 }
 
 async function requestTmdb(
@@ -239,8 +270,69 @@ async function requestTmdb(
       posterPath: tmdbImagePath(result.poster_path),
       backdropPath: tmdbImagePath(result.backdrop_path),
       releaseDate,
+      genres: [],
+      credits: [],
+      similarProviderIds: [],
     }];
   });
+}
+
+async function requestTmdbRecommendationFeatures(
+  token: string,
+  language: string,
+  kind: 'movie' | 'tv',
+  providerId: number,
+) {
+  const request = async (suffix: string) => {
+    const response = await fetch(
+      `https://api.themoviedb.org/3/${kind}/${providerId}${suffix}?language=${encodeURIComponent(language)}&page=1`,
+      {
+        headers: { accept: 'application/json', authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        `metadata_provider_http_${response.status}: TMDB recommendation metadata failed`,
+      );
+    }
+    return response.json() as Promise<Record<string, unknown>>;
+  };
+  const [detailsResult, creditsResult, similarResult] = await Promise.allSettled([
+    request(''),
+    request('/credits'),
+    request('/similar'),
+  ]);
+  const details = detailsResult.status === 'fulfilled' ? detailsResult.value : {};
+  const creditsPayload =
+    creditsResult.status === 'fulfilled' ? creditsResult.value : {};
+  const similar = similarResult.status === 'fulfilled' ? similarResult.value : {};
+  const genres = Array.isArray(details.genres)
+    ? details.genres
+        .map(asObject)
+        .map((genre) => stringValue(genre.name))
+        .filter((genre): genre is string => Boolean(genre))
+    : [];
+  const credits = Array.isArray(creditsPayload.cast)
+    ? creditsPayload.cast.slice(0, 15).flatMap((value) => {
+        const credit = asObject(value);
+        const id = integerValue(credit.id);
+        const name = stringValue(credit.name);
+        if (id === null || !name) return [];
+        return [{
+          id: `tmdb:${id}`,
+          name,
+          character: stringValue(credit.character),
+        }];
+      })
+    : [];
+  const similarProviderIds = Array.isArray(similar.results)
+    ? similar.results.flatMap((value) => {
+        const id = integerValue(asObject(value).id);
+        return id === null ? [] : [`tmdb:${id}`];
+      })
+    : [];
+  return { genres, credits, similarProviderIds };
 }
 
 async function loginTvdb(apikey: string, pin: string | null): Promise<string> {
@@ -313,6 +405,9 @@ async function requestTvdbSearch(
       posterPath: tvdbImageUrl(result.image_url ?? result.poster ?? result.thumbnail),
       backdropPath: null,
       releaseDate: null,
+      genres: [],
+      credits: [],
+      similarProviderIds: [],
     }];
   });
 }

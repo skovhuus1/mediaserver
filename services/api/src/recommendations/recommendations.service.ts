@@ -100,6 +100,11 @@ export class RecommendationsService {
         .filter((entry) => entry.completed)
         .map((entry) => entry.mediaId),
     );
+    const watchedSeries = new Set(
+      history
+        .filter((entry) => entry.completed && entry.media.seriesTitle)
+        .map((entry) => entry.media.seriesTitle!),
+    );
     const signals: RecommendationSignal[] = personalized
       ? history.map((entry) => {
           const ageDays =
@@ -107,7 +112,8 @@ export class RecommendationsService {
           const recency = Math.max(0.05, 1 - ageDays / 180);
           const baseWeight = entry.completed
             ? 1
-            : entry.positionMs > 0
+            : entry.media.file?.durationMs
+              && entry.positionMs / entry.media.file.durationMs >= 0.1
               ? 0.6
               : 0;
           return {
@@ -120,7 +126,9 @@ export class RecommendationsService {
     const ranked = candidates
       .filter(
         (media) =>
-          !watchedIds.has(media.id) && feedback.get(media.id) !== 'hidden',
+          !watchedIds.has(media.id)
+          && (!media.seriesTitle || !watchedSeries.has(media.seriesTitle))
+          && feedback.get(media.id) !== 'hidden',
       )
       .map((media) => {
         const result = scoreRecommendation(
