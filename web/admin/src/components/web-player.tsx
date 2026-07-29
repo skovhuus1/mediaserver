@@ -1,7 +1,7 @@
 'use client';
 
 import Hls from 'hls.js';
-import { sanitizeMediaTitle } from '@boltbytes/contracts';
+import { playbackResumeTargetSeconds, sanitizeMediaTitle } from '@boltbytes/contracts';
 import {
   ArrowLeft,
   Captions,
@@ -196,6 +196,7 @@ export function WebPlayer() {
   const sessionRef = useRef<string | null>(null);
   const mediaRef = useRef<PlayableMedia | null>(null);
   const resumeRef = useRef(0);
+  const resumeAppliedRef = useRef(false);
   const castingRef = useRef(false);
   const bufferingRef = useRef(false);
   const castRemotePlayerRef = useRef<CastRemotePlayer | null>(null);
@@ -320,6 +321,7 @@ export function WebPlayer() {
         setMedia(request.media);
         mediaRef.current = request.media;
         resumeRef.current = request.resumePositionMs;
+        resumeAppliedRef.current = false;
         setError('');
         setStatus('Autoriserer afspilning...');
         try {
@@ -383,13 +385,26 @@ export function WebPlayer() {
     const video = videoRef.current;
     if (!video) return;
     let disposed = false;
+    let started = false;
+    const applyResume = () => {
+      if (resumeAppliedRef.current) return true;
+      if (video.readyState < HTMLMediaElement.HAVE_METADATA) return false;
+      const target = playbackResumeTargetSeconds(resumeRef.current, video.duration);
+      if (target !== null) {
+        video.currentTime = target;
+        setCurrentTime(target);
+      }
+      resumeAppliedRef.current = true;
+      return true;
+    };
     const start = () => {
-      if (disposed) return;
-      const target = resumeRef.current / 1000;
-      if (target > 0 && target < video.duration) video.currentTime = target;
+      if (disposed || started || !applyResume()) return;
+      started = true;
       setDuration(Number.isFinite(video.duration) ? video.duration : 0);
       void video.play().catch(() => undefined);
     };
+    video.addEventListener('loadedmetadata', start);
+    video.addEventListener('durationchange', start);
 
     if (authorization.method === 'transcode' && Hls.isSupported()) {
       const hls = new Hls({
@@ -439,13 +454,14 @@ export function WebPlayer() {
       });
     } else {
       video.src = authorization.streamUrl;
-      video.addEventListener('loadedmetadata', start, { once: true });
     }
 
     return () => {
       disposed = true;
       hlsRef.current?.destroy();
       hlsRef.current = null;
+      video.removeEventListener('loadedmetadata', start);
+      video.removeEventListener('durationchange', start);
       video.removeAttribute('src');
       video.load();
     };
@@ -722,6 +738,7 @@ export function WebPlayer() {
       )
     ) {
       resumeRef.current = Math.round((videoRef.current?.currentTime ?? currentTime) * 1_000);
+      resumeAppliedRef.current = false;
       setSourceReady(false);
       setStatus(selectedTrack ? 'Forbereder undertekster med burn-in...' : 'Fjerner burn-in...');
       void api<{
