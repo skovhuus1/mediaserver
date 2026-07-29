@@ -250,32 +250,32 @@ function PlansView() {
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId);
   const flags: Array<[keyof PlanEntitlements, string]> = [
     ['allowDirectPlay', 'Direct Play'], ['allowDirectStream', 'Direct Stream'], ['allowVideoTranscode', 'Video-transcoding'],
-    ['allowAudioTranscode', 'Audio-transcoding'], ['allowSubtitleBurnIn', 'Indbr?ndte undertekster'],
+    ['allowAudioTranscode', 'Audio-transcoding'], ['allowSubtitleBurnIn', 'Indbrændte undertekster'],
     ['allowChromecast', 'Chromecast'], ['allowOfflineDownload', 'Offline-download'],
   ];
 
   return (
     <section className="management-page">
-      <span className="eyebrow">ENTITLEMENTS</span><h1>Planer</h1><p>Opret immutable planversioner. 4K kr?ver 2160p, passende bitrate og en tilladt afspilningsmetode.</p>
+      <span className="eyebrow">ENTITLEMENTS</span><h1>Planer</h1><p>Opret immutable planversioner. 4K kræver 2160p, passende bitrate og en tilladt afspilningsmetode.</p>
       <div className="management-grid">
         <div className="management-card">
           <h2><ShieldCheck size={18} /> Aktive planer</h2>
           {plans.map((plan) => {
             const version = plan.versions[0];
-            return <div className="data-row" key={plan.id}><div><strong>{plan.name}</strong><small>{plan.internalCode} ? version {version?.version ?? '-'}</small><small>{version?.maxConcurrentStreams ?? 0} stream(s) ? {version?.maxVideoResolution ?? 0}p ? {version ? (version.maxVideoBitrate / 1000).toFixed(1) : '0'} Mbps</small></div><div className="row-actions"><span className={`state-badge ${version?.isActive ? 'active' : ''}`}>{version?.isActive ? 'aktiv' : 'inaktiv'}</span><button disabled={!version || busy} onClick={() => edit(plan)}>Ny version</button></div></div>;
+            return <div className="data-row" key={plan.id}><div><strong>{plan.name}</strong><small>{plan.internalCode} · version {version?.version ?? '-'}</small><small>{version?.maxConcurrentStreams ?? 0} stream(s) · {version?.maxVideoResolution ?? 0}p · {version ? (version.maxVideoBitrate / 1000).toFixed(1) : '0'} Mbps</small></div><div className="row-actions"><span className={`state-badge ${version?.isActive ? 'active' : ''}`}>{version?.isActive ? 'aktiv' : 'inaktiv'}</span><button disabled={!version || busy} onClick={() => edit(plan)}>Ny version</button></div></div>;
           })}
         </div>
         {selectedPlan && entitlements && <form className="management-card management-form" onSubmit={save}>
           <h2>Ny version af {selectedPlan.name}</h2>
           <label>Maks. samtidige streams<input type="number" min="1" max="20" value={entitlements.maxConcurrentStreams} onChange={(event) => setNumber('maxConcurrentStreams', event.target.value)} required /></label>
           <label>Maks. registrerede enheder<input type="number" min="1" max="100" value={entitlements.maxRegisteredDevices} onChange={(event) => setNumber('maxRegisteredDevices', event.target.value)} required /></label>
-          <label>Maks. videoopl?sning<select value={entitlements.maxVideoResolution} onChange={(event) => setNumber('maxVideoResolution', event.target.value)}><option value="720">720p</option><option value="1080">1080p</option><option value="2160">2160p (4K)</option><option value="4320">4320p (8K)</option></select></label>
+          <label>Maks. videoopløsning<select value={entitlements.maxVideoResolution} onChange={(event) => setNumber('maxVideoResolution', event.target.value)}><option value="720">720p</option><option value="1080">1080p</option><option value="2160">2160p (4K)</option><option value="4320">4320p (8K)</option></select></label>
           <label>Maks. videobitrate (Kbps)<input type="number" min="128" max="500000" value={entitlements.maxVideoBitrate} onChange={(event) => setNumber('maxVideoBitrate', event.target.value)} required /></label>
-          <label>Forsinkelse i m?neder<input type="number" min="0" max="120" value={entitlements.releaseDelayMonths} onChange={(event) => setNumber('releaseDelayMonths', event.target.value)} required /></label>
+          <label>Forsinkelse i måneder<input type="number" min="0" max="120" value={entitlements.releaseDelayMonths} onChange={(event) => setNumber('releaseDelayMonths', event.target.value)} required /></label>
           <label>Ekstra forsinkelse i dage<input type="number" min="0" max="3650" value={entitlements.releaseDelayDays} onChange={(event) => setNumber('releaseDelayDays', event.target.value)} required /></label>
           {flags.map(([key, label]) => <label key={key}><input type="checkbox" checked={Boolean(entitlements[key])} onChange={(event) => setFlag(key, event.target.checked)} /> {label}</label>)}
           <label><input type="checkbox" checked={migrateSubscriptions} onChange={(event) => setMigrateSubscriptions(event.target.checked)} /> Flyt aktive abonnementer atomisk til den nye version</label>
-          <div className="row-actions"><button className="primary-action" disabled={busy}>{busy ? 'Gemmer...' : 'Aktiv?r ny version'}</button><button type="button" disabled={busy} onClick={() => { setSelectedPlanId(''); setEntitlements(null); }}>Annuller</button></div>
+          <div className="row-actions"><button className="primary-action" disabled={busy}>{busy ? 'Gemmer...' : 'Aktivér ny version'}</button><button type="button" disabled={busy} onClick={() => { setSelectedPlanId(''); setEntitlements(null); }}>Annuller</button></div>
         </form>}
       </div>
       {message && <div className="update-message">{message}</div>}
@@ -309,7 +309,7 @@ function SettingsView() {
     setMetadataMessage('');
     try {
       await api('/media/metadata/jobs', { method: 'POST', body: JSON.stringify({ mediaType: metadataScope }) });
-      setMetadataMessage(`Metadataopdatering for ${metadataScope === 'all' ? 'alle medier' : metadataScope === 'movie' ? 'alle film' : 'alle serier'} er sat i k?.`);
+      setMetadataMessage(`Metadataopdatering for ${metadataScope === 'all' ? 'alle medier' : metadataScope === 'movie' ? 'alle film' : 'alle serier'} er sat i kø.`);
       setMetadata(await api<MetadataStatus>('/media/metadata/status'));
     } catch (error) { setMetadataMessage(errorMessage(error)); } finally { setMetadataBusy(false); }
   }
@@ -330,7 +330,7 @@ function SettingsView() {
       setTmdbToken(''); setTvdbApiKey(''); setTvdbPin('');
       const next = await api<MetadataStatus>('/media/metadata/status');
       setMetadata(next);
-      setMetadataMessage('Metadata-n?glerne er testet og gemt krypteret.');
+      setMetadataMessage('Metadata-nøglerne er testet og gemt krypteret.');
     } catch (error) { setMetadataMessage(errorMessage(error)); } finally { setMetadataBusy(false); }
   }
   const canSaveMetadata = Boolean(tmdbToken.length >= 20 || tvdbApiKey.length >= 10 || metadata?.enabled);
@@ -339,26 +339,26 @@ function SettingsView() {
       <span className="eyebrow">SERVER CONTROL</span><h1>Indstillinger</h1><p>Driftsstatus, vedligeholdelse og durable fejl fra serveren.</p>
       <div className="management-card">
         <h2><Server size={18} /> Serveropdatering</h2>
-        <div className="data-row"><div><strong>{update?.enabled ? 'Updater aktiveret' : 'Updater deaktiveret'}</strong><small>Branch: {update?.branch ?? '...'}</small><small>Genstart: {update?.restartMode ?? '...'}</small></div><Link className="inline-action" href="/update">?bn updater</Link></div>
+        <div className="data-row"><div><strong>{update?.enabled ? 'Updater aktiveret' : 'Updater deaktiveret'}</strong><small>Branch: {update?.branch ?? '...'}</small><small>Genstart: {update?.restartMode ?? '...'}</small></div><Link className="inline-action" href="/update">Åbn updater</Link></div>
       </div>
       <div className="management-card">
         <h2><Database size={18} /> Metadata</h2>
-        <div className="data-row"><div><strong>{metadata?.enabled ? 'Metadata aktiveret' : 'Metadata deaktiveret'}</strong><small>TMDB film: {metadata?.providers?.tmdb.enabled ? 'aktiv' : 'inaktiv'} ? TVDB serier: {metadata?.providers?.tvdb.enabled ? 'aktiv' : 'inaktiv'}</small><small>Sprog: {metadata?.language ?? 'da-DK'} ? Seneste job: {metadata?.latestJob?.status ?? 'aldrig k?rt'}</small></div><div className="row-actions"><select aria-label="Medietype til metadata" value={metadataScope} onChange={(event) => setMetadataScope(event.target.value as 'all' | 'movie' | 'series')}><option value="all">Alle</option><option value="movie">Film</option><option value="series">Serier</option></select><button disabled={!metadata?.enabled || metadataBusy || ['queued', 'running'].includes(metadata?.latestJob?.status ?? '')} onClick={() => void queueMetadata()}>{metadataBusy ? 'Arbejder...' : 'K?r metadata'}</button></div></div>
+        <div className="data-row"><div><strong>{metadata?.enabled ? 'Metadata aktiveret' : 'Metadata deaktiveret'}</strong><small>TMDB film: {metadata?.providers?.tmdb.enabled ? 'aktiv' : 'inaktiv'} · TVDB serier: {metadata?.providers?.tvdb.enabled ? 'aktiv' : 'inaktiv'}</small><small>Sprog: {metadata?.language ?? 'da-DK'} · Seneste job: {metadata?.latestJob?.status ?? 'aldrig kørt'}</small></div><div className="row-actions"><select aria-label="Medietype til metadata" value={metadataScope} onChange={(event) => setMetadataScope(event.target.value as 'all' | 'movie' | 'series')}><option value="all">Alle</option><option value="movie">Film</option><option value="series">Serier</option></select><button disabled={!metadata?.enabled || metadataBusy || ['queued', 'running'].includes(metadata?.latestJob?.status ?? '')} onClick={() => void queueMetadata()}>{metadataBusy ? 'Arbejder...' : 'Kør metadata'}</button></div></div>
         <form className="management-form" onSubmit={saveMetadata}>
-          <label>TMDB API Read Access Token (film)<input type="password" autoComplete="off" value={tmdbToken} onChange={(event) => setTmdbToken(event.target.value)} minLength={20} placeholder={metadata?.providers?.tmdb.enabled ? 'Lad st? tomt for at beholde den gemte n?gle' : 'eyJ...'} /></label>
-          <label>TVDB API Key (serier)<input type="password" autoComplete="off" value={tvdbApiKey} onChange={(event) => setTvdbApiKey(event.target.value)} minLength={10} placeholder={metadata?.providers?.tvdb.enabled ? 'Lad st? tomt for at beholde den gemte n?gle' : 'TVDB API key'} /></label>
-          <label>TVDB Subscriber PIN (valgfri)<input type="password" autoComplete="off" value={tvdbPin} onChange={(event) => setTvdbPin(event.target.value)} placeholder="Kun hvis din TVDB-n?gle kr?ver PIN" /></label>
+          <label>TMDB API Read Access Token (film)<input type="password" autoComplete="off" value={tmdbToken} onChange={(event) => setTmdbToken(event.target.value)} minLength={20} placeholder={metadata?.providers?.tmdb.enabled ? 'Lad stå tomt for at beholde den gemte nøgle' : 'eyJ...'} /></label>
+          <label>TVDB API Key (serier)<input type="password" autoComplete="off" value={tvdbApiKey} onChange={(event) => setTvdbApiKey(event.target.value)} minLength={10} placeholder={metadata?.providers?.tvdb.enabled ? 'Lad stå tomt for at beholde den gemte nøgle' : 'TVDB API key'} /></label>
+          <label>TVDB Subscriber PIN (valgfri)<input type="password" autoComplete="off" value={tvdbPin} onChange={(event) => setTvdbPin(event.target.value)} placeholder="Kun hvis din TVDB-nøgle kræver PIN" /></label>
           <label>Metadata-sprog<input value={metadataLanguage} onChange={(event) => setMetadataLanguage(event.target.value)} pattern="[a-z]{2}(-[A-Z]{2})?" required /></label>
-          <button className="primary-action" disabled={metadataBusy || !canSaveMetadata}>{metadataBusy ? 'Tester...' : 'Test og gem n?gler'}</button>
+          <button className="primary-action" disabled={metadataBusy || !canSaveMetadata}>{metadataBusy ? 'Tester...' : 'Test og gem nøgler'}</button>
         </form>
-        <p>TMDB bruges til film. TVDB foretr?kkes til serier, mens TMDB bruges som fallback, hvis TVDB ikke er konfigureret. N?glerne valideres f?r lagring, krypteres med serverens <code>ENCRYPTION_KEY</code> og sendes aldrig tilbage til browseren.</p>
+        <p>TMDB bruges til film. TVDB foretrækkes til serier, mens TMDB bruges som fallback, hvis TVDB ikke er konfigureret. Nøglerne valideres før lagring, krypteres med serverens <code>ENCRYPTION_KEY</code> og sendes aldrig tilbage til browseren.</p>
         <p>Serieoplysninger fra TVDB skal vises med attribution til TheTVDB.com i klienten.</p>
         {metadataMessage && <div className="update-message">{metadataMessage}</div>}
       </div>
       <div className="management-card">
         <div className="management-heading"><h2><ShieldCheck size={18} /> Fejllog</h2><button onClick={() => void loadErrors()} disabled={loadingErrors}>{loadingErrors ? 'Henter...' : 'Opdater'}</button></div>
         {!errors.length && <p>Ingen durable scanner- eller workerfejl er registreret.</p>}
-        {errors.map((entry) => <article className={`error-entry ${entry.severity}`} key={entry.id}><div><strong>{entry.source} ? {entry.code}</strong><time>{new Date(entry.timestamp).toLocaleString('da-DK')}</time></div><p>{entry.message}</p><pre>{JSON.stringify(entry.details, null, 2)}</pre></article>)}
+        {errors.map((entry) => <article className={`error-entry ${entry.severity}`} key={entry.id}><div><strong>{entry.source} · {entry.code}</strong><time>{new Date(entry.timestamp).toLocaleString('da-DK')}</time></div><p>{entry.message}</p><pre>{JSON.stringify(entry.details, null, 2)}</pre></article>)}
       </div>
     </section>
   );

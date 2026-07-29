@@ -217,7 +217,7 @@ function DetailContent({ detail }: { detail: DetailState }) {
       <span className={`detail-art${imageUrl(item.backdropPath, 'w780') ? ' has-image' : ''}`} style={imageStyle(item.backdropPath, 'w780')}>{item.type === 'movie' ? <Film size={38} /> : <Tv size={38} />}</span>
       <span className="eyebrow">{item.category ?? item.type}</span>
       <h2>{item.title}</h2>
-      <p>{item.releaseYear ? `${item.releaseYear} ? ` : ''}{item.library?.name ?? 'BoltBytes bibliotek'}</p>
+      <p>{item.releaseYear ? `${item.releaseYear} · ` : ''}{item.library?.name ?? 'BoltBytes bibliotek'}</p>
       {item.overview && <p className="media-overview">{item.overview}</p>}
       {item.rating !== null && item.rating !== undefined && <p className="metadata-credit">TMDB rating {item.rating.toFixed(1)}/10</p>}
       {item.metadataProvider === 'tvdb' && <p className="metadata-credit">Metadata via <a href="https://thetvdb.com/" target="_blank" rel="noreferrer">TheTVDB.com</a></p>}
@@ -230,7 +230,7 @@ function DetailContent({ detail }: { detail: DetailState }) {
           <div><dt>Type</dt><dd>{episodeLabel(item)}</dd></div>
           <div><dt>Status</dt><dd>{item.file?.status ?? 'Uden fil'}</dd></div>
           <div><dt>Video</dt><dd>{item.file?.videoCodec ?? item.codec ?? 'Ukendt'}</dd></div>
-          <div><dt>L?ngde</dt><dd>{durationLabel(item.file?.durationMs)}</dd></div>
+          <div><dt>Længde</dt><dd>{durationLabel(item.file?.durationMs)}</dd></div>
           <div><dt>Placering</dt><dd><FolderOpen size={13} /> {item.file?.relativePath ?? 'Ikke tilknyttet'}</dd></div>
         </dl>
       )}
@@ -246,9 +246,9 @@ function SeriesEpisodes({ episodes, next }: { episodes: CatalogItem[]; next: Ser
     .sort((left, right) => (left.episodeNumber ?? 0) - (right.episodeNumber ?? 0));
   return (
     <div className="episode-list">
-      {next && <button className={playerStyles.playButton} onClick={() => requestPlayback(next.media, next.resumePositionMs)}><Play size={16} /> {next.resumePositionMs > 0 ? 'Forts?t episode' : 'Afspil n?ste episode'} ? {episodeLabel(next.media)}</button>}
-      <nav className="season-tabs" aria-label="S?soner">
-        {seasons.map((value) => <button className={season === value ? 'active' : ''} onClick={() => setSeason(value)} key={value}>{value === 0 ? 'Specials' : `S?son ${value}`}</button>)}
+      {next && <button className={playerStyles.playButton} onClick={() => requestPlayback(next.media, next.resumePositionMs)}><Play size={16} /> {next.resumePositionMs > 0 ? 'Fortsæt episode' : 'Afspil næste episode'} · {episodeLabel(next.media)}</button>}
+      <nav className="season-tabs" aria-label="Sæsoner">
+        {seasons.map((value) => <button className={season === value ? 'active' : ''} onClick={() => setSeason(value)} key={value}>{value === 0 ? 'Specials' : `Sæson ${value}`}</button>)}
       </nav>
       {visible.map((episode) => (
         <button className={`${playerStyles.episodeButton} ${playerStyles.episodeRich}`} onClick={() => requestPlayback(episode)} key={episode.id}>

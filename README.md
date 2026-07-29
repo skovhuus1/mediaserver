@@ -286,20 +286,29 @@ Alt arbejde sker p√• en opgavebranch. Branch-commits pushes til GitHub efter en 
 
 ## Chromecast end-to-end sender (2026-07-29)
 
-- Cast-handoff bevarer den eksisterende playback-session og logical session, sÂ overgangen ikke reserverer en ekstra stream-plads.
-- API'et udsteder et HMAC-signeret, sessionsbundet Cast-token med standardlevetid pÂ seks timer. `CAST_TOKEN_TTL_SECONDS` kan sÊttes til 300-86400 sekunder.
-- Receiverens stream-, HLS- og WebVTT-URL'er er absolutte og bruger `BB_MEDIA_PUBLIC_URL`, kontoens eksterne URL eller browserens validerede origin i den rÊkkef¯lge. Localhost-adresser afvises, fordi de peger pÂ receiveren selv.
+- Cast-handoff bevarer den eksisterende playback-session og logical session, s√• overgangen ikke reserverer en ekstra stream-plads.
+- API'et udsteder et HMAC-signeret, sessionsbundet Cast-token med standardlevetid p√• seks timer. `CAST_TOKEN_TTL_SECONDS` kan s√¶ttes til 300-86400 sekunder.
+- Receiverens stream-, HLS- og WebVTT-URL'er er absolutte og bruger `BB_MEDIA_PUBLIC_URL`, kontoens eksterne URL eller browserens validerede origin i den r√¶kkef√∏lge. Localhost-adresser afvises, fordi de peger p√• receiveren selv.
 - Webplayeren bruger Google Cast `RemotePlayerController` til play/pause, seek og lydstyrke. Undertekster skiftes med Cast media-track API'et.
-- Remote position, varighed, pause-state, heartbeat og playback-historik synkroniseres, mens fanen er Âben. Ved almindelig disconnect fortsÊtter den lokale player fra receiverens seneste position.
+- Remote position, varighed, pause-state, heartbeat og playback-historik synkroniseres, mens fanen er √•ben. Ved almindelig disconnect forts√¶tter den lokale player fra receiverens seneste position.
 - Hvis receiverens `loadMedia` fejler, rulles Cast-markeringen tilbage uden at frigive den oprindelige playback-session.
 
 ### Chromecast-konfiguration
 
-SÊt en adresse, som Chromecast-enheden kan hente fra, nÂr browserens origin eller setup-wizardens eksterne URL ikke er den rigtige:
+S√¶t en adresse, som Chromecast-enheden kan hente fra, n√•r browserens origin eller setup-wizardens eksterne URL ikke er den rigtige:
 
 ```dotenv
 BB_MEDIA_PUBLIC_URL=https://media.example.dk
 CAST_TOKEN_TTL_SECONDS=21600
 ```
 
-Web Sender-siden skal Âbnes via HTTPS, og Chromecast skal kunne nÂ URL'en og stole pÂ dens TLS-certifikat. Default Media Receiver krÊver fortsat en Âben controllerfane for heartbeat. En egen BoltBytes receiver med receiver-ejet heartbeat er nÊste Cast-trin.
+Web Sender-siden skal √•bnes via HTTPS, og Chromecast skal kunne n√• URL'en og stole p√• dens TLS-certifikat. Default Media Receiver kr√¶ver fortsat en √•ben controllerfane for heartbeat. En egen BoltBytes receiver med receiver-ejet heartbeat er n√¶ste Cast-trin.
+
+## Funktionel admin-topbar og dansk tekst (2026-07-29)
+
+- Topbarens Indstillinger og kundevisning er rigtige links med tydelige klikm√•l og tastaturfokus.
+- Notifikationsknappen viser de seneste durable serverfejl og linker videre til den fulde fejllog.
+- Admin-menuen viser den aktuelle konto/profil og giver adgang til kundevisning, profilvalg, indstillinger og logout.
+- Logout tilbagekalder refresh-tokenet p√• serveren, f√∏r den lokale session fjernes.
+- Beskadigede danske UI-strenge i katalog, planer og metadataindstillinger er rettet til korrekt UTF-8, herunder `√¶`, `√∏` og `√•`.
+- Native vandrette scrollbars er skjult under kategori- og s√¶sonchips, mens touch-, muse- og touchpad-scroll fortsat virker.
