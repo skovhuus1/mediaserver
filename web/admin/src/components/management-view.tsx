@@ -625,7 +625,7 @@ function ServerSettingsCard() {
   }
 
   return (
-    <div className="management-card">
+    <div className="management-card settings-card">
       <div className="management-card-header">
         <div>
           <span className="eyebrow">Domæne og streaming</span>
@@ -636,7 +636,7 @@ function ServerSettingsCard() {
         </span>
       </div>
       <form
-        className="management-form-grid"
+        className="management-form server-settings-form"
         onSubmit={(event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
@@ -654,35 +654,61 @@ function ServerSettingsCard() {
             .catch((error) => setMessage(error instanceof Error ? error.message : 'Serverindstillingerne kunne ikke gemmes'));
         }}
       >
-        <label>
-          Servernavn
-          <input name="serverName" defaultValue={settings.serverName} disabled={!canWrite} required />
-        </label>
-        <label>
-          Ekstern URL
-          <input
-            name="externalUrl"
-            type="url"
-            defaultValue={settings.externalUrl ?? ''}
-            placeholder="https://media.boltbytes.com"
-            disabled={!canWrite}
-            required
-          />
-        </label>
-        <label>
-          Sprog
-          <input name="language" defaultValue={settings.language} disabled={!canWrite} required />
-        </label>
-        <label>
-          Tidszone
-          <input name="timezone" defaultValue={settings.timezone} disabled={!canWrite} required />
-        </label>
-        {canWrite ? <button type="submit">Gem serverindstillinger</button> : null}
+        <div className="server-settings-grid">
+          <label>
+            <span>Servernavn</span>
+            <input name="serverName" defaultValue={settings.serverName} disabled={!canWrite} required />
+            <small>Navnet kunder og enheder ser.</small>
+          </label>
+          <label>
+            <span>Ekstern URL</span>
+            <input
+              name="externalUrl"
+              type="url"
+              defaultValue={settings.externalUrl ?? ''}
+              placeholder="https://media.boltbytes.com"
+              disabled={!canWrite}
+              required
+            />
+            <small>Den offentlige HTTPS-adresse uden afsluttende skråstreg.</small>
+          </label>
+          <label>
+            <span>Standardsprog</span>
+            <select name="language" defaultValue={settings.language} disabled={!canWrite} required>
+              <option value="da">Dansk</option>
+              <option value="en">English</option>
+            </select>
+            <small>Bruges som standard ved nye profiler.</small>
+          </label>
+          <label>
+            <span>Tidszone</span>
+            <input name="timezone" defaultValue={settings.timezone} disabled={!canWrite} required />
+            <small>IANA-navn, eksempelvis Europe/Copenhagen.</small>
+          </label>
+        </div>
+        {canWrite ? (
+          <footer className="server-settings-actions">
+            <span>Ændringer bruges af streaminglinks, CORS og Chromecast.</span>
+            <button className="primary-action" type="submit">Gem serverindstillinger</button>
+          </footer>
+        ) : null}
       </form>
       <div className="server-settings-status">
-        <span><strong>Effektiv URL:</strong> {settings.effectivePublicUrl ?? 'Ikke konfigureret'}</span>
-        <span><strong>Kilde:</strong> {settings.publicUrlSource}</span>
-        <span><strong>CORS:</strong> {settings.corsOrigins.join(', ') || 'Ingen origins'}</span>
+        <article className={settings.effectivePublicUrl ? 'ready' : 'warning'}>
+          <span>Effektiv URL</span>
+          <strong>{settings.effectivePublicUrl ?? 'Ikke konfigureret'}</strong>
+          <small>{settings.httpsReady ? 'HTTPS er aktiv' : 'HTTPS mangler'}</small>
+        </article>
+        <article>
+          <span>Konfigurationskilde</span>
+          <strong>{settings.publicUrlSource === 'environment' ? 'Miljøvariabel' : settings.publicUrlSource === 'account' ? 'Serverindstilling' : 'Ikke angivet'}</strong>
+          <small>{settings.castReady ? 'Chromecast er klar' : 'Chromecast afventer offentlig URL'}</small>
+        </article>
+        <article>
+          <span>Tilladte CORS-origins</span>
+          <strong>{settings.corsOrigins.join(', ') || 'Ingen origins'}</strong>
+          <small>Kun disse origins må kalde media-API&apos;et.</small>
+        </article>
       </div>
       {message ? <p className="form-message">{message}</p> : null}
     </div>
@@ -759,7 +785,7 @@ function SettingsView() {
       </div>
       <div className="management-card">
         <h2><Database size={18} /> Metadata</h2>
-        <div className="data-row"><div><strong>{metadata?.enabled ? 'Metadata aktiveret' : 'Metadata deaktiveret'}</strong><small>TMDB film: {metadata?.providers?.tmdb.enabled ? 'aktiv' : 'inaktiv'} · TVDB serier: {metadata?.providers?.tvdb.enabled ? 'aktiv' : 'inaktiv'}</small><small>Sprog: {metadata?.language ?? 'da-DK'} · Seneste job: {metadata?.latestJob?.status ?? 'aldrig kørt'}</small></div><div className="row-actions"><select aria-label="Medietype til metadata" value={metadataScope} onChange={(event) => setMetadataScope(event.target.value as 'all' | 'movie' | 'series')}><option value="all">Alle</option><option value="movie">Film</option><option value="series">Serier</option></select><button disabled={!metadata?.enabled || metadataBusy || ['queued', 'running'].includes(metadata?.latestJob?.status ?? '')} onClick={() => void queueMetadata()}>{metadataBusy ? 'Arbejder...' : 'Kør metadata'}</button></div></div>
+        <div className="data-row metadata-overview"><div><strong>{metadata?.enabled ? 'Metadata aktiveret' : 'Metadata deaktiveret'}</strong><small>TMDB film: {metadata?.providers?.tmdb.enabled ? 'aktiv' : 'inaktiv'} · TVDB serier: {metadata?.providers?.tvdb.enabled ? 'aktiv' : 'inaktiv'}</small><small>Sprog: {metadata?.language ?? 'da-DK'} · Seneste job: {metadata?.latestJob?.status ?? 'aldrig kørt'}</small></div><div className="row-actions"><select aria-label="Medietype til metadata" value={metadataScope} onChange={(event) => setMetadataScope(event.target.value as 'all' | 'movie' | 'series')}><option value="all">Alle medier</option><option value="movie">Kun film</option><option value="series">Kun serier</option></select><button disabled={!metadata?.enabled || metadataBusy || ['queued', 'running'].includes(metadata?.latestJob?.status ?? '')} onClick={() => void queueMetadata()}>{metadataBusy ? 'Arbejder...' : 'Kør metadata'}</button></div></div>
         <form className="management-form" onSubmit={saveMetadata}>
           <label>TMDB API Read Access Token (film)<input type="password" autoComplete="off" value={tmdbToken} onChange={(event) => setTmdbToken(event.target.value)} minLength={20} placeholder={metadata?.providers?.tmdb.enabled ? 'Lad stå tomt for at beholde den gemte nøgle' : 'eyJ...'} /></label>
           <label>TVDB API Key (serier)<input type="password" autoComplete="off" value={tvdbApiKey} onChange={(event) => setTvdbApiKey(event.target.value)} minLength={10} placeholder={metadata?.providers?.tvdb.enabled ? 'Lad stå tomt for at beholde den gemte nøgle' : 'TVDB API key'} /></label>

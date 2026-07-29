@@ -30,6 +30,11 @@
 > og tre komplette `npm ci`-forsøg med stigende pause. En vedvarende
 > netværksfejl stopper fortsat opdateringen uden at erstatte de kørende
 > containere.
+>
+> Adminpanelets server- og metadataindstillinger bruger et responsivt mørkt
+> formularsystem med tydelige labels, fokus-state, statusdiagnostik og
+> ensartede handlingsknapper. Native hvide felter bruges ikke i
+> indstillingsvisningen.
 
 BoltBytes Media Server er en selvhostet TypeScript-platform til administration og autoriseret afspilning af egne film og serier. Kodebasen er genopbygget fra bunden med server-side adgangskontrol, reproducerbar installation og en tydelig grænse mellem implementeret funktionalitet og kommende faser.
 
