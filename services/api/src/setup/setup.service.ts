@@ -17,7 +17,7 @@ const DEFAULT_ENTITLEMENTS = {
   allowDirectStream: true,
   allowVideoTranscode: true,
   allowAudioTranscode: true,
-  allowSubtitleBurnIn: false,
+  allowSubtitleBurnIn: true,
   allowChromecast: true,
   allowOfflineDownload: false,
   releaseDelayMonths: 0,

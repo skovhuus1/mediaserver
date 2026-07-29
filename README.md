@@ -19,6 +19,11 @@
 > Playerens kvalitetsvælger adskiller nu valgt tilstand fra den rendition, der
 > faktisk afspilles. Auto viser det aktuelle HLS-niveau, mens et manuelt valg
 > skifter via Hls.js uden at tømme hele bufferen og bekræfter skiftet i UI'et.
+>
+> Undertekster er en grundlæggende tilgængelighedsfunktion og gates ikke af
+> abonnementet. WebVTT leveres direkte, mens PGS/VobSub/DVB bruger samme
+> logical session til burn-in, også når planens almindelige transcodeflag er
+> deaktiveret. Adgang, session, streamlimit og validering håndhæves fortsat.
 
 BoltBytes Media Server er en selvhostet TypeScript-platform til administration og autoriseret afspilning af egne film og serier. Kodebasen er genopbygget fra bunden med server-side adgangskontrol, reproducerbar installation og en tydelig grænse mellem implementeret funktionalitet og kommende faser.
 

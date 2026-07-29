@@ -696,6 +696,12 @@ export function WebPlayer() {
     setMenu(null);
   };
 
+  const subtitleTracks = sortSubtitleTracks(
+    authorization?.subtitleTracks ?? [],
+    authorization?.playbackPreferences.preferredSubtitleLanguages ?? [],
+  );
+  const activeSubtitleTrack = subtitleTracks.find((track) => track.id === activeSubtitle);
+
   const revealControls = useCallback(() => {
     setControlsVisible(true);
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
@@ -943,20 +949,52 @@ export function WebPlayer() {
             </button>
           ))}
           {menu === 'subtitles' && (
-            <>
-              <button className={styles.menuRow} onClick={() => selectSubtitle(null)}>
-                <span>Fra</span>{activeSubtitle === null && <Check size={17} />}
+            <div className={styles.subtitleMenu}>
+              <div className={styles.subtitleNow}>
+                <span>Aktive undertekster</span>
+                <strong>{activeSubtitleTrack ? subtitleLanguageName(activeSubtitleTrack.language) : 'Fra'}</strong>
+                <small>
+                  {activeSubtitleTrack
+                    ? subtitleDescription(activeSubtitleTrack)
+                    : 'Videoen vises uden undertekster'}
+                </small>
+              </div>
+              <button
+                className={`${styles.menuRow} ${styles.subtitleRow} ${activeSubtitle === null ? styles.subtitleSelected : ''}`}
+                aria-pressed={activeSubtitle === null}
+                onClick={() => selectSubtitle(null)}
+              >
+                <span className={styles.subtitleChoice}>
+                  <span className={styles.subtitleLanguageBadge}>OFF</span>
+                  <span><strong>Fra</strong><small>Vis ingen undertekster</small></span>
+                </span>
+                {activeSubtitle === null && <Check size={18} />}
               </button>
-              {authorization?.subtitleTracks.map((track) => (
-                <button className={styles.menuRow} key={track.id} onClick={() => selectSubtitle(track.id)}>
-                  <span><strong>{track.label}</strong><small>{track.language === 'und' ? 'Ukendt sprog' : track.language}</small></span>
-                  {activeSubtitle === track.id && <Check size={17} />}
+              {subtitleTracks.map((track) => (
+                <button
+                  className={`${styles.menuRow} ${styles.subtitleRow} ${activeSubtitle === track.id ? styles.subtitleSelected : ''}`}
+                  aria-pressed={activeSubtitle === track.id}
+                  key={track.id}
+                  onClick={() => selectSubtitle(track.id)}
+                >
+                  <span className={styles.subtitleChoice}>
+                    <span className={styles.subtitleLanguageBadge}>{subtitleLanguageCode(track.language)}</span>
+                    <span>
+                      <strong>{subtitleLanguageName(track.language)}</strong>
+                      <small>{subtitleDescription(track)}</small>
+                    </span>
+                  </span>
+                  <span className={styles.subtitleTags}>
+                    <i>{subtitleFormat(track)}</i>
+                    {track.delivery === 'burn_in' && <em>Burn-in</em>}
+                    {activeSubtitle === track.id && <Check size={18} />}
+                  </span>
                 </button>
               ))}
-              {!authorization?.subtitleTracks.length && (
-                <div className={styles.emptyMenu}>Der blev ikke fundet kompatible tekstundertekster til denne fil.</div>
+              {!subtitleTracks.length && (
+                <div className={styles.emptyMenu}>Der blev ikke fundet undertekstspor til denne fil.</div>
               )}
-            </>
+            </div>
           )}
           {menu === 'audio' && (audioTracks.length ? audioTracks.map((track) => (
             <button className={styles.menuRow} key={track.index} onClick={() => selectAudioTrack(track.index)}>
@@ -1077,7 +1115,11 @@ export function WebPlayer() {
             </div>
             <div className={styles.optionControls}>
               <button onClick={() => setMenu(menu === 'speed' ? null : 'speed')}><Gauge /><small>{playbackRate}x</small><span>Hastighed</span></button>
-              <button onClick={() => setMenu(menu === 'subtitles' ? null : 'subtitles')}><Captions /><span>Undertekster</span></button>
+              <button onClick={() => setMenu(menu === 'subtitles' ? null : 'subtitles')}>
+                <Captions />
+                <small>{activeSubtitleTrack ? subtitleLanguageCode(activeSubtitleTrack.language) : 'Fra'}</small>
+                <span>Undertekster</span>
+              </button>
               <button onClick={() => setMenu(menu === 'audio' ? null : 'audio')}><Volume2 /><span>Lydspor</span></button>
               <button onClick={() => setMenu(menu === 'quality' ? null : 'quality')}>
                 <Settings2 />
@@ -1261,6 +1303,75 @@ function qualitySummary(quality?: QualityLevel) {
     quality.dynamicRange,
     quality.upscaled ? 'Opskaleret' : null,
   ].filter(Boolean).join(' · ');
+}
+
+const subtitleLanguages: Record<string, { code: string; name: string }> = {
+  chi: { code: 'ZH', name: 'Kinesisk' },
+  dan: { code: 'DA', name: 'Dansk' },
+  da: { code: 'DA', name: 'Dansk' },
+  deu: { code: 'DE', name: 'Tysk' },
+  dut: { code: 'NL', name: 'Hollandsk' },
+  eng: { code: 'EN', name: 'Engelsk' },
+  en: { code: 'EN', name: 'Engelsk' },
+  fin: { code: 'FI', name: 'Finsk' },
+  fra: { code: 'FR', name: 'Fransk' },
+  fre: { code: 'FR', name: 'Fransk' },
+  ger: { code: 'DE', name: 'Tysk' },
+  ita: { code: 'IT', name: 'Italiensk' },
+  jpn: { code: 'JA', name: 'Japansk' },
+  kor: { code: 'KO', name: 'Koreansk' },
+  nld: { code: 'NL', name: 'Hollandsk' },
+  nor: { code: 'NO', name: 'Norsk' },
+  spa: { code: 'ES', name: 'Spansk' },
+  swe: { code: 'SV', name: 'Svensk' },
+  zho: { code: 'ZH', name: 'Kinesisk' },
+};
+
+function subtitleLanguage(language: string) {
+  return subtitleLanguages[language.toLowerCase()] ?? {
+    code: language === 'und' ? '?' : language.slice(0, 2).toUpperCase(),
+    name: language === 'und' ? 'Ukendt sprog' : language.toUpperCase(),
+  };
+}
+
+function subtitleLanguageCode(language: string) {
+  return subtitleLanguage(language).code;
+}
+
+function subtitleLanguageName(language: string) {
+  return subtitleLanguage(language).name;
+}
+
+function subtitleFormat(track: SubtitleTrack) {
+  const codec = track.label.match(/\(([^)]+)\)/)?.[1]?.toLowerCase();
+  if (codec === 'hdmv_pgs_subtitle') return 'PGS';
+  if (codec === 'dvd_subtitle') return 'VobSub';
+  if (codec === 'dvb_subtitle') return 'DVB';
+  if (codec === 'subrip') return 'SRT';
+  if (codec === 'ass') return 'ASS';
+  return track.delivery === 'burn_in' ? 'Billede' : 'WebVTT';
+}
+
+function subtitleDescription(track: SubtitleTrack) {
+  const attributes = [
+    /forced|tvungen/i.test(track.label) ? 'Tvungen' : null,
+    /sdh|hearing/i.test(track.label) ? 'SDH' : null,
+    track.delivery === 'burn_in' ? 'Billedbaseret undertekst' : 'Tekstundertekst',
+  ];
+  return attributes.filter(Boolean).join(' · ');
+}
+
+function sortSubtitleTracks(tracks: SubtitleTrack[], preferredLanguages: string[]) {
+  const preference = preferredLanguages.map((language) => subtitleLanguageCode(language));
+  return [...tracks].sort((left, right) => {
+    const leftPreference = preference.indexOf(subtitleLanguageCode(left.language));
+    const rightPreference = preference.indexOf(subtitleLanguageCode(right.language));
+    const leftRank = leftPreference === -1 ? Number.MAX_SAFE_INTEGER : leftPreference;
+    const rightRank = rightPreference === -1 ? Number.MAX_SAFE_INTEGER : rightPreference;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    if (left.delivery !== right.delivery) return left.delivery === 'webvtt' ? -1 : 1;
+    return subtitleLanguageName(left.language).localeCompare(subtitleLanguageName(right.language), 'da');
+  });
 }
 
 function formatTime(seconds: number) {
