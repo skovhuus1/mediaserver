@@ -4,6 +4,7 @@ export * from './media-metadata.js';
 export * from './hdr-profile.js';
 export * from './adaptive-quality.js';
 export * from './playback-resume.js';
+export * from './playback-quality.js';
 
 export const entitlementActionSchema = z.enum(['playback', 'cast', 'offline_download']);
 export type EntitlementAction = z.infer<typeof entitlementActionSchema>;

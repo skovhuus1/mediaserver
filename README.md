@@ -15,6 +15,10 @@
 > `Fortsæt med at se` anvender den gemte position efter browserens
 > `loadedmetadata`/HLS-duration er klar. Resume-seeket udføres kun én gang pr.
 > stream-load og bevares ved HLS og subtitle-rekonfiguration.
+>
+> Playerens kvalitetsvælger adskiller nu valgt tilstand fra den rendition, der
+> faktisk afspilles. Auto viser det aktuelle HLS-niveau, mens et manuelt valg
+> skifter via Hls.js uden at tømme hele bufferen og bekræfter skiftet i UI'et.
 
 BoltBytes Media Server er en selvhostet TypeScript-platform til administration og autoriseret afspilning af egne film og serier. Kodebasen er genopbygget fra bunden med server-side adgangskontrol, reproducerbar installation og en tydelig grænse mellem implementeret funktionalitet og kommende faser.
 

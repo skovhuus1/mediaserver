@@ -1,7 +1,12 @@
 'use client';
 
 import Hls from 'hls.js';
-import { playbackResumeTargetSeconds, sanitizeMediaTitle } from '@boltbytes/contracts';
+import {
+  normalizePlaybackQualitySelection,
+  playbackResumeTargetSeconds,
+  presentPlaybackQualityLevel,
+  sanitizeMediaTitle,
+} from '@boltbytes/contracts';
 import {
   ArrowLeft,
   Captions,
@@ -84,7 +89,7 @@ type Authorization = {
 type TranscodeStatus = { state: 'queued' | 'running' | 'ready' | 'failed'; message: string };
 type PlayerMenu = 'playlist' | 'speed' | 'subtitles' | 'audio' | 'quality' | 'info' | null;
 type AudioTrack = { index: number; name: string; language: string };
-type QualityLevel = { index: number; label: string };
+type QualityLevel = ReturnType<typeof presentPlaybackQualityLevel> & { index: number };
 type SubtitleTrack = {
   id: string;
   label: string;
@@ -219,7 +224,9 @@ export function WebPlayer() {
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [activeAudioTrack, setActiveAudioTrack] = useState(0);
   const [qualities, setQualities] = useState<QualityLevel[]>([]);
-  const [activeQuality, setActiveQuality] = useState(-1);
+  const [qualitySelection, setQualitySelection] = useState(-1);
+  const [currentQuality, setCurrentQuality] = useState(-1);
+  const [qualitySwitching, setQualitySwitching] = useState<number | null>(null);
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -286,6 +293,10 @@ export function WebPlayer() {
     setCasting(false);
     activeSubtitleRef.current = null;
     setActiveSubtitle(null);
+    setQualities([]);
+    setQualitySelection(-1);
+    setCurrentQuality(-1);
+    setQualitySwitching(null);
   }, [saveProgress]);
 
   const togglePlay = useCallback(() => {
@@ -322,6 +333,10 @@ export function WebPlayer() {
         mediaRef.current = request.media;
         resumeRef.current = request.resumePositionMs;
         resumeAppliedRef.current = false;
+        setQualities([]);
+        setQualitySelection(-1);
+        setCurrentQuality(-1);
+        setQualitySwitching(null);
         setError('');
         setStatus('Autoriserer afspilning...');
         try {
@@ -419,14 +434,16 @@ export function WebPlayer() {
       hls.loadSource(authorization.streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      setQualities(hls.levels.map((level, index) => ({
+        setQualities(hls.levels.map((level, index) => ({
           index,
-          label: qualityLabel(
+          ...presentPlaybackQualityLevel(
             level.height,
             level.bitrate,
             authorization.adaptiveQuality.renditions[index],
           ),
         })));
+        setQualitySelection(hls.autoLevelEnabled ? -1 : hls.manualLevel);
+        setCurrentQuality(hls.currentLevel);
         setAudioTracks(hls.audioTracks.map((track, index) => ({
           index,
           name: track.name || `Lydspor ${index + 1}`,
@@ -443,9 +460,12 @@ export function WebPlayer() {
         }
         start();
       });
+      hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => {
+        setQualitySwitching(data.level);
+      });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
-        if (hls.autoLevelEnabled) setActiveQuality(-1);
-        else setActiveQuality(data.level);
+        setCurrentQuality(data.level);
+        setQualitySwitching(null);
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
@@ -667,8 +687,12 @@ export function WebPlayer() {
   };
 
   const selectQuality = (index: number) => {
-    if (hlsRef.current) hlsRef.current.currentLevel = index;
-    setActiveQuality(index);
+    const hls = hlsRef.current;
+    if (!hls) return;
+    const selected = normalizePlaybackQualitySelection(index, hls.levels.length);
+    setQualitySelection(selected);
+    setQualitySwitching(selected === -1 || selected === hls.currentLevel ? null : selected);
+    hls.nextLevel = selected;
     setMenu(null);
   };
 
@@ -941,13 +965,55 @@ export function WebPlayer() {
             </button>
           )) : <div className={styles.emptyMenu}>Browseren eksponerer ikke separate lydspor for denne stream.</div>)}
           {menu === 'quality' && (
-            <>
-              <button className={styles.menuRow} onClick={() => selectQuality(-1)}>
-                <span>Automatisk</span>{activeQuality === -1 && <Check size={17} />}
+            <div className={styles.qualityMenu}>
+              <div className={styles.qualityNow}>
+                <span>Afspiller nu</span>
+                <strong>
+                  {currentQuality >= 0
+                    ? qualities.find((quality) => quality.index === currentQuality)?.resolution ?? 'Forbereder'
+                    : 'Forbereder'}
+                </strong>
+                <small>
+                  {currentQuality >= 0
+                    ? qualitySummary(qualities.find((quality) => quality.index === currentQuality))
+                    : 'Venter på første videosegment'}
+                </small>
+              </div>
+              <button
+                className={`${styles.menuRow} ${styles.qualityRow} ${qualitySelection === -1 ? styles.qualitySelected : ''}`}
+                aria-pressed={qualitySelection === -1}
+                onClick={() => selectQuality(-1)}
+              >
+                <span className={styles.qualityChoice}>
+                  <Gauge size={19} />
+                  <span>
+                    <strong>Automatisk</strong>
+                    <small>Tilpasser løbende kvaliteten til forbindelsen</small>
+                  </span>
+                </span>
+                {qualitySelection === -1 && <Check size={18} />}
               </button>
               {qualities.map((quality) => (
-                <button className={styles.menuRow} key={quality.index} onClick={() => selectQuality(quality.index)}>
-                  <span>{quality.label}</span>{activeQuality === quality.index && <Check size={17} />}
+                <button
+                  className={`${styles.menuRow} ${styles.qualityRow} ${qualitySelection === quality.index ? styles.qualitySelected : ''}`}
+                  aria-pressed={qualitySelection === quality.index}
+                  key={quality.index}
+                  onClick={() => selectQuality(quality.index)}
+                >
+                  <span className={styles.qualityChoice}>
+                    <span className={styles.resolutionBadge}>{quality.resolution}</span>
+                    <span>
+                      <strong>{quality.resolution}</strong>
+                      <small>{quality.bitrate ?? 'Variabel bitrate'}</small>
+                    </span>
+                  </span>
+                  <span className={styles.qualityTags}>
+                    {quality.dynamicRange && <i>{quality.dynamicRange}</i>}
+                    {quality.upscaled && <i className={styles.upscaledTag}>Opskaleret</i>}
+                    {qualitySwitching === quality.index
+                      ? <em>Skifter...</em>
+                      : qualitySelection === quality.index && <Check size={18} />}
+                  </span>
                 </button>
               ))}
               {!qualities.length && (
@@ -955,7 +1021,7 @@ export function WebPlayer() {
                   Original kvalitet · {authorization ? formatVideoProfile(authorization) || 'Direct Play' : 'Direct Play'}
                 </div>
               )}
-            </>
+            </div>
           )}
           {menu === 'info' && (
             <dl className={styles.infoGrid}>
@@ -1013,7 +1079,15 @@ export function WebPlayer() {
               <button onClick={() => setMenu(menu === 'speed' ? null : 'speed')}><Gauge /><small>{playbackRate}x</small><span>Hastighed</span></button>
               <button onClick={() => setMenu(menu === 'subtitles' ? null : 'subtitles')}><Captions /><span>Undertekster</span></button>
               <button onClick={() => setMenu(menu === 'audio' ? null : 'audio')}><Volume2 /><span>Lydspor</span></button>
-              <button onClick={() => setMenu(menu === 'quality' ? null : 'quality')}><Settings2 /><span>Kvalitet</span></button>
+              <button onClick={() => setMenu(menu === 'quality' ? null : 'quality')}>
+                <Settings2 />
+                <small>
+                  {qualitySelection === -1
+                    ? 'Auto'
+                    : qualities.find((quality) => quality.index === qualitySelection)?.resolution ?? 'Original'}
+                </small>
+                <span>Kvalitet</span>
+              </button>
               <button onClick={() => void toggleFullscreen()}><Maximize /><span>{isFullscreen ? 'Afslut fuld skærm' : 'Fuld skærm'}</span></button>
             </div>
           </div>
@@ -1180,16 +1254,13 @@ function menuTitle(menu: Exclude<PlayerMenu, null>) {
   } as const)[menu];
 }
 
-function qualityLabel(
-  height: number,
-  bitrate: number,
-  rendition?: { upscaled: boolean; hdr: boolean },
-) {
-  const resolution = height ? (height === 2160 ? '4K' : `${height}p`) : 'Transcoded';
-  const speed = bitrate > 0 ? ` ? ${(bitrate / 1_000_000).toFixed(1)} Mbps` : '';
-  const signal = rendition ? ` ? ${rendition.hdr ? 'HDR' : 'SDR'}` : '';
-  const upscale = rendition?.upscaled ? ' ? Opskaleret' : '';
-  return `${resolution}${speed}${signal}${upscale}`;
+function qualitySummary(quality?: QualityLevel) {
+  if (!quality) return 'Ukendt kvalitet';
+  return [
+    quality.bitrate,
+    quality.dynamicRange,
+    quality.upscaled ? 'Opskaleret' : null,
+  ].filter(Boolean).join(' · ');
 }
 
 function formatTime(seconds: number) {
