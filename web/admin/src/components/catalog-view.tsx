@@ -73,7 +73,7 @@ const emptyCatalog: CatalogResponse = {
   facets: { categories: [], libraries: [] },
 };
 
-export function CatalogView() {
+export function CatalogView({ basePath = '/' }: { basePath?: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryKey = searchParams.toString();
@@ -113,7 +113,7 @@ export function CatalogView() {
     if (value) params.set(key, value);
     else params.delete(key);
     if (key !== 'page') params.delete('page');
-    router.push(`/?${params.toString()}`);
+    router.push(`${basePath}?${params.toString()}`);
   };
   const openItem = async (item: CatalogItem) => {
     setDetailLoading(true);
