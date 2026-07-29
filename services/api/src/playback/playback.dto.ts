@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, IsUUID, Length, ValidateNested } from 'class-validator';
 
 export class PlaybackCapabilitiesDto {
   @IsArray()
@@ -34,4 +34,10 @@ export class AuthorizePlaybackDto {
   @ValidateNested()
   @Type(() => PlaybackCapabilitiesDto)
   capabilities!: PlaybackCapabilitiesDto;
+}
+
+export class CastHandoffDto {
+  @IsString()
+  @Length(32, 512)
+  streamToken!: string;
 }

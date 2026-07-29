@@ -108,7 +108,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Tokenbeskyttet HLS med atomisk master-manifest, separat variant-playliste, eksplicit `BANDWIDTH`, `AVERAGE-BANDWIDTH` og `RESOLUTION`, firesekunders MPEG-TS-segmenter, H.264/AAC-output, planens opløsnings-/bitrategrænser og `hls.js`-fallback i browsere uden native HLS. Kvalitetsmenuen viser derfor aldrig længere en kunstig nulværdi. HLS-tokenet skrives ikke til nginx-accessloggen.
 - Nye installationers administratorplan starter på `2160p/50 Mbps`. Eksisterende abonnementer beholder bevidst deres immutable planversion/snapshot og skal have en ny aktiv 4K-planversion og et abonnement på denne version, før serveren må levere 4K.
 - Compose klargør det navngivne transcode-volume med en afgrænset engangs-init-container; API, worker og transcoder kører fortsat som ikke-root og starter først efter migrationer/API-health.
-- Chromecast Web Sender via Google Cast Default Media Receiver og et servervalideret handoff på den eksisterende logical session. HLS bruger Cast-kompatibel MIME-type, Direct Play/HLS/WebVTT svarer med origin-specifik CORS og cross-origin media-policy, og valgte undertekster sendes med som Cast text tracks. Knappen viser en konkret fejl, hvis HTTPS, Cast Framework, netværk eller receiver mangler; controllerfanen skal fortsat være åben for heartbeat i denne første senderimplementation.
+- Chromecast Web Sender via Google Cast Default Media Receiver og et servervalideret handoff på den eksisterende logical session. Receiveren får absolutte medie- og WebVTT-URL'er med et HMAC-signeret, sessionsbundet Cast-token, mens browserens oprindelige stream-token forbliver uændret. HLS viderefører Cast-tokenet til variant-playlister og segmenter. Playeren synkroniserer remote play/pause, seek, lydstyrke, undertekster, heartbeat og playback-historik og fortsætter lokalt, hvis Cast-sessionen afbrydes.
 - Automatisk undertekstfund for `.srt`/`.vtt`-sidecars med samme filnavn samt tekstbaserede indlejrede spor (`SRT`, `ASS`, `SSA`, `WebVTT` og `mov_text`) i transcodede filer. Sidecars konverteres sikkert til WebVTT ved levering, mens workeren udtrækker kompatible indlejrede spor før streamen markeres klar.
 - Scanstatus og manuel scan-trigger i admin-dashboardet.
 - Funktionel adminnavigation med live film-/seriefiltrering, søgning, bibliotek-oprettelse, sikker mappevælger, scanning, brugerliste, planliste og driftsindstillinger.
@@ -181,7 +181,7 @@ Biblioteksscanneren klassificerer filer deterministisk før ekstern metadataopsl
 - Hardwareaccelereret 4K tone mapping/encoding. HDR-pathen bruger i første omgang softwarefiltrene `zscale`/`tonemap` samt `libx265`, mens kompatibel HEVC kan remuxes uden videogenkodning.
 - Ægte container-remux uden video-reencoding. `direct_stream` vælges derfor bevidst ikke endnu; browserinkompatible containere går gennem transcoding.
 - Automatisk næste episode, intro-/recap-markører og burn-in/OCR af billedbaserede undertekster som PGS/VobSub. Tekstbaserede sidecars og indlejrede tekstspor er implementeret.
-- Egen Chromecast receiver, receiver-heartbeat og fortsat afspilning efter controllerfanen lukkes. Den nuværende Default Media Receiver-handoff kræver, at fanen forbliver aktiv, at serverens stream-URL kan nås fra Chromecast-enheden, og at webpanelet åbnes via HTTPS. En LAN-adresse over almindelig HTTP opfylder ikke Web Sender-kravet.
+- Egen brandet Chromecast receiver og receiver-ejet heartbeat efter controllerfanen lukkes. Den nuværende Default Media Receiver kræver fortsat, at fanen forbliver aktiv, at `BB_MEDIA_PUBLIC_URL` eller serverens eksterne URL kan nås fra Chromecast-enheden, og at webpanelet åbnes via HTTPS. Ved privat HTTPS skal certifikatet være gyldigt på receiveren.
 - TVDB-provider; TMDB er den aktive provider for både film og serier.
 - Kortlivet separat receiver-token i stedet for det nuværende sessionbundne stream-token.
 - Sonarr, Radarr og qBittorrent integration.
@@ -283,3 +283,23 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 - `/profiles` vælger aktiv profil ved sikker refresh-token-rotation. Playback-historik og fortsæt-position følger dermed den valgte profil.
 - Adminområdet har knappen `Kundevisning`, og kundeportalen viser `Admin`-returknappen kun for admin/operator-roller.
 - Admin-dashboardet kontrollerer rollen via `/auth/me`, før det kalder administrative endpoints. Serverens eksisterende `@Roles`-checks er fortsat den autoritative sikkerhedsgrænse; frontend-routing er kun UX-laget.
+
+## Chromecast end-to-end sender (2026-07-29)
+
+- Cast-handoff bevarer den eksisterende playback-session og logical session, s� overgangen ikke reserverer en ekstra stream-plads.
+- API'et udsteder et HMAC-signeret, sessionsbundet Cast-token med standardlevetid p� seks timer. `CAST_TOKEN_TTL_SECONDS` kan s�ttes til 300-86400 sekunder.
+- Receiverens stream-, HLS- og WebVTT-URL'er er absolutte og bruger `BB_MEDIA_PUBLIC_URL`, kontoens eksterne URL eller browserens validerede origin i den r�kkef�lge. Localhost-adresser afvises, fordi de peger p� receiveren selv.
+- Webplayeren bruger Google Cast `RemotePlayerController` til play/pause, seek og lydstyrke. Undertekster skiftes med Cast media-track API'et.
+- Remote position, varighed, pause-state, heartbeat og playback-historik synkroniseres, mens fanen er �ben. Ved almindelig disconnect forts�tter den lokale player fra receiverens seneste position.
+- Hvis receiverens `loadMedia` fejler, rulles Cast-markeringen tilbage uden at frigive den oprindelige playback-session.
+
+### Chromecast-konfiguration
+
+S�t en adresse, som Chromecast-enheden kan hente fra, n�r browserens origin eller setup-wizardens eksterne URL ikke er den rigtige:
+
+```dotenv
+BB_MEDIA_PUBLIC_URL=https://media.example.dk
+CAST_TOKEN_TTL_SECONDS=21600
+```
+
+Web Sender-siden skal �bnes via HTTPS, og Chromecast skal kunne n� URL'en og stole p� dens TLS-certifikat. Default Media Receiver kr�ver fortsat en �ben controllerfane for heartbeat. En egen BoltBytes receiver med receiver-ejet heartbeat er n�ste Cast-trin.

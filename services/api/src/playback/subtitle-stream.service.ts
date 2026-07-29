@@ -3,6 +3,7 @@ import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveStreamToken } from './cast-stream-token';
 import { isPathWithin, streamTokenMatches } from './direct-stream-policy';
 import { applyMediaCors } from './media-cors';
 import {
@@ -137,7 +138,8 @@ export class SubtitleStreamService {
       },
     });
     if (!session) throw new NotFoundException({ code: 'stream_session_missing', message: 'Playback session was not found' });
-    if (!streamTokenMatches(token, session.streamTokenHash)) {
+    const streamToken = resolveStreamToken(sessionId, token, process.env.JWT_SECRET ?? '');
+    if (!streamToken || !streamTokenMatches(streamToken, session.streamTokenHash)) {
       throw new UnauthorizedException({ code: 'stream_token_invalid', message: 'Stream token is invalid' });
     }
     if (!['reserving', 'active', 'paused'].includes(session.status) || session.leaseExpiresAt <= new Date()) {
