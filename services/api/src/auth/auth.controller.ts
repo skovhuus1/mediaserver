@@ -4,7 +4,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Public } from '../common/auth';
 import { AuthService } from './auth.service';
-import { LoginDto, LogoutDto, RefreshDto } from './auth.dto';
+import { CompletePasswordChangeDto, LoginDto, LogoutDto, RefreshDto } from './auth.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -25,6 +25,14 @@ export class AuthController {
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   refresh(@Body() dto: RefreshDto) {
     return this.auth.refresh(dto);
+  }
+
+  @Public()
+  @Post('complete-password-change')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  completePasswordChange(@Body() dto: CompletePasswordChangeDto) {
+    return this.auth.completePasswordChange(dto);
   }
 
   @Post('logout')

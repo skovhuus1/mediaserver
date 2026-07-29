@@ -6,7 +6,9 @@ import { Brand } from '@/components/brand';
 import { api, deviceFingerprint, saveSession, type ApiFailure, type SessionUser } from '@/lib/api';
 import { t } from '@/lib/messages';
 
-type LoginResult = { accessToken: string; refreshToken: string };
+type LoginResult =
+  | { accessToken: string; refreshToken: string; passwordChangeRequired?: false }
+  | { passwordChangeRequired: true; passwordChangeToken: string };
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,6 +32,11 @@ export default function LoginPage() {
           platform: navigator.platform,
         }),
       }, false);
+      if ('passwordChangeRequired' in result && result.passwordChangeRequired) {
+        window.sessionStorage.setItem('bb_password_change_token', result.passwordChangeToken);
+        router.replace('/change-password');
+        return;
+      }
       saveSession(result.accessToken, result.refreshToken);
       const session = await api<SessionUser>('/auth/me');
       const isAdmin = session.roles.some((role) => role === 'admin' || role === 'operator');

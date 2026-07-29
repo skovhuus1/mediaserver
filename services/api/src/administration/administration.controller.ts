@@ -9,6 +9,10 @@ import {
   CreateProfileDto,
   CreateSubscriptionDto,
   CreateUserDto,
+  UpdateUserDto,
+  UpdateProfileDto,
+  ArchiveProfileDto,
+  ChangeSubscriptionPlanDto,
   SuspendUserDto,
 } from './administration.dto';
 import { AdministrationService } from './administration.service';
@@ -28,6 +32,18 @@ export class AdministrationController {
     return this.administration.createUser(actor, dto);
   }
 
+  @Patch('users/:id')
+  @Roles('admin')
+  updateUser(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateUserDto) {
+    return this.administration.updateUser(actor, id, dto);
+  }
+
+  @Post('users/:id/reset-password')
+  @Roles('admin')
+  resetPassword(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.administration.resetPassword(actor, id);
+  }
+
   @Patch('users/:id/suspend')
   @Roles('admin')
   suspendUser(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: SuspendUserDto) {
@@ -40,6 +56,18 @@ export class AdministrationController {
   @Post('profiles')
   createProfile(@CurrentUser() actor: AuthenticatedUser, @Body() dto: CreateProfileDto) {
     return this.administration.createProfile(actor, dto);
+  }
+
+  @Patch('profiles/:id')
+  @Roles('admin')
+  updateProfile(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateProfileDto) {
+    return this.administration.updateProfile(actor, id, dto);
+  }
+
+  @Patch('profiles/:id/archive')
+  @Roles('admin')
+  archiveProfile(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: ArchiveProfileDto) {
+    return this.administration.archiveProfile(actor, id, dto.archived);
   }
 
   @Get('devices')
@@ -82,9 +110,31 @@ export class AdministrationController {
     return this.administration.cancelSubscription(actor, id);
   }
 
+  @Patch('subscriptions/:id/change-plan')
+  @Roles('admin')
+  changeSubscriptionPlan(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ChangeSubscriptionPlanDto,
+  ) {
+    return this.administration.changeSubscriptionPlan(actor, id, dto.planVersionId);
+  }
+
+  @Get('entitlement-overrides')
+  @Roles('admin', 'operator')
+  overrides(@CurrentUser() actor: AuthenticatedUser) {
+    return this.administration.listOverrides(actor);
+  }
+
   @Post('entitlement-overrides')
   @Roles('admin')
   createOverride(@CurrentUser() actor: AuthenticatedUser, @Body() dto: CreateEntitlementOverrideDto) {
     return this.administration.createOverride(actor, dto);
+  }
+
+  @Delete('entitlement-overrides/:id')
+  @Roles('admin')
+  deleteOverride(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.administration.deleteOverride(actor, id);
   }
 }
