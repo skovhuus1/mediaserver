@@ -36,6 +36,9 @@ export type PlayableMedia = {
   overview?: string | null;
   posterPath?: string | null;
   backdropPath?: string | null;
+  width?: number | null;
+  height?: number | null;
+  hdr?: 'hdr10' | 'hlg' | 'dolby_vision' | null;
   file?: { durationMs?: number | null } | null;
 };
 

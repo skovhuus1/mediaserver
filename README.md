@@ -256,3 +256,8 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 - HDR10/Dolby Vision tone mapping ved transcoding er ikke implementeret; HDR er i denne fase passthrough via Direct Play/Direct Stream.
 - TVDB episode-level metadata og sæson-/episode-artwork er ikke implementeret endnu; den nuværende worker beriger serieepisoder med det matchede series-record.
 - TVDB-attribution skal også føjes til kommende TV- og mobilklienter, når de begynder at vise TVDB-data.
+## 4K- og HDR-badges på posters (2026-07-29)
+
+- Startsidens mediekort, katalogets posters og “Fortsæt med at se” viser nu et `4K`-badge, når den analyserede fil er mindst 3840 pixels bred eller 2160 pixels høj.
+- Et separat `HDR`-badge vises kun, når ffprobe-data er klassificeret som HDR10, HLG eller Dolby Vision. 4K SDR fejlkategoriseres derfor ikke som HDR.
+- API’et udleder HDR-status server-side med den fælles video-signal-detektor og returnerer kun det normaliserede `hdr`-felt; den komplette ffprobe-payload eksponeres ikke til webklienten.

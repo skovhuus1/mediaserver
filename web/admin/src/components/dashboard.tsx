@@ -10,8 +10,18 @@ import { AppShell } from './app-shell';
 import { CatalogView } from './catalog-view';
 import { ManagementView } from './management-view';
 import { ContinueWatching } from './continue-watching';
+import { PosterQualityBadges } from './poster-quality-badges';
 
-type Media = { id: string; title: string; type: string; codec: string | null; container: string | null };
+type Media = {
+  id: string;
+  title: string;
+  type: string;
+  codec: string | null;
+  container: string | null;
+  width: number | null;
+  height: number | null;
+  hdr: 'hdr10' | 'hlg' | 'dolby_vision' | null;
+};
 type Session = {
   id: string;
   method: string;
@@ -151,6 +161,7 @@ function MediaSection({ title, items, emptyLabel, wide = false, onSeeAll }: { ti
         {items.slice(0, wide ? 4 : 6).map((item, index) => (
           <article className="media-card" key={item.id}>
             <div className={`poster poster-${index % 6}`}>
+              <PosterQualityBadges media={item} />
               {item.type === 'movie' ? <Film /> : <Tv />}
               <span>{item.codec ?? 'Ikke analyseret'}</span>
             </div>

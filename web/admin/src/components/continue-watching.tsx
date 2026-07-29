@@ -5,6 +5,7 @@ import { Radio } from 'lucide-react';
 import { api } from '@/lib/api';
 import { playbackHistoryChangedEvent, requestPlayback, type PlayableMedia } from './web-player';
 import styles from './playback.module.css';
+import { PosterQualityBadges } from './poster-quality-badges';
 
 type ContinueItem = PlayableMedia & {
   posterPath: string | null;
@@ -47,7 +48,9 @@ export function ContinueWatching() {
       <div className={styles.continueRow}>
         {items.map((item) => (
           <button className={styles.continueCard} key={item.id} onClick={() => requestPlayback(item, item.progress.positionMs)}>
-            <span className={styles.continueArt} style={imageStyle(item.backdropPath ?? item.posterPath)} />
+            <span className={styles.continueArt} style={imageStyle(item.backdropPath ?? item.posterPath)}>
+              <PosterQualityBadges media={item} />
+            </span>
             <span className={styles.continueCopy}>
               <strong>{item.seriesTitle ?? item.title}</strong>
               <small>{item.seriesTitle ? episodeLabel(item) : timeLabel(item.progress.positionMs)}</small>

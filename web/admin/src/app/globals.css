@@ -201,6 +201,38 @@ a { color: inherit; text-decoration: none; }
 .poster::after { content: ""; position: absolute; inset: 0; background: linear-gradient(155deg, transparent 40%, rgba(0,0,0,.58)); }
 .poster.has-image, .detail-art.has-image { background-size: cover; background-position: center; background-repeat: no-repeat; }
 .poster.has-image > svg, .detail-art.has-image > svg { opacity: 0; }
+.poster-quality-badges {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 5px;
+  margin: 0;
+  font-style: normal;
+  pointer-events: none;
+}
+.poster-quality-badges b {
+  display: inline-flex;
+  min-width: 28px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border: 1px solid rgba(255,255,255,.42);
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(5,8,12,.84);
+  box-shadow: 0 4px 12px rgba(0,0,0,.34);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: .07em;
+}
+.poster-quality-badges .quality-hdr {
+  border-color: rgba(255,190,67,.8);
+  color: #ffd372;
+}
 .poster-0 { background: radial-gradient(circle at 68% 23%, #e6a353, transparent 22%), linear-gradient(150deg, #6b371e, #141b22); }
 .poster-1 { background: radial-gradient(circle at 30% 55%, #557665, transparent 26%), linear-gradient(130deg, #222f2c, #101419); }
 .poster-2 { background: radial-gradient(circle at 63% 40%, #db5f27, transparent 18%), linear-gradient(140deg, #4a1410, #171317); }
