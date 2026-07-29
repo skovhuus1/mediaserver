@@ -23,7 +23,7 @@ MEDIA_PATH=/home/seeds/Media/Films/user/google/google/external/Media
 Åbn derefter:
 
 ```text
-http://SERVERENS-IP:5555
+http://SERVERENS-IP:6555
 ```
 
 `JWT_SECRET` og `ENCRYPTION_KEY` genereres automatisk af `scripts/bootstrap-env.mjs`. Eksisterende secrets overskrives ikke, og værdierne skrives aldrig til terminalen.
@@ -44,7 +44,7 @@ Direkte installation fungerer Plex-lignende som tre systemd-services bag nginx. 
 1. Opret PostgreSQL-databasen og brugeren, som er angivet i `.env.direct.example`.
 2. Kør `sudo bash scripts/install-direct.sh`.
 
-Installeren bygger API, admin og worker, anvender migrationer, opretter systemd-services, konfigurerer nginx og åbner applikationen på port `5555`. Databasen bruger normalt `5432`, Redis `6379`, API internt `3001` og admin internt `3000`; kun `5555` skal eksponeres offentligt.
+Installeren bygger API, admin og worker, anvender migrationer, opretter systemd-services, konfigurerer nginx og åbner applikationen på port `5555`. Databasen bruger normalt `5432`, Redis `6379`, API internt `3001` og admin internt `3000`; kun `6555` skal eksponeres offentligt.
 
 ## Sikker updater
 
@@ -330,3 +330,19 @@ Produktionsdomænet er `https://media.boltbytes.com`, mens Docker fortsat bruger
 Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, planlagte scans/file-watcher, manuel metadata-match, hardware-transcoding, egen Chromecast receiver samt Android- og TV-klienter.
 
 CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, så health-, Direct Play-, subtitle-, HLS- og transcode-kontroller rammer den publicerede testport.
+
+
+## Personlige kundepr?ferencer og anbefalinger (2026-07-29)
+
+- `/watch/settings` har separate, eksplicitte Gem-forl?b for profil, lyd/undertekster, anbefalinger, sikkerhed og enhedens afspilning.
+- Profilpr?ferencer synkroniserer sprogprioritet, underteksttilstand, autoplay og personalisering. Kvalitet, maksimumopl?sning, upscaling, databesparelse, hastighed og HDR gemmes p? den aktive enhed.
+- En eksisterende profil-PIN skal bekr?ftes, f?r den ?ndres eller fjernes; ny PIN hashes med bcrypt cost 12.
+- Anbefalinger scores kun blandt lokale titler med en registreret mediefil. Historik, provider-lighed, skuespillere, genrer, kategori, rating og Like/Dislike/Ikke for mig indg?r i scoren.
+- Anbefalingscache bruger Redis i 15 minutter og versionsbindes til profilindstillinger, seneste historik og seneste feedback. Reset bevarer historikken, men afsk?rer ?ldre signaler.
+- Kundeportalens logo linker til `/watch`, kundeheaderen linker til indstillinger, og native vandrette scrollbars skjules p? kunde-r?kker.
+
+### Rester i den samlede personalized-watch-ABR-leverance
+
+- Metadataworkeren skal endnu udfylde de nye genre-, credit- og provider-similar-felter fra TMDB/TVDB.
+- Multi-rendition HLS, NVENC-health/fallback, dynamisk burn-in-rekonfiguration og den fulde player-overlay/fullscreen/track-binding er ikke afsluttet i denne chunk.
+- Denne branch m? ikke merges til `main`, f?r de resterende dele samt alle lokale og GitHub-gates er gr?nne.

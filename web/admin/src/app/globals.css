@@ -726,3 +726,20 @@ a { color: inherit; text-decoration: none; }
     grid-template-columns: 1fr;
   }
 }
+/* Customer rails use their own controls; native horizontal bars are hidden. */
+[data-horizontal-scroller],
+[class*="genreFilters"],
+[class*="seasonRail"],
+[class*="mediaRail"],
+[class*="catalogRail"] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+[data-horizontal-scroller]::-webkit-scrollbar,
+[class*="genreFilters"]::-webkit-scrollbar,
+[class*="seasonRail"]::-webkit-scrollbar,
+[class*="mediaRail"]::-webkit-scrollbar,
+[class*="catalogRail"]::-webkit-scrollbar {
+  display: none;
+}

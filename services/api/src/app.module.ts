@@ -12,6 +12,8 @@ import { CatalogModule } from './catalog/catalog.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
 import { InfraModule } from './infra/infra.module';
 import { PlaybackModule } from './playback/playback.module';
+import { PreferencesModule } from './preferences/preferences.module';
+import { RecommendationsModule } from './recommendations/recommendations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SetupModule } from './setup/setup.module';
 import { SystemModule } from './system/system.module';
@@ -39,6 +41,8 @@ import { SystemModule } from './system/system.module';
     CatalogModule,
     EntitlementsModule,
     PlaybackModule,
+    PreferencesModule,
+    RecommendationsModule,
     SystemModule,
   ],
   providers: [

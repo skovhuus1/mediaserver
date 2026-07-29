@@ -144,6 +144,7 @@ model Profile {
   isChildProfile       Boolean               @default(false) @map("is_child_profile")
   pinHash              String?               @map("pin_hash")
   language             String                @default("da")
+  avatarKey            String?               @map("avatar_key")
   archivedAt           DateTime?             @map("archived_at")
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")
@@ -211,6 +212,12 @@ model Device {
   platform         String?
   appVersion       String?           @map("app_version")
   capabilities     Json              @default("{}")
+  qualityMode      String            @default("auto") @map("quality_mode")
+  fixedQualityHeight Int?            @map("fixed_quality_height")
+  allowUpscale     Boolean           @default(true) @map("allow_upscale")
+  dataSaver        Boolean           @default(false) @map("data_saver")
+  playbackRate     Float             @default(1) @map("playback_rate")
+  hdrMode          String            @default("auto") @map("hdr_mode")
   isRevoked        Boolean           @default(false) @map("is_revoked")
   firstSeenAt      DateTime          @default(now()) @map("first_seen_at")
   lastSeenAt       DateTime          @default(now()) @map("last_seen_at")
@@ -434,6 +441,10 @@ model MediaItem {
   posterPath           String?           @map("poster_path")
   backdropPath         String?           @map("backdrop_path")
   metadataUpdatedAt    DateTime?         @map("metadata_updated_at")
+  genres               Json?
+  credits              Json?
+  similarProviderIds   Json?             @map("similar_provider_ids")
+  recommendationUpdatedAt DateTime?      @map("recommendation_updated_at")
   releaseDate          DateTime?         @map("release_date")
   availabilityOverride DateTime?         @map("availability_override")
   createdAt            DateTime          @default(now()) @map("created_at")
@@ -568,6 +579,36 @@ model PlaybackHistory {
 
   @@unique([profileId, mediaId])
   @@map("playback_history")
+}
+
+model ProfilePreferences {
+  profileId                  String    @id @map("profile_id")
+  accountId                  String    @map("account_id")
+  preferredAudioLanguages    Json      @map("preferred_audio_languages")
+  preferredSubtitleLanguages Json      @map("preferred_subtitle_languages")
+  subtitleMode               String    @default("auto") @map("subtitle_mode")
+  autoplayNext               Boolean   @default(true) @map("autoplay_next")
+  recommendationsEnabled     Boolean   @default(true) @map("recommendations_enabled")
+  recommendationResetAt      DateTime? @map("recommendation_reset_at")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
+
+  @@index([accountId])
+  @@map("profile_preferences")
+}
+
+model RecommendationFeedback {
+  id        String   @id @default(uuid())
+  accountId String   @map("account_id")
+  profileId String   @map("profile_id")
+  mediaId   String   @map("media_id")
+  type      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([profileId, mediaId])
+  @@index([accountId, profileId, type])
+  @@map("recommendation_feedback")
 }
 
 model BillingWebhookEvent {

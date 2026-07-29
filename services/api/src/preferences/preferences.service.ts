@@ -1,0 +1,277 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
+import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../infra/redis.service';
+import {
+  UpdateDevicePreferencesDto,
+  UpdateProfilePreferencesDto,
+} from './preferences.dto';
+
+export interface PreferenceActor {
+  accountId: string;
+  userId: string;
+  profileId?: string | null;
+  deviceId?: string | null;
+}
+
+const PROFILE_DEFAULTS = {
+  preferredAudioLanguages: ['da', 'en'],
+  preferredSubtitleLanguages: ['da', 'en'],
+  subtitleMode: 'auto',
+  autoplayNext: true,
+  recommendationsEnabled: true,
+} as const;
+
+const DEVICE_DEFAULTS = {
+  qualityMode: 'auto',
+  fixedQualityHeight: null,
+  allowUpscale: true,
+  dataSaver: false,
+  playbackRate: 1,
+  hdrMode: 'auto',
+} as const;
+
+@Injectable()
+export class PreferencesService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
+
+  async getProfilePreferences(actor: PreferenceActor) {
+    const profile = await this.requireProfile(actor);
+    const preferences = await this.prisma.profilePreferences.findUnique({
+      where: { profileId: profile.id },
+    });
+
+    return {
+      profile: {
+        id: profile.id,
+        name: profile.name,
+        avatarKey: profile.avatarKey,
+        language: profile.language,
+        isChild: profile.isChildProfile,
+        pinProtected: Boolean(profile.pinHash),
+      },
+      preferences: {
+        ...PROFILE_DEFAULTS,
+        ...(preferences
+          ? {
+              preferredAudioLanguages: this.languages(
+                preferences.preferredAudioLanguages,
+                PROFILE_DEFAULTS.preferredAudioLanguages,
+              ),
+              preferredSubtitleLanguages: this.languages(
+                preferences.preferredSubtitleLanguages,
+                PROFILE_DEFAULTS.preferredSubtitleLanguages,
+              ),
+              subtitleMode: preferences.subtitleMode,
+              autoplayNext: preferences.autoplayNext,
+              recommendationsEnabled: preferences.recommendationsEnabled,
+            }
+          : {}),
+      },
+    };
+  }
+
+  async updateProfilePreferences(
+    actor: PreferenceActor,
+    input: UpdateProfilePreferencesDto,
+  ) {
+    const profile = await this.requireProfile(actor);
+
+    if ((input.newPin || input.clearPin) && profile.pinHash) {
+      if (!input.currentPin) {
+        throw new UnauthorizedException({
+          code: 'profile_current_pin_required',
+          message: 'The current profile PIN is required',
+        });
+      }
+      if (!(await bcrypt.compare(input.currentPin, profile.pinHash))) {
+        throw new UnauthorizedException({
+          code: 'profile_current_pin_invalid',
+          message: 'The current profile PIN is invalid',
+        });
+      }
+    }
+    if (input.newPin && input.clearPin) {
+      throw new BadRequestException({
+        code: 'profile_pin_conflict',
+        message: 'A profile PIN cannot be set and removed in the same request',
+      });
+    }
+
+    const pinHash = input.newPin
+      ? await bcrypt.hash(input.newPin, 12)
+      : input.clearPin
+        ? null
+        : undefined;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.profile.update({
+        where: { id: profile.id },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.avatarKey !== undefined ? { avatarKey: input.avatarKey } : {}),
+          ...(input.language !== undefined ? { language: input.language } : {}),
+          ...(pinHash !== undefined ? { pinHash } : {}),
+        },
+      });
+      await tx.profilePreferences.upsert({
+        where: { profileId: profile.id },
+        create: {
+          profileId: profile.id,
+          accountId: actor.accountId,
+          preferredAudioLanguages:
+            input.preferredAudioLanguages ??
+            [...PROFILE_DEFAULTS.preferredAudioLanguages],
+          preferredSubtitleLanguages:
+            input.preferredSubtitleLanguages ??
+            [...PROFILE_DEFAULTS.preferredSubtitleLanguages],
+          subtitleMode: input.subtitleMode ?? PROFILE_DEFAULTS.subtitleMode,
+          autoplayNext: input.autoplayNext ?? PROFILE_DEFAULTS.autoplayNext,
+          recommendationsEnabled:
+            input.recommendationsEnabled ??
+            PROFILE_DEFAULTS.recommendationsEnabled,
+        },
+        update: {
+          ...(input.preferredAudioLanguages !== undefined
+            ? { preferredAudioLanguages: input.preferredAudioLanguages }
+            : {}),
+          ...(input.preferredSubtitleLanguages !== undefined
+            ? { preferredSubtitleLanguages: input.preferredSubtitleLanguages }
+            : {}),
+          ...(input.subtitleMode !== undefined
+            ? { subtitleMode: input.subtitleMode }
+            : {}),
+          ...(input.autoplayNext !== undefined
+            ? { autoplayNext: input.autoplayNext }
+            : {}),
+          ...(input.recommendationsEnabled !== undefined
+            ? { recommendationsEnabled: input.recommendationsEnabled }
+            : {}),
+        },
+      });
+    });
+
+    await this.redis.delete(this.recommendationKey(actor));
+    return this.getProfilePreferences(actor);
+  }
+
+  async getDevicePreferences(actor: PreferenceActor) {
+    const device = await this.requireDevice(actor);
+    return {
+      deviceId: device.id,
+      preferences: {
+        qualityMode: device.qualityMode ?? DEVICE_DEFAULTS.qualityMode,
+        fixedQualityHeight:
+          device.fixedQualityHeight ?? DEVICE_DEFAULTS.fixedQualityHeight,
+        allowUpscale: device.allowUpscale ?? DEVICE_DEFAULTS.allowUpscale,
+        dataSaver: device.dataSaver ?? DEVICE_DEFAULTS.dataSaver,
+        playbackRate: device.playbackRate ?? DEVICE_DEFAULTS.playbackRate,
+        hdrMode: device.hdrMode ?? DEVICE_DEFAULTS.hdrMode,
+      },
+    };
+  }
+
+  async updateDevicePreferences(
+    actor: PreferenceActor,
+    input: UpdateDevicePreferencesDto,
+  ) {
+    const device = await this.requireDevice(actor);
+    const qualityMode = input.qualityMode ?? device.qualityMode;
+    const fixedHeight = input.fixedQualityHeight ?? device.fixedQualityHeight;
+    if (qualityMode === 'fixed' && !fixedHeight) {
+      throw new BadRequestException({
+        code: 'fixed_quality_height_required',
+        message: 'A fixed maximum resolution is required in fixed mode',
+      });
+    }
+
+    await this.prisma.device.update({
+      where: { id: device.id },
+      data: {
+        ...(input.qualityMode !== undefined
+          ? { qualityMode: input.qualityMode }
+          : {}),
+        ...(input.fixedQualityHeight !== undefined
+          ? { fixedQualityHeight: input.fixedQualityHeight }
+          : {}),
+        ...(input.allowUpscale !== undefined
+          ? { allowUpscale: input.allowUpscale }
+          : {}),
+        ...(input.dataSaver !== undefined
+          ? { dataSaver: input.dataSaver }
+          : {}),
+        ...(input.playbackRate !== undefined
+          ? { playbackRate: input.playbackRate }
+          : {}),
+        ...(input.hdrMode !== undefined ? { hdrMode: input.hdrMode } : {}),
+      },
+    });
+    return this.getDevicePreferences(actor);
+  }
+
+  private async requireProfile(actor: PreferenceActor) {
+    if (!actor.profileId) {
+      throw new ForbiddenException({
+        code: 'active_profile_required',
+        message: 'Select a profile before changing profile preferences',
+      });
+    }
+    const profile = await this.prisma.profile.findFirst({
+      where: {
+        id: actor.profileId,
+        accountId: actor.accountId,
+        archivedAt: null,
+      },
+    });
+    if (!profile) {
+      throw new NotFoundException({
+        code: 'profile_not_found',
+        message: 'The active profile is unavailable',
+      });
+    }
+    return profile;
+  }
+
+  private async requireDevice(actor: PreferenceActor) {
+    if (!actor.deviceId) {
+      throw new ForbiddenException({
+        code: 'registered_device_required',
+        message: 'A registered device is required for device preferences',
+      });
+    }
+    const device = await this.prisma.device.findFirst({
+      where: {
+        id: actor.deviceId,
+        accountId: actor.accountId,
+        userId: actor.userId,
+        isRevoked: false,
+      },
+    });
+    if (!device) {
+      throw new NotFoundException({
+        code: 'device_not_found',
+        message: 'The active device is unavailable',
+      });
+    }
+    return device;
+  }
+
+  private languages(value: unknown, fallback: readonly string[]) {
+    return Array.isArray(value) && value.every((item) => typeof item === 'string')
+      ? value
+      : [...fallback];
+  }
+
+  private recommendationKey(actor: PreferenceActor) {
+    return `recommendations:${actor.accountId}:${actor.profileId ?? 'none'}`;
+  }
+}
