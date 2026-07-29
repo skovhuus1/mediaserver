@@ -111,7 +111,7 @@ export class SystemController {
   @Put('metadata/settings')
   @Roles('admin')
   saveMetadataSettings(@CurrentUser() actor: AuthenticatedUser, @Body() dto: SaveMetadataSettingsDto) {
-    return saveMetadataSettings(this.prisma, actor.accountId, dto.token, dto.language);
+    return saveMetadataSettings(this.prisma, actor.accountId, dto);
   }
 
   @Get('update/status')

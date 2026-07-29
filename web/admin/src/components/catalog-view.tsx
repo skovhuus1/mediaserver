@@ -237,6 +237,7 @@ function durationLabel(durationMs?: number | null): string {
 }
 
 function imageUrl(path: string | null | undefined, size: 'w500' | 'w780'): string | null {
+  if (path && /^https:\/\/(?:artworks\.)?thetvdb\.com\/[A-Za-z0-9_./%-]+$/i.test(path)) return path;
   if (!path || !/^\/[A-Za-z0-9._-]+$/.test(path)) return null;
   return `https://image.tmdb.org/t/p/${size}${path}`;
 }

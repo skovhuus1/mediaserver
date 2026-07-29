@@ -240,3 +240,19 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 - [Arkitektur](docs/architecture.md)
 - [Deployment](docs/deployment.md)
 - [Runbook](docs/runbook.md)
+## Planeditor, 4K og TVDB-seriemetadata (2026-07-29)
+
+- Adminpanelets planoversigt kan oprette en ny immutable planversion med stream- og enhedsgrænser, opløsning op til 8K, bitrate, Direct Play/Direct Stream, transcode, undertekster, Chromecast og offline-download.
+- Når en ny version aktiveres, kan administratoren vælge en atomisk overgang af aktive abonnementer. Den gamle subscription afsluttes, en ny subscription bindes til den nye version, og overgangen gemmes i subscription ledger og audit log.
+- 4K-adgang styres fortsat server-side. En plan skal mindst tillade `2160p`, en tilstrækkelig `maxVideoBitrate` og den afspilningsmetode, som enheden kræver. HDR passthrough kræver fortsat en kompatibel fil, browser/enhed og Direct Play/Direct Stream.
+- Metadataindstillinger understøtter nu separat TMDB Read Access Token til film og TVDB API Key samt valgfri Subscriber PIN til serier. Alle indtastede hemmeligheder valideres hos udbyderen og gemmes krypteret med `ENCRYPTION_KEY`.
+- Serie-workeren logger ind mod TVDB v4, søger med `type=series`, matcher titel/år og henter det valgte series extended-record. Hvis TVDB ikke er konfigureret, bruges TMDB fortsat som fallback til serier.
+- TVDB-artwork kan vises direkte fra godkendte `thetvdb.com`-URL'er. Klienter, der viser TVDB-data, skal samtidig vise attribution og link til [TheTVDB.com](https://thetvdb.com/) i overensstemmelse med [TVDB's API-regler](https://thetvdb.com/api-information).
+- Implementeringen følger [TVDB v4 API-specifikationen](https://thetvdb.github.io/v4-api/) for login, series search og extended series records.
+- Nøgler returneres aldrig fra status-endpoints eller til browseren efter lagring. Alternativ miljøkonfiguration er `TMDB_API_TOKEN`, `TVDB_API_KEY`, `TVDB_SUBSCRIBER_PIN` og `TMDB_LANGUAGE`.
+
+### Mangler efter denne leverance
+
+- HDR10/Dolby Vision tone mapping ved transcoding er ikke implementeret; HDR er i denne fase passthrough via Direct Play/Direct Stream.
+- TVDB episode-level metadata og sæson-/episode-artwork er ikke implementeret endnu; den nuværende worker beriger serieepisoder med det matchede series-record.
+- TVDB-attribution skal også føjes til kommende TV- og mobilklienter, når de begynder at vise TVDB-data.

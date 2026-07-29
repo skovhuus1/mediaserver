@@ -195,7 +195,7 @@ export class AdministrationService {
       if (!plan) throw new NotFoundException({ code: 'plan_not_found', message: 'Plan was not found in this account' });
       const latest = await tx.planVersion.findFirst({ where: { planId: plan.id }, orderBy: { version: 'desc' } });
       if (dto.isActive) await tx.planVersion.updateMany({ where: { planId: plan.id, isActive: true }, data: { isActive: false } });
-      return tx.planVersion.create({
+      const version = await tx.planVersion.create({
         data: {
           planId: plan.id,
           version: (latest?.version ?? 0) + 1,
@@ -205,6 +205,87 @@ export class AdministrationService {
           entitlement: { create: { snapshot: { ...dto.entitlements } as Prisma.InputJsonObject } },
         },
       });
+      let migratedSubscriptions = 0;
+      if (dto.isActive && dto.migrateActiveSubscriptions) {
+        const now = new Date();
+        const subscriptions = await tx.subscription.findMany({
+          where: {
+            accountId: actor.accountId,
+            planVersion: { planId: plan.id },
+            status: { in: ['active', 'trialing', 'grace_period'] },
+            startsAt: { lte: now },
+            OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+          },
+        });
+        for (const subscription of subscriptions) {
+          await tx.subscription.update({
+            where: { id: subscription.id },
+            data: {
+              status: 'canceled',
+              endsAt: now,
+              events: {
+                create: {
+                  type: 'plan_version_migrated',
+                  payload: {
+                    previousPlanVersionId: subscription.planVersionId,
+                    nextPlanVersionId: version.id,
+                    requestedBy: actor.sub,
+                  },
+                },
+              },
+            },
+          });
+          const replacement = await tx.subscription.create({
+            data: {
+              accountId: subscription.accountId,
+              userId: subscription.userId,
+              planVersionId: version.id,
+              status: subscription.status,
+              startsAt: now,
+              endsAt: subscription.endsAt,
+              events: {
+                create: {
+                  type: 'created',
+                  payload: {
+                    source: 'plan_version_migration',
+                    previousSubscriptionId: subscription.id,
+                    requestedBy: actor.sub,
+                  },
+                },
+              },
+            },
+          });
+          await tx.subscriptionSnapshot.create({
+            data: {
+              subscriptionId: replacement.id,
+              snapshot: {
+                planVersionId: version.id,
+                entitlements: { ...dto.entitlements },
+                previousSubscriptionId: subscription.id,
+                capturedAt: now.toISOString(),
+              },
+            },
+          });
+          migratedSubscriptions += 1;
+        }
+      }
+      await tx.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          action: 'plan.version_create',
+          outcome: 'success',
+          code: 'plan_version_created',
+          details: {
+            planId: plan.id,
+            planVersionId: version.id,
+            version: version.version,
+            isActive: version.isActive,
+            migratedSubscriptions,
+          },
+        },
+      });
+      return { ...version, migratedSubscriptions };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
