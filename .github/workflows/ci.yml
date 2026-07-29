@@ -195,7 +195,7 @@ jobs:
             -H 'content-type: application/json' \
             -d '{"qualityMode":"original"}' \
             "$api_base/devices/me/preferences")"
-          test "$(jq -r '.qualityMode' <<<"$direct_play_preferences")" = "original"
+          test "$(jq -r '.preferences.qualityMode' <<<"$direct_play_preferences")" = "original"
           authorization="$(curl --fail --silent --show-error \
             -H "authorization: Bearer $token" \
             -H 'content-type: application/json' \
@@ -249,11 +249,11 @@ jobs:
             -H 'content-type: application/json' \
             -d '{"qualityMode":"auto","allowUpscale":true,"dataSaver":false}' \
             "$api_base/devices/me/preferences")"
-          test "$(jq -r '.qualityMode' <<<"$adaptive_preferences")" = "auto"
+          test "$(jq -r '.preferences.qualityMode' <<<"$adaptive_preferences")" = "auto"
           transcode_authorization="$(curl --fail --silent --show-error \
             -H "authorization: Bearer $token" \
             -H 'content-type: application/json' \
-            -d "{\"profileId\":\"$profile_id\",\"mediaId\":\"$media_id\",\"deviceId\":\"$device_id\",\"capabilities\":{\"supportedCodecs\":[\"vp9\"],\"supportedContainers\":[\"webm\"],\"physicalScreenHeight\":1080,\"devicePixelRatio\":1,\"estimatedDownlinkMbps\":50}}" \
+            -d "{\"profileId\":\"$profile_id\",\"mediaId\":\"$media_id\",\"deviceId\":\"$device_id\",\"capabilities\":{\"supportedCodecs\":[\"vp9\"],\"supportedContainers\":[\"webm\"],\"screenHeight\":1080,\"devicePixelRatio\":1,\"estimatedDownlinkMbps\":50}}" \
             "$api_base/playback/authorize")"
           transcode_session_id="$(jq -er '.sessionId' <<<"$transcode_authorization")"
           transcode_status_url="$(jq -er '.transcodeStatusUrl' <<<"$transcode_authorization")"
