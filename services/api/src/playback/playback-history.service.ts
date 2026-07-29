@@ -102,6 +102,9 @@ export class PlaybackHistoryService {
 
     return entries.map((entry) => {
       const durationMs = entry.media.file?.durationMs ?? null;
+      const file = entry.media.file
+        ? (({ probe: _probe, ...publicFile }) => ({ ...publicFile, sizeBytes: entry.media.file!.sizeBytes.toString() }))(entry.media.file)
+        : null;
       return {
         id: entry.media.id,
         title: entry.media.title,
@@ -119,9 +122,7 @@ export class PlaybackHistoryService {
         height: entry.media.height,
         hdr: detectVideoSignalProfile(entry.media.file?.probe).hdr,
         library: entry.media.library,
-        file: entry.media.file
-          ? { ...entry.media.file, sizeBytes: entry.media.file.sizeBytes.toString() }
-          : null,
+        file,
         progress: {
           positionMs: entry.positionMs,
           durationMs,
@@ -130,5 +131,56 @@ export class PlaybackHistoryService {
         },
       };
     });
+  }
+
+  async nextEpisode(actor: AuthenticatedUser, seriesTitle: string) {
+    const normalizedTitle = seriesTitle?.trim();
+    if (!actor.profileId || !normalizedTitle || normalizedTitle.length > 240) return null;
+    const episodes = await this.prisma.mediaItem.findMany({
+      where: {
+        accountId: actor.accountId,
+        type: 'episode',
+        seriesTitle: { equals: normalizedTitle, mode: 'insensitive' },
+      },
+      include: {
+        file: true,
+        library: { select: { id: true, name: true, type: true } },
+      },
+      orderBy: [{ seasonNumber: 'asc' }, { episodeNumber: 'asc' }, { title: 'asc' }],
+    });
+    if (!episodes.length) return null;
+    const history = await this.prisma.playbackHistory.findMany({
+      where: {
+        accountId: actor.accountId,
+        userId: actor.sub,
+        profileId: actor.profileId,
+        mediaId: { in: episodes.map((episode) => episode.id) },
+      },
+    });
+    const progressByMedia = new Map(history.map((entry) => [entry.mediaId, entry]));
+    const unfinished = history
+      .filter((entry) => !entry.completed && entry.positionMs > 0)
+      .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())[0];
+    const unfinishedIndex = unfinished ? episodes.findIndex((episode) => episode.id === unfinished.mediaId) : -1;
+    const lastCompletedIndex = episodes.reduce(
+      (latest, episode, index) => progressByMedia.get(episode.id)?.completed ? Math.max(latest, index) : latest,
+      -1,
+    );
+    const media = unfinishedIndex >= 0
+      ? episodes[unfinishedIndex]
+      : episodes[lastCompletedIndex + 1] ?? null;
+    if (!media) return null;
+    const progress = progressByMedia.get(media.id);
+    const file = media.file
+      ? (({ probe: _probe, ...publicFile }) => ({ ...publicFile, sizeBytes: media.file!.sizeBytes.toString() }))(media.file)
+      : null;
+    return {
+      media: {
+        ...media,
+        hdr: detectVideoSignalProfile(media.file?.probe).hdr,
+        file,
+      },
+      resumePositionMs: progress?.positionMs ?? 0,
+    };
   }
 }

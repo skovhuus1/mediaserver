@@ -11,6 +11,30 @@ type ProviderCandidate = MetadataCandidate & {
   releaseDate: Date | null;
 };
 
+type TvdbSeasonMetadata = {
+  id: number;
+  number: number;
+  name: string | null;
+  posterPath: string | null;
+  priority: number;
+};
+
+type TvdbEpisodeMetadata = {
+  id: number;
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string | null;
+  overview: string | null;
+  stillPath: string | null;
+  airedAt: Date | null;
+};
+
+type TvdbSeriesMatch = {
+  series: ProviderCandidate;
+  seasons: Map<number, TvdbSeasonMetadata>;
+  episodes: Map<string, TvdbEpisodeMetadata>;
+};
+
 type MetadataStats = { inspected: number; matched: number; unmatched: number };
 
 export async function enrichLibraryMetadata(
@@ -40,9 +64,11 @@ export async function enrichLibraryMetadata(
   });
   const needsTvdb = Boolean(settings.tvdbApiKey && items.some((item) => item.type === 'episode'));
   const tvdbToken = needsTvdb ? await loginTvdb(settings.tvdbApiKey!, settings.tvdbPin) : null;
-  const cache = new Map<string, Promise<ProviderCandidate | null>>();
+  const tmdbCache = new Map<string, Promise<ProviderCandidate | null>>();
+  const tvdbCache = new Map<string, Promise<TvdbSeriesMatch | null>>();
   let matched = 0;
   let unmatched = 0;
+
   for (const item of items) {
     const movie = item.type === 'movie';
     const title = movie ? item.title : item.seriesTitle;
@@ -51,20 +77,62 @@ export async function enrichLibraryMetadata(
       await input.onProgress();
       continue;
     }
-    const provider = movie ? 'tmdb' : tvdbToken ? 'tvdb' : 'tmdb';
-    const credential = provider === 'tvdb' ? tvdbToken : settings.tmdbToken;
-    if (!credential) {
+
+    if (!movie && tvdbToken) {
+      const cacheKey = `${title}:${item.releaseYear ?? ''}`;
+      let pending = tvdbCache.get(cacheKey);
+      if (!pending) {
+        pending = searchTvdbSeries(tvdbToken, settings.language, title, item.releaseYear);
+        tvdbCache.set(cacheKey, pending);
+      }
+      const match = await pending;
+      if (!match) {
+        unmatched += 1;
+        await input.onProgress();
+        continue;
+      }
+      const episode = item.seasonNumber !== null && item.episodeNumber !== null
+        ? match.episodes.get(episodeKey(item.seasonNumber, item.episodeNumber)) ?? null
+        : null;
+      const season = item.seasonNumber !== null ? match.seasons.get(item.seasonNumber) ?? null : null;
+      await prisma.mediaItem.update({
+        where: { id: item.id },
+        data: {
+          title: episode?.title ?? item.title,
+          overview: episode?.overview ?? item.overview ?? match.series.overview,
+          rating: null,
+          metadataProvider: 'tvdb',
+          metadataProviderId: episode ? String(episode.id) : null,
+          seriesDisplayTitle: match.series.title,
+          seriesOverview: match.series.overview,
+          seriesMetadataProviderId: String(match.series.id),
+          seasonMetadataProviderId: season ? String(season.id) : null,
+          seasonPosterPath: season?.posterPath ?? null,
+          episodeStillPath: episode?.stillPath ?? null,
+          posterPath: match.series.posterPath,
+          backdropPath: match.series.backdropPath,
+          metadataUpdatedAt: new Date(),
+          releaseYear: item.releaseYear ?? match.series.releaseYear ?? null,
+          releaseDate: episode?.airedAt ?? item.releaseDate,
+        },
+      });
+      matched += 1;
+      await input.onProgress();
+      continue;
+    }
+
+    const token = settings.tmdbToken;
+    if (!token) {
       unmatched += 1;
       await input.onProgress();
       continue;
     }
-    const cacheKey = `${provider}:${title}:${item.releaseYear ?? ''}`;
-    let pending = cache.get(cacheKey);
+    const kind = movie ? 'movie' : 'tv';
+    const cacheKey = `${kind}:${title}:${item.releaseYear ?? ''}`;
+    let pending = tmdbCache.get(cacheKey);
     if (!pending) {
-      pending = provider === 'tvdb'
-        ? searchTvdb(credential, settings.language, title, item.releaseYear)
-        : searchTmdb(credential, settings.language, movie ? 'movie' : 'tv', title, item.releaseYear);
-      cache.set(cacheKey, pending);
+      pending = searchTmdb(token, settings.language, kind, title, item.releaseYear);
+      tmdbCache.set(cacheKey, pending);
     }
     const candidate = await pending;
     if (!candidate) {
@@ -75,10 +143,16 @@ export async function enrichLibraryMetadata(
     await prisma.mediaItem.update({
       where: { id: item.id },
       data: {
-        overview: candidate.overview,
+        overview: movie ? candidate.overview : item.overview ?? candidate.overview,
         rating: candidate.rating,
-        metadataProvider: candidate.provider,
+        metadataProvider: 'tmdb',
         metadataProviderId: String(candidate.id),
+        seriesDisplayTitle: movie ? null : candidate.title,
+        seriesOverview: movie ? null : candidate.overview,
+        seriesMetadataProviderId: movie ? null : String(candidate.id),
+        seasonMetadataProviderId: null,
+        seasonPosterPath: null,
+        episodeStillPath: null,
         posterPath: candidate.posterPath,
         backdropPath: candidate.backdropPath,
         metadataUpdatedAt: new Date(),
@@ -148,8 +222,7 @@ async function requestTmdb(
   if (!response.ok) throw new Error(`metadata_provider_http_${response.status}: TMDB search failed`);
   const payload = await response.json() as { results?: unknown[] };
   return (payload.results ?? []).flatMap((value) => {
-    if (!value || typeof value !== 'object') return [];
-    const result = value as Record<string, unknown>;
+    const result = asObject(value);
     if (typeof result.id !== 'number') return [];
     const displayTitle = stringValue(kind === 'movie' ? result.title : result.name);
     if (!displayTitle) return [];
@@ -185,19 +258,46 @@ async function loginTvdb(apikey: string, pin: string | null): Promise<string> {
   return payload.data.token;
 }
 
-async function searchTvdb(
+async function searchTvdbSeries(
   token: string,
   language: string,
   title: string,
   year: number | null,
-): Promise<ProviderCandidate | null> {
+): Promise<TvdbSeriesMatch | null> {
+  const candidates = await requestTvdbSearch(token, language, title, year);
+  const selected = selectMetadataCandidate(candidates, title, year);
+  if (!selected) return null;
+  const response = await requestTvdb(`/series/${selected.id}/extended?short=false`, token);
+  const payload = await response.json() as { data?: Record<string, unknown> };
+  const extended = payload.data ?? {};
+  const artworks = parseTvdbArtwork(extended.artworks);
+  const releaseDate = parseDate(stringValue(extended.firstAired));
+  const series: ProviderCandidate = {
+    ...selected,
+    title: stringValue(extended.name) ?? selected.title,
+    overview: stringValue(extended.overview) ?? selected.overview,
+    posterPath: artworks.poster ?? tvdbImageUrl(extended.image) ?? selected.posterPath,
+    backdropPath: artworks.backdrop,
+    releaseDate,
+    releaseYear: releaseDate?.getUTCFullYear() ?? integerValue(extended.year) ?? selected.releaseYear ?? null,
+  };
+  const seasons = parseTvdbSeasons(extended.seasons);
+  const episodes = await fetchTvdbEpisodes(selected.id, token, language);
+  return { series, seasons, episodes };
+}
+
+async function requestTvdbSearch(
+  token: string,
+  language: string,
+  title: string,
+  year: number | null,
+): Promise<ProviderCandidate[]> {
   const params = new URLSearchParams({ query: title, type: 'series', limit: '10', language: tvdbLanguage(language) });
   if (year) params.set('year', String(year));
   const response = await requestTvdb(`/search?${params}`, token);
   const payload = await response.json() as { data?: unknown[] };
-  const candidates = (payload.data ?? []).flatMap((value) => {
-    if (!value || typeof value !== 'object') return [];
-    const result = value as Record<string, unknown>;
+  return (payload.data ?? []).flatMap((value) => {
+    const result = asObject(value);
     const id = integerValue(result.tvdb_id ?? result.id);
     const name = stringValue(result.name_translated ?? result.name ?? result.title);
     if (id === null || !name) return [];
@@ -215,20 +315,77 @@ async function searchTvdb(
       releaseDate: null,
     }];
   });
-  const selected = selectMetadataCandidate(candidates, title, year);
-  if (!selected) return null;
-  const extendedResponse = await requestTvdb(`/series/${selected.id}/extended?short=true`, token);
-  const extendedPayload = await extendedResponse.json() as { data?: Record<string, unknown> };
-  const extended = extendedPayload.data;
-  if (!extended) return selected;
-  const releaseDate = parseDate(stringValue(extended.firstAired));
+}
+
+async function fetchTvdbEpisodes(
+  seriesId: number,
+  token: string,
+  language: string,
+): Promise<Map<string, TvdbEpisodeMetadata>> {
+  const episodes = new Map<string, TvdbEpisodeMetadata>();
+  for (let page = 0; page < 100; page += 1) {
+    const params = new URLSearchParams({ page: String(page) });
+    const response = await requestTvdb(
+      `/series/${seriesId}/episodes/default/${tvdbLanguage(language)}?${params}`,
+      token,
+    );
+    const payload = await response.json() as {
+      data?: { episodes?: unknown[] };
+      links?: { next?: unknown };
+    };
+    for (const value of payload.data?.episodes ?? []) {
+      const record = asObject(value);
+      const id = integerValue(record.id);
+      const seasonNumber = integerValue(record.seasonNumber ?? record.season_number);
+      const episodeNumber = integerValue(record.number ?? record.episodeNumber ?? record.episode_number);
+      if (id === null || seasonNumber === null || episodeNumber === null) continue;
+      episodes.set(episodeKey(seasonNumber, episodeNumber), {
+        id,
+        seasonNumber,
+        episodeNumber,
+        title: stringValue(record.name),
+        overview: stringValue(record.overview),
+        stillPath: tvdbImageUrl(record.image),
+        airedAt: parseDate(stringValue(record.aired)),
+      });
+    }
+    if (!stringValue(payload.links?.next)) break;
+  }
+  return episodes;
+}
+
+function parseTvdbSeasons(value: unknown): Map<number, TvdbSeasonMetadata> {
+  const records = (Array.isArray(value) ? value : []).flatMap((entry) => {
+    const season = asObject(entry);
+    const id = integerValue(season.id);
+    const number = integerValue(season.number);
+    if (id === null || number === null) return [];
+    const type = asObject(season.type);
+    const typeName = `${stringValue(type.name) ?? ''} ${stringValue(type.type) ?? ''}`.toLowerCase();
+    const priority = typeName.includes('aired') || typeName.includes('official') || typeName.includes('default') ? 2 : 1;
+    return [{
+      id,
+      number,
+      name: stringValue(season.name),
+      posterPath: tvdbImageUrl(season.image),
+      priority,
+    }];
+  }).sort((left, right) => right.priority - left.priority);
+  const seasons = new Map<number, TvdbSeasonMetadata>();
+  for (const season of records) if (!seasons.has(season.number)) seasons.set(season.number, season);
+  return seasons;
+}
+
+function parseTvdbArtwork(value: unknown): { poster: string | null; backdrop: string | null } {
+  const artwork = (Array.isArray(value) ? value : []).flatMap((entry) => {
+    const record = asObject(entry);
+    const image = tvdbImageUrl(record.image);
+    if (!image) return [];
+    return [{ image, width: integerValue(record.width) ?? 0, height: integerValue(record.height) ?? 0 }];
+  });
   return {
-    ...selected,
-    title: stringValue(extended.name) ?? selected.title,
-    overview: stringValue(extended.overview) ?? selected.overview,
-    posterPath: tvdbImageUrl(extended.image) ?? selected.posterPath,
-    releaseDate,
-    releaseYear: releaseDate?.getUTCFullYear() ?? integerValue(extended.year) ?? selected.releaseYear,
+    poster: artwork.find((entry) => entry.height > entry.width)?.image ?? null,
+    backdrop: artwork.find((entry) => entry.width > entry.height)?.image ?? null,
   };
 }
 
@@ -241,9 +398,17 @@ async function requestTvdb(path: string, token: string): Promise<Response> {
   return response;
 }
 
+function episodeKey(seasonNumber: number, episodeNumber: number): string {
+  return `${seasonNumber}:${episodeNumber}`;
+}
+
 function tvdbLanguage(language: string): string {
   const iso = language.slice(0, 2).toLowerCase();
   return ({ da: 'dan', en: 'eng', de: 'deu', fr: 'fra', es: 'spa', no: 'nor', sv: 'swe' } as Record<string, string>)[iso] ?? 'eng';
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function stringValue(value: unknown): string | null {
@@ -260,7 +425,7 @@ function numberValue(value: unknown): number | null {
 
 function integerValue(value: unknown): number | null {
   const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number.parseInt(value, 10) : Number.NaN;
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function tmdbImagePath(value: unknown): string | null {

@@ -571,3 +571,23 @@
     grid-template-columns: repeat(2, minmax(150px, 1fr));
   }
 }
+
+.episodeRich {
+  grid-template-columns: 96px 54px minmax(0, 1fr) auto;
+  border-radius: 7px;
+}
+
+.episodeStill {
+  display: block;
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  border-radius: 5px;
+  background: linear-gradient(135deg, #29323b, #101317);
+  background-position: center;
+  background-size: cover;
+}
+
+.episodeCopy { min-width: 0; }
+.episodeCopy b, .episodeCopy small { display: block; }
+.episodeCopy b { overflow: hidden; color: #fff; text-overflow: ellipsis; white-space: nowrap; }
+.episodeCopy small { display: -webkit-box; margin-top: 4px; overflow: hidden; color: rgba(255, 255, 255, .57); line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
