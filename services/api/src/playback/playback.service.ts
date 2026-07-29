@@ -3,8 +3,11 @@ import { detectVideoSignalProfile, isHevcCodec, type AuthenticatedUser } from '@
 import { isPrivileged } from '../common/auth';
 import { correlationId } from '../common/request-context';
 import { EntitlementsService } from '../entitlements/entitlements.service';
+import { readEnvironment } from '../config/environment';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuthorizePlaybackDto } from './playback.dto';
+import { createCastStreamToken } from './cast-stream-token';
+import { streamTokenMatches } from './direct-stream-policy';
+import { AuthorizePlaybackDto, CastHandoffDto } from './playback.dto';
 import { choosePlaybackMethod } from './playback-decision';
 import { StreamReservationService } from './stream-reservation.service';
 import { SubtitleStreamService } from './subtitle-stream.service';
@@ -12,6 +15,8 @@ import { TranscodeStreamService } from './transcode-stream.service';
 
 @Injectable()
 export class PlaybackService {
+  private readonly environment = readEnvironment();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementsService,
@@ -147,7 +152,12 @@ export class PlaybackService {
     }
   }
 
-  async handoffToCast(actor: AuthenticatedUser, sessionId: string) {
+  async handoffToCast(
+    actor: AuthenticatedUser,
+    sessionId: string,
+    dto: CastHandoffDto,
+    requestOrigin?: string,
+  ) {
     const session = await this.prisma.playbackSession.findFirst({
       where: {
         id: sessionId,
@@ -156,8 +166,18 @@ export class PlaybackService {
         status: { in: ['reserving', 'active', 'paused'] },
         leaseExpiresAt: { gt: new Date() },
       },
+      include: {
+        media: {
+          include: {
+            file: { include: { storageRoot: true } },
+          },
+        },
+      },
     });
     if (!session) throw new NotFoundException({ code: 'session_not_found', message: 'Playback session was not found or has expired' });
+    if (!streamTokenMatches(dto.streamToken, session.streamTokenHash)) {
+      throw new ForbiddenException({ code: 'stream_token_invalid', message: 'The playback stream token is invalid' });
+    }
     const entitlement = await this.entitlements.evaluate(actor, {
       profileId: session.profileId,
       mediaId: session.mediaId,
@@ -170,6 +190,33 @@ export class PlaybackService {
         message: entitlement.reasons[0] ?? 'Chromecast is not allowed by the active plan',
       });
     }
+    if (!session.media.file || session.media.file.status !== 'ready') {
+      throw new UnprocessableEntityException({
+        code: 'media_file_not_ready',
+        message: 'The media item has no readable scanned file',
+      });
+    }
+    const account = await this.prisma.account.findUnique({
+      where: { id: actor.accountId },
+      select: { externalUrl: true },
+    });
+    const publicBaseUrl = this.castPublicBaseUrl(account?.externalUrl, requestOrigin);
+    const signed = createCastStreamToken(
+      session.id,
+      dto.streamToken,
+      this.environment.jwtSecret,
+      this.environment.castTokenTtlSeconds,
+    );
+    const encodedToken = encodeURIComponent(signed.token);
+    const streamPath = session.method === 'transcode'
+      ? `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${encodedToken}`
+      : `/api/v1/playback/sessions/${session.id}/stream?token=${encodedToken}`;
+    const subtitleTracks = await this.subtitleStream.listForPlayback(
+      session.id,
+      signed.token,
+      session.media.file,
+      session.method === 'transcode',
+    );
     await this.prisma.playbackSession.update({
       where: { id: session.id },
       data: { isCastSession: true, lastHeartbeatAt: new Date() },
@@ -186,7 +233,60 @@ export class PlaybackService {
         details: { sessionId: session.id, logicalSessionId: session.logicalSessionId, mediaId: session.mediaId },
       },
     });
+    return {
+      accepted: true,
+      sessionId: session.id,
+      logicalSessionId: session.logicalSessionId,
+      method: session.method,
+      streamUrl: new URL(streamPath, publicBaseUrl).toString(),
+      contentType: session.method === 'transcode'
+        ? 'application/x-mpegURL'
+        : this.directContentType(session.media.container),
+      subtitleTracks: subtitleTracks.map((track) => ({
+        ...track,
+        src: new URL(track.src, publicBaseUrl).toString(),
+      })),
+      tokenExpiresAt: signed.expiresAt,
+    };
+  }
+
+  async cancelCastHandoff(actor: AuthenticatedUser, sessionId: string) {
+    const session = await this.prisma.playbackSession.findFirst({
+      where: {
+        id: sessionId,
+        accountId: actor.accountId,
+        ...(isPrivileged(actor) ? {} : { userId: actor.sub }),
+        status: { in: ['reserving', 'active', 'paused'] },
+        leaseExpiresAt: { gt: new Date() },
+      },
+    });
+    if (!session) {
+      throw new NotFoundException({ code: 'session_not_found', message: 'Playback session was not found or has expired' });
+    }
+    await this.prisma.playbackSession.update({
+      where: { id: session.id },
+      data: { isCastSession: false, lastHeartbeatAt: new Date() },
+    });
     return { accepted: true, sessionId: session.id, logicalSessionId: session.logicalSessionId };
+  }
+
+  private castPublicBaseUrl(configuredUrl: string | null | undefined, requestOrigin: string | undefined): string {
+    const candidates = [process.env.BB_MEDIA_PUBLIC_URL, configuredUrl, requestOrigin];
+    for (const candidate of candidates) {
+      if (!candidate?.trim()) continue;
+      try {
+        const parsed = new URL(candidate.trim());
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) continue;
+        if (['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) continue;
+        return `${parsed.protocol}//${parsed.host}/`;
+      } catch {
+        // Try the next configured source.
+      }
+    }
+    throw new UnprocessableEntityException({
+      code: 'cast_public_url_required',
+      message: 'Chromecast requires a receiver-accessible server URL. Set BB_MEDIA_PUBLIC_URL or the server external URL.',
+    });
   }
 
   list(actor: AuthenticatedUser) {

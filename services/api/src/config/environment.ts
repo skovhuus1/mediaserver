@@ -7,6 +7,7 @@ export type Environment = {
   jwtSecret: string;
   jwtAccessTtlSeconds: number;
   jwtRefreshTtlDays: number;
+  castTokenTtlSeconds: number;
   encryptionKey: string;
   sessionLeaseSeconds: number;
   mediaMountPath: string;
@@ -48,6 +49,7 @@ export function readEnvironment(): Environment {
     jwtSecret,
     jwtAccessTtlSeconds: boundedInteger('JWT_ACCESS_TTL_SECONDS', 900, 60, 86400),
     jwtRefreshTtlDays: boundedInteger('JWT_REFRESH_TTL_DAYS', 30, 1, 365),
+    castTokenTtlSeconds: boundedInteger('CAST_TOKEN_TTL_SECONDS', 21_600, 300, 86_400),
     encryptionKey,
     sessionLeaseSeconds: boundedInteger('SESSION_LEASE_SECONDS', 90, 15, 300),
     mediaMountPath: process.env.MEDIA_MOUNT_PATH?.trim() || process.env.MEDIA_PATH?.trim() || '/media',

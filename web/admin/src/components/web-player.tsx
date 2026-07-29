@@ -46,6 +46,7 @@ type PlaybackRequest = { media: PlayableMedia; resumePositionMs: number };
 type PlaybackContext = { profileId: string | null; deviceId: string | null };
 type Authorization = {
   sessionId: string;
+  streamToken: string;
   method: 'direct_play' | 'direct_stream' | 'transcode';
   streamUrl: string;
   contentType: string;
@@ -69,6 +70,16 @@ type PlayerMenu = 'playlist' | 'speed' | 'subtitles' | 'audio' | 'quality' | 'in
 type AudioTrack = { index: number; name: string; language: string };
 type QualityLevel = { index: number; label: string };
 type SubtitleTrack = { id: string; label: string; language: string; src: string; contentType: 'text/vtt' };
+type CastHandoff = {
+  accepted: true;
+  sessionId: string;
+  logicalSessionId: string;
+  method: Authorization['method'];
+  streamUrl: string;
+  contentType: string;
+  subtitleTracks: SubtitleTrack[];
+  tokenExpiresAt: string;
+};
 
 type CastMediaInfo = {
   metadata?: { title?: string; subtitle?: string };
@@ -84,11 +95,38 @@ type CastTrack = {
   language?: string;
 };
 type CastLoadRequest = { currentTime?: number; activeTrackIds?: number[] };
-type CastSession = { loadMedia(request: CastLoadRequest): Promise<void> };
+type CastMediaSession = {
+  editTracksInfo(
+    request: object,
+    success: () => void,
+    failure: (error: unknown) => void,
+  ): void;
+};
+type CastSession = {
+  loadMedia(request: CastLoadRequest): Promise<void>;
+  endSession(stopCastingMedia: boolean): void;
+  getMediaSession(): CastMediaSession | null;
+};
 type CastContext = {
   setOptions(options: { receiverApplicationId: string; autoJoinPolicy: string }): void;
   requestSession(): Promise<void>;
   getCurrentSession(): CastSession | null;
+};
+type CastRemotePlayer = {
+  currentTime: number;
+  duration: number;
+  isConnected: boolean;
+  isPaused: boolean;
+  playerState: string;
+  volumeLevel: number;
+};
+type CastRemotePlayerController = {
+  addEventListener(type: string, listener: () => void): void;
+  removeEventListener(type: string, listener: () => void): void;
+  playOrPause(): void;
+  seek(): void;
+  setVolumeLevel(): void;
+  stop(): void;
 };
 type CastWindow = Window & {
   __onGCastApiAvailable?: (available: boolean) => void;
@@ -96,6 +134,9 @@ type CastWindow = Window & {
     framework?: {
       CastContext: { getInstance(): CastContext };
       AutoJoinPolicy: { ORIGIN_SCOPED: string };
+      RemotePlayer: new () => CastRemotePlayer;
+      RemotePlayerController: new (player: CastRemotePlayer) => CastRemotePlayerController;
+      RemotePlayerEventType: { ANY_CHANGE: string };
     };
   };
   chrome?: {
@@ -105,6 +146,7 @@ type CastWindow = Window & {
         MediaInfo: new (url: string, contentType: string) => CastMediaInfo;
         GenericMediaMetadata: new () => { title?: string; subtitle?: string };
         LoadRequest: new (mediaInfo: CastMediaInfo) => CastLoadRequest;
+        EditTracksInfoRequest: new (activeTrackIds: number[]) => object;
         Track: new (trackId: number, trackType: string) => CastTrack;
         TrackType: { TEXT: string };
         TextTrackType: { SUBTITLES: string };
@@ -132,6 +174,9 @@ export function WebPlayer() {
   const mediaRef = useRef<PlayableMedia | null>(null);
   const resumeRef = useRef(0);
   const castingRef = useRef(false);
+  const castRemotePlayerRef = useRef<CastRemotePlayer | null>(null);
+  const castRemoteControllerRef = useRef<CastRemotePlayerController | null>(null);
+  const clearCastListenerRef = useRef<(() => void) | null>(null);
   const activeSubtitleRef = useRef<string | null>(null);
   const lastProgressAt = useRef(0);
   const requestNumber = useRef(0);
@@ -158,15 +203,18 @@ export function WebPlayer() {
   const saveProgress = useCallback(async (completed = false) => {
     const sessionId = sessionRef.current;
     const video = videoRef.current;
-    if (!sessionId || !video) return;
+    const remote = castingRef.current ? castRemotePlayerRef.current : null;
+    const positionSeconds = remote?.currentTime ?? video?.currentTime;
+    if (!sessionId || positionSeconds === undefined) return;
     const fallbackDuration = mediaRef.current?.file?.durationMs ?? undefined;
-    const durationMs = Number.isFinite(video.duration) && video.duration > 0
-      ? Math.round(video.duration * 1000)
+    const playbackDuration = remote?.duration ?? video?.duration;
+    const durationMs = typeof playbackDuration === 'number' && Number.isFinite(playbackDuration) && playbackDuration > 0
+      ? Math.round(playbackDuration * 1000)
       : fallbackDuration;
     await api(`/playback/sessions/${sessionId}/progress`, {
       method: 'PATCH',
       body: JSON.stringify({
-        positionMs: Math.max(0, Math.round(video.currentTime * 1000)),
+        positionMs: Math.max(0, Math.round(positionSeconds * 1000)),
         ...(durationMs ? { durationMs } : {}),
         completed,
       }),
@@ -177,10 +225,20 @@ export function WebPlayer() {
 
   const stop = useCallback(async () => {
     requestNumber.current += 1;
+    const wasCasting = castingRef.current;
+    if (wasCasting) await saveProgress(false).catch(() => undefined);
+    castingRef.current = false;
+    clearCastListenerRef.current?.();
+    clearCastListenerRef.current = null;
+    const castWindow = window as CastWindow;
+    if (wasCasting) {
+      castRemoteControllerRef.current?.stop();
+      castWindow.cast?.framework?.CastContext.getInstance().getCurrentSession()?.endSession(true);
+    }
     const sessionId = sessionRef.current;
     if (sessionId) {
       await Promise.allSettled([
-        saveProgress(false),
+        ...(wasCasting ? [] : [saveProgress(false)]),
         api(`/playback/sessions/${sessionId}`, { method: 'DELETE', keepalive: true }),
       ]);
     }
@@ -189,6 +247,8 @@ export function WebPlayer() {
     sessionRef.current = null;
     mediaRef.current = null;
     castingRef.current = false;
+    castRemotePlayerRef.current = null;
+    castRemoteControllerRef.current = null;
     setAuthorization(null);
     setSourceReady(false);
     setMedia(null);
@@ -201,6 +261,10 @@ export function WebPlayer() {
   }, [saveProgress]);
 
   const togglePlay = useCallback(() => {
+    if (castingRef.current && castRemoteControllerRef.current) {
+      castRemoteControllerRef.current.playOrPause();
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) void video.play().catch(() => undefined);
@@ -208,6 +272,13 @@ export function WebPlayer() {
   }, []);
 
   const seekBy = useCallback((seconds: number) => {
+    const remote = castRemotePlayerRef.current;
+    const controller = castRemoteControllerRef.current;
+    if (castingRef.current && remote && controller) {
+      remote.currentTime = Math.max(0, Math.min(remote.duration || Number.MAX_SAFE_INTEGER, remote.currentTime + seconds));
+      controller.seek();
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     video.currentTime = Math.max(0, Math.min(video.duration || Number.MAX_SAFE_INTEGER, video.currentTime + seconds));
@@ -390,6 +461,7 @@ export function WebPlayer() {
     if (!authorization || !media) return;
     setCasting(true);
     setError('');
+    let handoffAccepted = false;
     try {
       if (!window.isSecureContext) {
         throw new Error('Chromecast fra webpanelet kræver HTTPS. Åbn serveren via en HTTPS-adresse og prøv igen.');
@@ -401,12 +473,16 @@ export function WebPlayer() {
       if (!framework || !mediaApi) throw new Error('Google Cast er ikke tilgængelig i denne browser.');
       const context = framework.CastContext.getInstance();
       await context.requestSession();
-      await api(`/playback/sessions/${authorization.sessionId}/cast-handoff`, { method: 'POST' });
+      const handoff = await api<CastHandoff>(`/playback/sessions/${authorization.sessionId}/cast-handoff`, {
+        method: 'POST',
+        body: JSON.stringify({ streamToken: authorization.streamToken }),
+      });
+      handoffAccepted = true;
       const castSession = context.getCurrentSession();
       if (!castSession) throw new Error('Chromecast-sessionen kunne ikke oprettes.');
       const mediaInfo = new mediaApi.MediaInfo(
-        new URL(authorization.streamUrl, window.location.href).href,
-        authorization.contentType,
+        handoff.streamUrl,
+        handoff.contentType,
       );
       const metadata = new mediaApi.GenericMediaMetadata();
       metadata.title = media.seriesTitle ?? media.title;
@@ -414,9 +490,9 @@ export function WebPlayer() {
       mediaInfo.metadata = metadata;
       mediaInfo.streamType = mediaApi.StreamType.BUFFERED;
       if (media.file?.durationMs) mediaInfo.duration = media.file.durationMs / 1000;
-      mediaInfo.tracks = authorization.subtitleTracks.map((subtitle, index) => {
+      mediaInfo.tracks = handoff.subtitleTracks.map((subtitle, index) => {
         const track = new mediaApi.Track(index + 1, mediaApi.TrackType.TEXT);
-        track.trackContentId = new URL(subtitle.src, window.location.href).href;
+        track.trackContentId = subtitle.src;
         track.trackContentType = subtitle.contentType;
         track.subtype = mediaApi.TextTrackType.SUBTITLES;
         track.name = subtitle.label;
@@ -425,13 +501,60 @@ export function WebPlayer() {
       });
       const request = new mediaApi.LoadRequest(mediaInfo);
       request.currentTime = videoRef.current?.currentTime ?? 0;
-      const selectedTrackIndex = authorization.subtitleTracks.findIndex((track) => track.id === activeSubtitleRef.current);
+      const selectedTrackIndex = handoff.subtitleTracks.findIndex((track) => track.id === activeSubtitleRef.current);
       if (selectedTrackIndex >= 0) request.activeTrackIds = [selectedTrackIndex + 1];
       await castSession.loadMedia(request);
       videoRef.current?.pause();
       castingRef.current = true;
+      const remotePlayer = new framework.RemotePlayer();
+      const remoteController = new framework.RemotePlayerController(remotePlayer);
+      let connectedOnce = remotePlayer.isConnected;
+      const onRemoteChange = () => {
+        if (!castingRef.current) return;
+        if (remotePlayer.isConnected) connectedOnce = true;
+        setCurrentTime(Number.isFinite(remotePlayer.currentTime) ? remotePlayer.currentTime : 0);
+        setDuration(Number.isFinite(remotePlayer.duration) ? remotePlayer.duration : 0);
+        setPaused(remotePlayer.isPaused);
+        setVolume(Number.isFinite(remotePlayer.volumeLevel) ? remotePlayer.volumeLevel : 1);
+        if (!remotePlayer.isConnected && connectedOnce) {
+          const resumeAt = remotePlayer.currentTime;
+          void saveProgress(false).catch(() => undefined);
+          castingRef.current = false;
+          clearCastListenerRef.current?.();
+          clearCastListenerRef.current = null;
+          castRemotePlayerRef.current = null;
+          castRemoteControllerRef.current = null;
+          setStatus('Chromecast afbrudt · fortsætter lokalt');
+          void api(`/playback/sessions/${authorization.sessionId}/cast-handoff`, { method: 'DELETE' })
+            .catch(() => undefined)
+            .finally(() => {
+              const video = videoRef.current;
+              if (!video) return;
+              if (Number.isFinite(resumeAt)) video.currentTime = resumeAt;
+              void video.play().catch(() => undefined);
+            });
+          return;
+        }
+        const now = Date.now();
+        if (now - lastProgressAt.current >= 10_000) {
+          lastProgressAt.current = now;
+          const completed = remotePlayer.duration > 0
+            && remotePlayer.currentTime >= remotePlayer.duration - 15;
+          void saveProgress(completed).catch(() => undefined);
+        }
+      };
+      remoteController.addEventListener(framework.RemotePlayerEventType.ANY_CHANGE, onRemoteChange);
+      clearCastListenerRef.current = () => {
+        remoteController.removeEventListener(framework.RemotePlayerEventType.ANY_CHANGE, onRemoteChange);
+      };
+      castRemotePlayerRef.current = remotePlayer;
+      castRemoteControllerRef.current = remoteController;
       setStatus('Chromecast');
     } catch (caught) {
+      if (handoffAccepted) {
+        await api(`/playback/sessions/${authorization.sessionId}/cast-handoff`, { method: 'DELETE' })
+          .catch(() => undefined);
+      }
       setError(caught instanceof Error ? caught.message : 'Chromecast kunne ikke startes.');
     } finally {
       setCasting(false);
@@ -439,6 +562,11 @@ export function WebPlayer() {
   };
 
   const selectPlaybackRate = (rate: number) => {
+    if (castingRef.current) {
+      setError('Afspilningshastighed kan ikke ændres på Google Cast Default Media Receiver.');
+      setMenu(null);
+      return;
+    }
     const video = videoRef.current;
     if (video) video.playbackRate = rate;
     setPlaybackRate(rate);
@@ -458,6 +586,17 @@ export function WebPlayer() {
   };
 
   const selectSubtitle = (id: string | null) => {
+    if (castingRef.current) {
+      const castWindow = window as CastWindow;
+      const mediaApi = castWindow.chrome?.cast?.media;
+      const castMedia = castWindow.cast?.framework?.CastContext.getInstance().getCurrentSession()?.getMediaSession();
+      if (mediaApi && castMedia) {
+        const selectedIndex = authorization?.subtitleTracks.findIndex((track) => track.id === id) ?? -1;
+        const request = new mediaApi.EditTracksInfoRequest(selectedIndex >= 0 ? [selectedIndex + 1] : []);
+        void new Promise<void>((resolve, reject) => castMedia.editTracksInfo(request, resolve, reject))
+          .catch(() => setError('Chromecast kunne ikke skifte undertekstspor.'));
+      }
+    }
     const tracks = Array.from(videoRef.current?.textTracks ?? []);
     authorization?.subtitleTracks.forEach((track, index) => {
       if (tracks[index]) tracks[index].mode = track.id === id ? 'showing' : 'disabled';
@@ -627,7 +766,14 @@ export function WebPlayer() {
               value={Math.min(currentTime, Math.max(duration, 1))}
               onChange={(event) => {
                 const next = Number(event.target.value);
-                if (videoRef.current) videoRef.current.currentTime = next;
+                const remote = castRemotePlayerRef.current;
+                const controller = castRemoteControllerRef.current;
+                if (castingRef.current && remote && controller) {
+                  remote.currentTime = next;
+                  controller.seek();
+                } else if (videoRef.current) {
+                  videoRef.current.currentTime = next;
+                }
                 setCurrentTime(next);
               }}
               aria-label="Afspilningsposition"
@@ -665,7 +811,14 @@ export function WebPlayer() {
               value={volume}
               onChange={(event) => {
                 const next = Number(event.target.value);
-                if (videoRef.current) videoRef.current.volume = next;
+                const remote = castRemotePlayerRef.current;
+                const controller = castRemoteControllerRef.current;
+                if (castingRef.current && remote && controller) {
+                  remote.volumeLevel = next;
+                  controller.setVolumeLevel();
+                } else if (videoRef.current) {
+                  videoRef.current.volume = next;
+                }
                 setVolume(next);
               }}
               aria-label="Lydstyrke"

@@ -5,7 +5,7 @@ import type { Response } from 'express';
 import { CurrentUser, Public } from '../common/auth';
 import { DirectStreamService } from './direct-stream.service';
 import { applyMediaCors } from './media-cors';
-import { AuthorizePlaybackDto } from './playback.dto';
+import { AuthorizePlaybackDto, CastHandoffDto } from './playback.dto';
 import { PlaybackService } from './playback.service';
 import { StreamReservationService } from './stream-reservation.service';
 import { SubtitleStreamService } from './subtitle-stream.service';
@@ -43,8 +43,18 @@ export class PlaybackController {
   }
 
   @Post('sessions/:id/cast-handoff')
-  castHandoff(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
-    return this.playback.handoffToCast(actor, id);
+  castHandoff(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: CastHandoffDto,
+    @Headers('origin') origin: string | undefined,
+  ) {
+    return this.playback.handoffToCast(actor, id, dto, origin);
+  }
+
+  @Delete('sessions/:id/cast-handoff')
+  cancelCastHandoff(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.playback.cancelCastHandoff(actor, id);
   }
 
   @Get('sessions/:id/transcode-status')
