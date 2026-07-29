@@ -16,7 +16,7 @@ jobs:
       API_PORT: 3001
       DATABASE_URL: postgresql://bbmedia:bbmedia_pass@localhost:5432/bbmedia_test?schema=public
       REDIS_URL: redis://localhost:6379
-      CORS_ORIGIN: http://localhost:5555
+      CORS_ORIGIN: http://localhost:6555
       JWT_SECRET: ci-only-secret-ci-only-secret-ci-only-secret-ci-only-secret-ci-only-secret
       JWT_ACCESS_TTL_SECONDS: 900
       JWT_REFRESH_TTL_DAYS: 30
@@ -128,9 +128,9 @@ jobs:
           test "$(docker inspect --format '{{.State.Health.Status}}' "$api_id")" = "healthy"
           test "$(docker inspect --format '{{.State.Status}}' "$worker_id")" = "running"
           test "$(docker inspect --format '{{.State.Status}}' "$transcoder_id")" = "running"
-          curl --fail --silent --show-error http://127.0.0.1:5555/api/v1/system/health
+          curl --fail --silent --show-error http://127.0.0.1:6555/api/v1/system/health
 
-          api_base="http://127.0.0.1:5555/api/v1"
+          api_base="http://127.0.0.1:6555/api/v1"
           curl --fail --silent --show-error \
             -H 'content-type: application/json' \
             -d '{"accountName":"CI Account","serverName":"CI Media","adminDisplayName":"CI Admin","adminEmail":"ci@example.test","adminPassword":"ci-password-123456","language":"da","timezone":"Europe/Copenhagen","mountPath":"/media"}' \
@@ -202,7 +202,7 @@ jobs:
             -H 'origin: https://cast.example.test' \
             -D /tmp/bb-media-subtitle-headers \
             -o /tmp/bb-media-subtitle.vtt \
-            "http://127.0.0.1:5555$subtitle_url"
+            "http://127.0.0.1:6555$subtitle_url"
           grep -Eiq '^access-control-allow-origin: https://cast\.example\.test' /tmp/bb-media-subtitle-headers
           grep -Fxq 'WEBVTT' /tmp/bb-media-subtitle.vtt
           grep -Fq '00:00:00.000 --> 00:00:00.900' /tmp/bb-media-subtitle.vtt
@@ -211,7 +211,7 @@ jobs:
             -H 'origin: https://cast.example.test' \
             -D /tmp/bb-media-stream-headers \
             -o /tmp/bb-media-stream-body \
-            "http://127.0.0.1:5555$stream_url"
+            "http://127.0.0.1:6555$stream_url"
           grep -Eq '^HTTP/[0-9.]+ 206' /tmp/bb-media-stream-headers
           grep -Eiq '^access-control-allow-origin: https://cast\.example\.test' /tmp/bb-media-stream-headers
           test "$(wc -c < /tmp/bb-media-stream-body)" -eq 32
@@ -246,7 +246,7 @@ jobs:
           test "$(jq -r '.method' <<<"$transcode_authorization")" = "transcode"
           transcode_state=""
           for _ in $(seq 1 90); do
-            transcode_status="$(curl --fail --silent --show-error "http://127.0.0.1:5555$transcode_status_url")"
+            transcode_status="$(curl --fail --silent --show-error "http://127.0.0.1:6555$transcode_status_url")"
             transcode_state="$(jq -r '.state' <<<"$transcode_status")"
             if [ "$transcode_state" = "ready" ] || [ "$transcode_state" = "failed" ]; then break; fi
             sleep 1
@@ -260,19 +260,19 @@ jobs:
             -H 'origin: https://cast.example.test' \
             -D /tmp/bb-media-master-headers \
             -o /tmp/bb-media-master.m3u8 \
-            "http://127.0.0.1:5555$transcode_stream_url"
+            "http://127.0.0.1:6555$transcode_stream_url"
           grep -Eiq '^access-control-allow-origin: https://cast\.example\.test' /tmp/bb-media-master-headers
           grep -Eq '^#EXT-X-STREAM-INF:.*BANDWIDTH=[1-9][0-9]*.*RESOLUTION=320x240' /tmp/bb-media-master.m3u8
           variant_path="$(grep -E '^stream\.m3u8\?token=' /tmp/bb-media-master.m3u8 | head -n1)"
           test -n "$variant_path"
           curl --fail --silent --show-error \
             -o /tmp/bb-media-stream.m3u8 \
-            "http://127.0.0.1:5555/api/v1/playback/sessions/$transcode_session_id/hls/$variant_path"
+            "http://127.0.0.1:6555/api/v1/playback/sessions/$transcode_session_id/hls/$variant_path"
           segment_path="$(grep -E '^segment[0-9]{5}\.ts\?token=' /tmp/bb-media-stream.m3u8 | head -n1)"
           test -n "$segment_path"
           curl --fail --silent --show-error \
             -o /tmp/bb-media-segment.ts \
-            "http://127.0.0.1:5555/api/v1/playback/sessions/$transcode_session_id/hls/$segment_path"
+            "http://127.0.0.1:6555/api/v1/playback/sessions/$transcode_session_id/hls/$segment_path"
           test -s /tmp/bb-media-segment.ts
           curl --fail --silent --show-error \
             -X DELETE \

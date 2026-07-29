@@ -328,3 +328,5 @@ Denne leverance tilføjer komplet administrativ onboarding uden SMTP:
 Produktionsdomænet er `https://media.boltbytes.com`, mens Docker fortsat bruger host-port `6555` som intern upstream. DNS, certifikat, Nginx Proxy Manager, firewall, Range-streaming, fejlsøgning og rollback er dokumenteret i [`docs/domain-nginx-proxy-manager.md`](docs/domain-nginx-proxy-manager.md).
 
 Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, planlagte scans/file-watcher, manuel metadata-match, hardware-transcoding, egen Chromecast receiver samt Android- og TV-klienter.
+
+CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, så health-, Direct Play-, subtitle-, HLS- og transcode-kontroller rammer den publicerede testport.
