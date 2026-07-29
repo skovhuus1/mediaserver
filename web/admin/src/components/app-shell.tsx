@@ -9,18 +9,30 @@ import {
   Gauge,
   Home,
   Library,
+  LogOut,
   MonitorPlay,
   Settings,
   ShieldCheck,
   Sparkles,
+  UserRound,
   Users,
 } from 'lucide-react';
 import Link from 'next/link';
-import { Suspense, type ReactNode } from 'react';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { Suspense, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Brand } from './brand';
+import { api, logoutSession, type SessionUser } from '@/lib/api';
 import { t } from '@/lib/messages';
 import { WebPlayer } from './web-player';
+
+type Notification = {
+  id: string;
+  severity: string;
+  source: string;
+  code: string;
+  message: string;
+  timestamp: string;
+};
 
 const admin = [
   { label: 'Dashboard', icon: Home, href: '/' },
@@ -40,8 +52,13 @@ export function AppShell({ children, rail }: { children: ReactNode; rail: ReactN
 }
 
 function AppShellContent({ children, rail }: { children: ReactNode; rail: ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const currentQuery = searchParams.toString();
   const isActive = (href: string) => {
     const [targetPath, targetQuery = ''] = href.split('?');
@@ -50,6 +67,33 @@ function AppShellContent({ children, rail }: { children: ReactNode; rail: ReactN
     const targetParams = new URLSearchParams(targetQuery);
     return Array.from(targetParams.entries()).every(([key, value]) => searchParams.get(key) === value);
   };
+  const loadNotifications = useCallback(async () => {
+    setNotifications(await api<Notification[]>('/system/errors'));
+  }, []);
+
+  useEffect(() => {
+    void api<SessionUser>('/auth/me').then(setUser).catch(() => undefined);
+    void loadNotifications().catch(() => undefined);
+  }, [loadNotifications]);
+
+  useEffect(() => {
+    const closeMenus = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setNotificationsOpen(false);
+      setAccountOpen(false);
+    };
+    window.addEventListener('keydown', closeMenus);
+    return () => window.removeEventListener('keydown', closeMenus);
+  }, []);
+
+  const activeProfile = user?.profiles.find((profile) => profile.id === user.activeProfileId) ?? user?.profiles[0];
+  const displayName = user?.displayName ?? 'Admin';
+  const avatarLetter = (activeProfile?.name ?? displayName).slice(0, 1).toUpperCase();
+
+  async function logout() {
+    await logoutSession().catch(() => undefined);
+    router.replace('/login');
+  }
 
   return (
     <div className="app-shell">
@@ -68,10 +112,65 @@ function AppShellContent({ children, rail }: { children: ReactNode; rail: ReactN
       <header className="topbar">
         <div className="admin-context"><ShieldCheck size={17} /><span>Serveradministration</span></div>
         <div className="top-actions">
-          <Link className="settings-button" href="/watch"><MonitorPlay size={15} />Kundevisning</Link>
-          <Link className="settings-button" href="/?admin=settings"><Settings size={15} />{t.settings}</Link>
-          <MonitorPlay size={18} /><Bell size={18} />
-          <span className="avatar">A</span><span>Admin</span><ChevronDown size={14} />
+          <Link className="settings-button" href="/?admin=settings" aria-label="Åbn indstillinger">
+            <Settings size={15} />{t.settings}
+          </Link>
+          <Link className="top-icon-button" href="/watch" aria-label="Skift til kundevisning" title="Kundevisning">
+            <MonitorPlay size={18} />
+          </Link>
+          <div className="top-action-menu">
+            <button
+              className="top-icon-button"
+              type="button"
+              aria-label="Vis notifikationer"
+              aria-expanded={notificationsOpen}
+              onClick={() => {
+                setNotificationsOpen((open) => !open);
+                setAccountOpen(false);
+                void loadNotifications().catch(() => undefined);
+              }}
+            >
+              <Bell size={18} />
+              {notifications.length > 0 && <span className="notification-count">{Math.min(notifications.length, 99)}</span>}
+            </button>
+            {notificationsOpen && (
+              <section className="top-popover notification-popover" aria-label="Notifikationer">
+                <header><strong>Notifikationer</strong><Link href="/?admin=settings" onClick={() => setNotificationsOpen(false)}>Se fejllog</Link></header>
+                {!notifications.length && <p>Ingen registrerede serverfejl.</p>}
+                {notifications.slice(0, 6).map((notification) => (
+                  <article key={notification.id}>
+                    <span className={`notification-dot ${notification.severity}`} />
+                    <div><strong>{notification.source}</strong><p>{notification.message}</p><time>{new Date(notification.timestamp).toLocaleString('da-DK')}</time></div>
+                  </article>
+                ))}
+              </section>
+            )}
+          </div>
+          <div className="top-action-menu">
+            <button
+              className="account-button"
+              type="button"
+              aria-label="Åbn Admin-menu"
+              aria-expanded={accountOpen}
+              onClick={() => {
+                setAccountOpen((open) => !open);
+                setNotificationsOpen(false);
+              }}
+            >
+              <span className="avatar">{avatarLetter || 'A'}</span>
+              <span>{displayName}</span>
+              <ChevronDown size={14} />
+            </button>
+            {accountOpen && (
+              <nav className="top-popover account-popover" aria-label="Admin-menu">
+                <div className="account-summary"><span className="avatar">{avatarLetter || 'A'}</span><div><strong>{displayName}</strong><small>{activeProfile?.name ?? user?.email}</small></div></div>
+                <Link href="/watch" onClick={() => setAccountOpen(false)}><MonitorPlay size={16} />Kundevisning</Link>
+                <Link href="/profiles" onClick={() => setAccountOpen(false)}><UserRound size={16} />Skift profil</Link>
+                <Link href="/?admin=settings" onClick={() => setAccountOpen(false)}><Settings size={16} />Indstillinger</Link>
+                <button type="button" onClick={() => void logout()}><LogOut size={16} />Log ud</button>
+              </nav>
+            )}
+          </div>
         </div>
       </header>
       <main className="main-content">{children}</main>

@@ -46,6 +46,26 @@ export function clearSession(): void {
   window.localStorage.removeItem('bb_refresh_token');
 }
 
+export async function logoutSession(): Promise<void> {
+  const currentRefreshToken = refreshToken();
+  const currentAccessToken = accessToken();
+  try {
+    if (currentRefreshToken && currentAccessToken) {
+      await fetch('/api/v1/auth/logout', {
+        method: 'POST',
+        cache: 'no-store',
+        headers: {
+          authorization: `Bearer ${currentAccessToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ refreshToken: currentRefreshToken }),
+      });
+    }
+  } finally {
+    clearSession();
+  }
+}
+
 export async function selectProfile(profileId: string): Promise<void> {
   const currentRefreshToken = refreshToken();
   if (!currentRefreshToken) {

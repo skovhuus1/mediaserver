@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { Brand } from './brand';
 import { WebPlayer } from './web-player';
-import { clearSession, type SessionUser } from '@/lib/api';
+import { logoutSession, type SessionUser } from '@/lib/api';
 
 export function CustomerShell({ user, children }: { user: SessionUser; children: ReactNode }) {
   const router = useRouter();
@@ -27,8 +27,8 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
     const target = new URLSearchParams(query);
     return Array.from(target.entries()).every(([key, value]) => searchParams.get(key) === value);
   };
-  function logout() {
-    clearSession();
+  async function logout() {
+    await logoutSession().catch(() => undefined);
     router.replace('/login');
   }
   return (
@@ -40,7 +40,7 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
         <div className="watch-account">
           {isAdmin && <Link className="admin-return" href="/"><ChevronLeft size={15} />Admin</Link>}
           <Link className="profile-button" href="/profiles"><span>{activeProfile?.name.slice(0, 1).toUpperCase() ?? <UserRound size={15} />}</span>{activeProfile?.name ?? user.displayName}</Link>
-          <button onClick={logout} aria-label="Log ud"><LogOut size={16} /></button>
+          <button onClick={() => void logout()} aria-label="Log ud"><LogOut size={16} /></button>
         </div>
       </header>
       <main className="watch-main">{children}</main>
