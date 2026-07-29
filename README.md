@@ -261,3 +261,18 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 - Startsidens mediekort, katalogets posters og “Fortsæt med at se” viser nu et `4K`-badge, når den analyserede fil er mindst 3840 pixels bred eller 2160 pixels høj.
 - Et separat `HDR`-badge vises kun, når ffprobe-data er klassificeret som HDR10, HLG eller Dolby Vision. 4K SDR fejlkategoriseres derfor ikke som HDR.
 - API’et udleder HDR-status server-side med den fælles video-signal-detektor og returnerer kun det normaliserede `hdr`-felt; den komplette ffprobe-payload eksponeres ikke til webklienten.
+## TVDB sæson-/episode-metadata og serieside (2026-07-29)
+
+- TVDB-workerens serieflow bruger nu den officielle `series/{id}/episodes/default/{lang}`-kontrakt med pagination til at matche lokale `SxxExx`-filer mod TVDB’s standard episodeorden.
+- Metadatajobbet gemmer canonical serienavn, serieoversigt, serieposter/backdrop, TVDB-serie-id, sæson-id/poster samt episode-id, titel, beskrivelse, premieredato og still-billede.
+- Databasemigrationen er additiv. Eksisterende biblioteker backfilles ved at vælge `Serier` og køre metadata fra adminindstillingerne; lokale filstier og scannerens sæson-/episodenumre ændres ikke.
+- Seriesiden har sæsonvælger, episode-stills, lokaliserede titler/beskrivelser og korrekt attribution til TheTVDB.com.
+- `Afspil næste episode` bruger den aktive profils playback-historik: en påbegyndt episode fortsættes, afsluttede episoder springes over, og derefter vælges første resterende episode i sæson-/episodeorden.
+- API’et returnerer kun normaliserede metadata- og HDR-felter. Rå ffprobe-data fjernes fra katalog-, detalje-, historik- og næste-episode-responser.
+- TVDB-kontrakten er dokumenteret i den [officielle v4 Swagger](https://thetvdb.github.io/v4-api/) og TVDB anbefaler lokal caching frem for klientkald direkte til udbyderen.
+
+### Kendte rester
+
+- Alternate/DVD/streaming episode orders kan endnu ikke vælges manuelt; standardordenen bruges.
+- Manuel metadata-matchning ved forkerte eller tvetydige serienavne mangler.
+- TVDB-liveflow kræver fortsat en gyldig nøgle på installationsserveren og verificeres først dér.

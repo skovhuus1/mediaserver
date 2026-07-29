@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser } from '../common/auth';
@@ -18,6 +18,11 @@ export class PlaybackHistoryController {
   @Get('history/continue')
   continueWatching(@CurrentUser() actor: AuthenticatedUser) {
     return this.history.continueWatching(actor);
+  }
+
+  @Get('history/series-next')
+  nextEpisode(@CurrentUser() actor: AuthenticatedUser, @Query('seriesTitle') seriesTitle: string) {
+    return this.history.nextEpisode(actor, seriesTitle);
   }
 
   @Patch('sessions/:id/progress')

@@ -14,9 +14,16 @@ type CatalogItem = {
   type: string;
   category: string | null;
   seriesTitle: string | null;
+  seriesDisplayTitle?: string | null;
+  seriesOverview?: string | null;
+  seriesMetadataProviderId?: string | null;
   releaseYear: number | null;
+  releaseDate?: string | null;
   seasonNumber: number | null;
+  seasonMetadataProviderId?: string | null;
+  seasonPosterPath?: string | null;
   episodeNumber: number | null;
+  episodeStillPath?: string | null;
   episodeCount?: number;
   overview?: string | null;
   rating?: number | null;
@@ -53,7 +60,9 @@ type CatalogResponse = {
 
 type DetailState =
   | { kind: 'media'; item: CatalogItem }
-  | { kind: 'series'; item: CatalogItem; episodes: CatalogItem[] };
+  | { kind: 'series'; item: CatalogItem; episodes: CatalogItem[]; next: SeriesNext | null };
+
+type SeriesNext = { media: CatalogItem; resumePositionMs: number };
 
 const emptyCatalog: CatalogResponse = {
   items: [],
@@ -117,8 +126,11 @@ export function CatalogView() {
           pageSize: '100',
           sort: 'title',
         });
-        const episodes = await api<CatalogResponse>(`/media/catalog?${params.toString()}`);
-        setDetail({ kind: 'series', item, episodes: episodes.items });
+        const [episodes, next] = await Promise.all([
+          api<CatalogResponse>(`/media/catalog?${params.toString()}`),
+          api<SeriesNext | null>(`/playback/history/series-next?seriesTitle=${encodeURIComponent(item.seriesTitle ?? item.title)}`),
+        ]);
+        setDetail({ kind: 'series', item, episodes: episodes.items, next });
       } else {
         setDetail({ kind: 'media', item: await api<CatalogItem>(`/media/${encodeURIComponent(item.id)}`) });
       }
@@ -205,26 +217,48 @@ function DetailContent({ detail }: { detail: DetailState }) {
       <span className={`detail-art${imageUrl(item.backdropPath, 'w780') ? ' has-image' : ''}`} style={imageStyle(item.backdropPath, 'w780')}>{item.type === 'movie' ? <Film size={38} /> : <Tv size={38} />}</span>
       <span className="eyebrow">{item.category ?? item.type}</span>
       <h2>{item.title}</h2>
-      <p>{item.releaseYear ? `${item.releaseYear} · ` : ''}{item.library?.name ?? 'BoltBytes bibliotek'}</p>
+      <p>{item.releaseYear ? `${item.releaseYear} ? ` : ''}{item.library?.name ?? 'BoltBytes bibliotek'}</p>
       {item.overview && <p className="media-overview">{item.overview}</p>}
-      {item.rating !== null && item.rating !== undefined && <p className="metadata-credit">TMDB rating {item.rating.toFixed(1)}/10 · Metadata via TMDB</p>}
+      {item.rating !== null && item.rating !== undefined && <p className="metadata-credit">TMDB rating {item.rating.toFixed(1)}/10</p>}
+      {item.metadataProvider === 'tvdb' && <p className="metadata-credit">Metadata via <a href="https://thetvdb.com/" target="_blank" rel="noreferrer">TheTVDB.com</a></p>}
+      {item.metadataProvider === 'tmdb' && <p className="metadata-credit">Metadata via TMDB</p>}
       {detail.kind !== 'series' && <button className={playerStyles.playButton} onClick={() => requestPlayback(item)}><Play size={16} /> Afspil</button>}
       {detail.kind === 'series' ? (
-        <div className="episode-list">
-          {detail.episodes.map((episode) => (
-            <button className={playerStyles.episodeButton} onClick={() => requestPlayback(episode)} key={episode.id}><strong>{episodeLabel(episode)}</strong><span>{episode.title}</span><small>{durationLabel(episode.file?.durationMs)}</small></button>
-          ))}
-        </div>
+        <SeriesEpisodes key={item.seriesTitle ?? item.title} episodes={detail.episodes} next={detail.next} />
       ) : (
         <dl className="detail-facts">
           <div><dt>Type</dt><dd>{episodeLabel(item)}</dd></div>
           <div><dt>Status</dt><dd>{item.file?.status ?? 'Uden fil'}</dd></div>
           <div><dt>Video</dt><dd>{item.file?.videoCodec ?? item.codec ?? 'Ukendt'}</dd></div>
-          <div><dt>Længde</dt><dd>{durationLabel(item.file?.durationMs)}</dd></div>
+          <div><dt>L?ngde</dt><dd>{durationLabel(item.file?.durationMs)}</dd></div>
           <div><dt>Placering</dt><dd><FolderOpen size={13} /> {item.file?.relativePath ?? 'Ikke tilknyttet'}</dd></div>
         </dl>
       )}
     </>
+  );
+}
+
+function SeriesEpisodes({ episodes, next }: { episodes: CatalogItem[]; next: SeriesNext | null }) {
+  const seasons = Array.from(new Set(episodes.map((episode) => episode.seasonNumber ?? 0))).sort((left, right) => left - right);
+  const [season, setSeason] = useState(seasons[0] ?? 0);
+  const visible = episodes
+    .filter((episode) => (episode.seasonNumber ?? 0) === season)
+    .sort((left, right) => (left.episodeNumber ?? 0) - (right.episodeNumber ?? 0));
+  return (
+    <div className="episode-list">
+      {next && <button className={playerStyles.playButton} onClick={() => requestPlayback(next.media, next.resumePositionMs)}><Play size={16} /> {next.resumePositionMs > 0 ? 'Forts?t episode' : 'Afspil n?ste episode'} ? {episodeLabel(next.media)}</button>}
+      <nav className="season-tabs" aria-label="S?soner">
+        {seasons.map((value) => <button className={season === value ? 'active' : ''} onClick={() => setSeason(value)} key={value}>{value === 0 ? 'Specials' : `S?son ${value}`}</button>)}
+      </nav>
+      {visible.map((episode) => (
+        <button className={`${playerStyles.episodeButton} ${playerStyles.episodeRich}`} onClick={() => requestPlayback(episode)} key={episode.id}>
+          <span className={playerStyles.episodeStill} style={imageStyle(episode.episodeStillPath ?? episode.seasonPosterPath, 'w500')} />
+          <strong>{episodeLabel(episode)}</strong>
+          <span className={playerStyles.episodeCopy}><b>{episode.title}</b><small>{episode.overview ?? (episode.releaseDate ? new Date(episode.releaseDate).toLocaleDateString('da-DK') : 'Episodebeskrivelse afventer')}</small></span>
+          <small>{durationLabel(episode.file?.durationMs)}</small>
+        </button>
+      ))}
+    </div>
   );
 }
 

@@ -413,8 +413,14 @@ model MediaItem {
   height               Int?
   category             String?
   seriesTitle          String?           @map("series_title")
+  seriesDisplayTitle   String?           @map("series_display_title")
+  seriesOverview       String?           @map("series_overview")
+  seriesMetadataProviderId String?        @map("series_metadata_provider_id")
   seasonNumber         Int?              @map("season_number")
+  seasonMetadataProviderId String?        @map("season_metadata_provider_id")
+  seasonPosterPath     String?            @map("season_poster_path")
   episodeNumber        Int?              @map("episode_number")
+  episodeStillPath     String?            @map("episode_still_path")
   releaseYear          Int?              @map("release_year")
   overview             String?
   rating               Float?
@@ -436,6 +442,7 @@ model MediaItem {
   @@index([accountId, type])
   @@index([accountId, category])
   @@index([accountId, seriesTitle, seasonNumber])
+  @@index([accountId, seriesMetadataProviderId])
   @@index([accountId, metadataProvider, metadataProviderId])
   @@map("media_items")
 }
