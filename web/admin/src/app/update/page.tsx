@@ -1,6 +1,15 @@
 'use client';
 
-import { Check, Circle, CircleAlert, LoaderCircle, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
+import {
+  Check,
+  Circle,
+  CircleAlert,
+  LoaderCircle,
+  RefreshCw,
+  RotateCcw,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from '@/components/app-shell';
 import { api, type ApiFailure } from '@/lib/api';
@@ -51,6 +60,7 @@ export default function UpdatePage() {
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [serverUnavailable, setServerUnavailable] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
 
@@ -124,6 +134,24 @@ export default function UpdatePage() {
     }
   }
 
+  async function resetUpdater() {
+    setResetting(true);
+    setMessage('');
+    try {
+      const resetProgress = await api<UpdateProgress>('/system/update/reset', {
+        method: 'POST',
+      });
+      setProgress(resetProgress);
+      setBusy(false);
+      setStatus(await api<UpdateStatus>('/system/update/status'));
+      setMessage('Updaterstatus er nulstillet. Du kan nu kontrollere eller installere igen.');
+    } catch (failure) {
+      setMessage(failureMessage(failure, 'Updateren kunne ikke nulstilles'));
+    } finally {
+      setResetting(false);
+    }
+  }
+
   useEffect(() => {
     void check();
     void loadProgress();
@@ -190,6 +218,16 @@ export default function UpdatePage() {
         <div className="update-actions">
           <button onClick={() => void check()} disabled={Boolean(updating)}><RefreshCw size={16} />{t.checkUpdate}</button>
           <button className="primary" onClick={() => void apply()} disabled={Boolean(updating || !status?.hasUpdate || !status?.canApply)}><Sparkles size={16} />{updating ? 'Opdaterer...' : t.applyUpdate}</button>
+          {progress && progress.state !== 'idle' && progress.state !== 'completed' && (
+            <button
+              className="reset"
+              onClick={() => void resetUpdater()}
+              disabled={resetting}
+            >
+              <RotateCcw size={16} />
+              {resetting ? 'Nulstiller...' : 'Nulstil updater'}
+            </button>
+          )}
         </div>
       </section>
     </AppShell>

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseRunnerProgress, readUpdateProgress } from './updater-progress';
+import {
+  isActiveRunnerState,
+  parseRunnerProgress,
+  readUpdateProgress,
+} from './updater-progress';
 
 describe('updater progress', () => {
   it('uses the last structured runner marker and ignores compose output', () => {
@@ -26,6 +30,17 @@ describe('updater progress', () => {
     });
   });
 
+  it('parses a marker wrapped in terminal colour codes', () => {
+    expect(parseRunnerProgress(
+      '\u001b[91mBB_UPDATE_PROGRESS|65|failed|2026-07-29T19:48:34Z|Docker build fejlede\u001b[0m',
+    )).toMatchObject({
+      state: 'failed',
+      phase: 'failed',
+      percent: 65,
+      error: 'Docker build fejlede',
+    });
+  });
+
   it('sanitizes malformed persisted progress', () => {
     expect(readUpdateProgress({ state: 'unknown', percent: 900 })).toMatchObject({
       state: 'idle',
@@ -33,4 +48,20 @@ describe('updater progress', () => {
       runId: null,
     });
   });
+});
+
+describe('updater runner state', () => {
+  it.each(['created', 'running', 'restarting', 'paused'])(
+    'blocks reset while runner state is %s',
+    (state) => {
+      expect(isActiveRunnerState(state)).toBe(true);
+    },
+  );
+
+  it.each(['exited', 'dead', 'removing', '', null])(
+    'allows reset when runner state is %s',
+    (state) => {
+      expect(isActiveRunnerState(state)).toBe(false);
+    },
+  );
 });

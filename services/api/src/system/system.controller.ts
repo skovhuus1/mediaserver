@@ -290,4 +290,10 @@ export class SystemController {
   updateApply(@CurrentUser() actor: AuthenticatedUser) {
     return this.updater.apply(actor.accountId);
   }
+
+  @Post('update/reset')
+  @Roles('admin')
+  updateReset(@CurrentUser() actor: AuthenticatedUser) {
+    return this.updater.reset(actor.accountId);
+  }
 }
