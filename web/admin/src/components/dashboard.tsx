@@ -1,9 +1,11 @@
 'use client';
 
 import { Activity, Database, Film, HardDrive, Radio, Server, Tv } from 'lucide-react';
+import { Cpu, MemoryStick } from 'lucide-react';
+import { sanitizeMediaTitle } from '@boltbytes/contracts';
 import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { api, clearSession, type SessionUser } from '@/lib/api';
 import { t } from '@/lib/messages';
 import { AppShell } from './app-shell';
@@ -26,11 +28,28 @@ type Session = {
   id: string;
   method: string;
   isCastSession: boolean;
+  runtimeState: string;
+  positionMs: number;
+  durationMs: number | null;
+  currentBitrate: number | null;
+  currentHeight: number | null;
+  bufferAheadMs: number | null;
+  lastHeartbeatAt: string;
+  startedAt: string;
   media: { title: string };
   device: { name: string; type: string };
   user: { displayName: string };
 };
 type Health = { status: string; version: string };
+type ServerStats = {
+  cpuPercent: number;
+  memoryUsedBytes: number;
+  memoryTotalBytes: number;
+  memoryPercent: number;
+  loadAverage: number[];
+  uptimeSeconds: number;
+  sampledAt: string;
+};
 type LibraryScan = {
   id: string;
   status: string;
@@ -53,6 +72,7 @@ export function Dashboard() {
   const [media, setMedia] = useState<Media[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [serverStats, setServerStats] = useState<ServerStats | null>(null);
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
@@ -71,19 +91,36 @@ export function Dashboard() {
         api<Library[]>('/libraries'),
         api<Session[]>('/playback/sessions'),
         api<Health>('/system/health', {}, false),
+        api<ServerStats>('/system/stats'),
       ]);
     }).then((result) => {
       if (!result) return;
-      const [mediaItems, libraryItems, activeSessions, status] = result;
+      const [mediaItems, libraryItems, activeSessions, status, stats] = result;
       setMedia(mediaItems);
       setLibraries(libraryItems);
       setSessions(activeSessions);
       setHealth(status);
+      setServerStats(stats);
     }).catch(() => {
       clearSession();
       router.replace('/login');
     }).finally(() => setLoading(false));
   }, [router]);
+
+  useEffect(() => {
+    if (!authorized) return;
+    const refreshRuntime = () => {
+      void Promise.all([
+        api<Session[]>('/playback/sessions'),
+        api<ServerStats>('/system/stats'),
+      ]).then(([activeSessions, stats]) => {
+        setSessions(activeSessions);
+        setServerStats(stats);
+      }).catch(() => undefined);
+    };
+    const timer = window.setInterval(refreshRuntime, 2_000);
+    return () => window.clearInterval(timer);
+  }, [authorized]);
 
   useEffect(() => {
     if (!authorized) return;
@@ -129,7 +166,7 @@ export function Dashboard() {
   if (!authorized) return <main className="watch-loading" aria-busy="true" />;
 
   return (
-    <AppShell rail={<StatusRail health={health} sessions={sessions} mediaCount={media.length} libraries={libraries} scanPending={scanPending} scanMessage={scanMessage} onScan={queueScan} />}>
+    <AppShell rail={<StatusRail health={health} stats={serverStats} sessions={sessions} mediaCount={media.length} libraries={libraries} scanPending={scanPending} scanMessage={scanMessage} onScan={queueScan} />}>
       {adminView ? <ManagementView view={adminView} /> : catalogMode ? <CatalogView /> : (
       <>
       <section className="hero-line">
@@ -188,6 +225,7 @@ function MediaSection({ title, items, emptyLabel, wide = false, onSeeAll }: { ti
 
 function StatusRail({
   health,
+  stats,
   sessions,
   mediaCount,
   libraries,
@@ -196,6 +234,7 @@ function StatusRail({
   onScan,
 }: {
   health: Health | null;
+  stats: ServerStats | null;
   sessions: Session[];
   mediaCount: number;
   libraries: Library[];
@@ -208,11 +247,15 @@ function StatusRail({
     <>
       <section className="rail-card">
         <div className="rail-title"><h3>{t.serverStatus}</h3><Server size={17} /></div>
-        <div className="status-disc"><span>{health?.status === 'ok' ? 'OK' : '...'}</span><small>API</small></div>
+        <div className="server-metrics">
+          <ServerMetric icon={<Cpu size={14} />} label="CPU" value={stats ? `${stats.cpuPercent.toFixed(0)}%` : '...'} percent={stats?.cpuPercent ?? 0} />
+          <ServerMetric icon={<MemoryStick size={14} />} label="RAM" value={stats ? `${stats.memoryPercent.toFixed(0)}%` : '...'} percent={stats?.memoryPercent ?? 0} />
+        </div>
         <dl className="status-list">
           <div><dt>Version</dt><dd>{health?.version ?? '...'}</dd></div>
           <div><dt>Medier</dt><dd>{mediaCount}</dd></div>
           <div><dt>Sessions</dt><dd>{sessions.length}</dd></div>
+          <div><dt>RAM</dt><dd>{stats ? `${formatBytes(stats.memoryUsedBytes)} / ${formatBytes(stats.memoryTotalBytes)}` : '...'}</dd></div>
         </dl>
       </section>
       <section className="rail-card sessions-card">
@@ -220,8 +263,14 @@ function StatusRail({
         {!sessions.length ? <div className="rail-empty"><Radio size={20} /><span>{t.noSessions}</span></div> : sessions.map((session) => (
           <div className="session-row" key={session.id}>
             <span className="session-poster"><Film size={16} /></span>
-            <span><strong>{session.media.title}</strong><small>{session.method.replace('_', ' ')} · {session.device.name}</small></span>
-            <i />
+            <span>
+              <strong>{sanitizeMediaTitle(session.media.title) || session.media.title}</strong>
+              <small>{session.user.displayName} · {session.device.name}{session.isCastSession ? ' · Cast' : ''}</small>
+              <small>{session.method.replaceAll('_', ' ')} · {session.currentHeight ? `${session.currentHeight}p` : 'original'} · {formatBitrate(session.currentBitrate)}</small>
+              <small>{session.runtimeState === 'buffering' ? 'Buffering' : session.runtimeState === 'paused' ? 'Pauset' : 'Afspiller'} · buffer {formatBuffer(session.bufferAheadMs)}</small>
+              {session.durationMs ? <span className="session-progress"><i style={{ width: `${Math.min(100, (session.positionMs / session.durationMs) * 100)}%` }} /></span> : null}
+            </span>
+            <i className={session.runtimeState === 'buffering' ? 'buffering' : session.runtimeState === 'paused' ? 'paused' : ''} />
           </div>
         ))}
       </section>
@@ -237,6 +286,22 @@ function StatusRail({
       </section>
     </>
   );
+}
+
+function ServerMetric({ icon, label, value, percent }: { icon: ReactNode; label: string; value: string; percent: number }) {
+  return <div><span>{icon}<small>{label}</small></span><strong>{value}</strong><i><b style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} /></i></div>;
+}
+
+function formatBytes(value: number): string {
+  return `${(value / (1024 ** 3)).toFixed(1)} GB`;
+}
+
+function formatBitrate(value: number | null): string {
+  return value && value > 0 ? `${(value / 1_000_000).toFixed(1)} Mbps` : 'bitrate afventer';
+}
+
+function formatBuffer(value: number | null): string {
+  return value === null ? 'ukendt' : `${(value / 1000).toFixed(1)} sek.`;
 }
 
 function LoadingGrid() {

@@ -5,6 +5,7 @@ import type { AuthenticatedUser, PlaybackMethod } from '@boltbytes/contracts';
 import { isPrivileged } from '../common/auth';
 import { readEnvironment } from '../config/environment';
 import { PrismaService } from '../prisma/prisma.service';
+import type { PlaybackHeartbeatDto } from './playback.dto';
 
 type ReservationInput = {
   actor: AuthenticatedUser;
@@ -96,7 +97,7 @@ export class StreamReservationService {
     return { ...session, streamToken };
   }
 
-  async heartbeat(actor: AuthenticatedUser, sessionId: string) {
+  async heartbeat(actor: AuthenticatedUser, sessionId: string, input: PlaybackHeartbeatDto = {}) {
     const session = await this.ownedSession(actor, sessionId);
     if (!['reserving', 'active', 'paused'].includes(session.status)) {
       throw new BadRequestException({ code: 'session_finished', message: 'The playback session is already finished' });
@@ -110,6 +111,12 @@ export class StreamReservationService {
       data: {
         lastHeartbeatAt: now,
         leaseExpiresAt: new Date(now.getTime() + this.leaseSeconds * 1000),
+        ...(input.runtimeState !== undefined ? { runtimeState: input.runtimeState } : {}),
+        ...(input.positionMs !== undefined ? { positionMs: input.positionMs } : {}),
+        ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+        ...(input.currentBitrate !== undefined ? { currentBitrate: input.currentBitrate } : {}),
+        ...(input.currentHeight !== undefined ? { currentHeight: input.currentHeight } : {}),
+        ...(input.bufferAheadMs !== undefined ? { bufferAheadMs: input.bufferAheadMs } : {}),
       },
     });
     if (result.count !== 1) throw new BadRequestException({ code: 'heartbeat_conflict', message: 'The session changed while heartbeat was processed' });

@@ -58,6 +58,7 @@ function AppShellContent({ children, rail }: { children: ReactNode; rail: ReactN
   const [user, setUser] = useState<SessionUser | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [clearingNotifications, setClearingNotifications] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const currentQuery = searchParams.toString();
   const isActive = (href: string) => {
@@ -69,6 +70,15 @@ function AppShellContent({ children, rail }: { children: ReactNode; rail: ReactN
   };
   const loadNotifications = useCallback(async () => {
     setNotifications(await api<Notification[]>('/system/errors'));
+  }, []);
+  const clearNotifications = useCallback(async () => {
+    setClearingNotifications(true);
+    try {
+      await api('/system/errors', { method: 'DELETE' });
+      setNotifications([]);
+    } finally {
+      setClearingNotifications(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -135,7 +145,7 @@ function AppShellContent({ children, rail }: { children: ReactNode; rail: ReactN
             </button>
             {notificationsOpen && (
               <section className="top-popover notification-popover" aria-label="Notifikationer">
-                <header><strong>Notifikationer</strong><Link href="/?admin=settings" onClick={() => setNotificationsOpen(false)}>Se fejllog</Link></header>
+                <header><strong>Notifikationer</strong><span><button disabled={!notifications.length || clearingNotifications} onClick={() => void clearNotifications()}>{clearingNotifications ? 'Rydder...' : 'Ryd alle'}</button><Link href="/?admin=settings" onClick={() => setNotificationsOpen(false)}>Se fejllog</Link></span></header>
                 {!notifications.length && <p>Ingen registrerede serverfejl.</p>}
                 {notifications.slice(0, 6).map((notification) => (
                   <article key={notification.id}>

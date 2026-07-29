@@ -5,6 +5,11 @@
 > aktuelle `stream_<n>.m3u8`- og `segment_<n>_<sekvens>.ts`-kontrakter samt
 > klientens `screenHeight`, pixel-ratio og estimerede netværkssignal.
 
+> Admin-dashboardet viser live CPU/RAM og seneste player-heartbeat med tilstand,
+> bitrate, opløsning og buffer. Notifikationer kan ryddes uden at slette
+> scanner-/jobhistorik. Kundeportalens topmenu skifter nu synligt mellem hjem,
+> film, serier og fortsæt, og tekniske release-tags skjules fra titler.
+
 BoltBytes Media Server er en selvhostet TypeScript-platform til administration og autoriseret afspilning af egne film og serier. Kodebasen er genopbygget fra bunden med server-side adgangskontrol, reproducerbar installation og en tydelig grænse mellem implementeret funktionalitet og kommende faser.
 
 ## Hurtig installation med Docker

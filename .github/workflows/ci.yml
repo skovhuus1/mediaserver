@@ -141,6 +141,10 @@ jobs:
             "$api_base/auth/login")"
           token="$(jq -er '.accessToken' <<<"$login")"
           test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/system/update/progress" | jq -r '.state')" = "idle"
+          server_stats="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/system/stats")"
+          jq -e '.cpuPercent >= 0 and .memoryTotalBytes > 0 and .sampledAt' <<<"$server_stats" >/dev/null
+          cleared_notifications="$(curl --fail --silent --show-error -X DELETE -H "authorization: Bearer $token" "$api_base/system/errors")"
+          jq -e '.clearedAt' <<<"$cleared_notifications" >/dev/null
           root_id="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/storage-roots" | jq -er '.[0].id')"
           library="$(curl --fail --silent --show-error \
             -H "authorization: Bearer $token" \
@@ -204,6 +208,16 @@ jobs:
           session_id="$(jq -er '.sessionId' <<<"$authorization")"
           stream_url="$(jq -er '.streamUrl' <<<"$authorization")"
           test "$(jq -r '.method' <<<"$authorization")" = "direct_play"
+          curl --fail --silent --show-error \
+            -X PATCH \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d '{"runtimeState":"buffering","positionMs":250,"durationMs":1000,"currentBitrate":800000,"currentHeight":240,"bufferAheadMs":1250}' \
+            "$api_base/playback/sessions/$session_id/heartbeat" >/dev/null
+          session_snapshot="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/playback/sessions" | jq -er --arg id "$session_id" '.[] | select(.id == $id)')"
+          test "$(jq -r '.runtimeState' <<<"$session_snapshot")" = "buffering"
+          test "$(jq -r '.currentBitrate' <<<"$session_snapshot")" -eq 800000
+          test "$(jq -r '.bufferAheadMs' <<<"$session_snapshot")" -eq 1250
           subtitle_url="$(jq -er '.subtitleTracks[] | select(.language == "da") | .src' <<<"$authorization")"
           curl --fail --silent --show-error \
             -H 'origin: https://cast.example.test' \
