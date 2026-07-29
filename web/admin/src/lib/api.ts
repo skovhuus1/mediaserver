@@ -10,6 +10,17 @@ type TokenPair = {
   refreshToken: string;
 };
 
+export type SessionUser = {
+  id: string;
+  accountId: string;
+  email: string;
+  displayName: string;
+  status: string;
+  roles: string[];
+  activeProfileId: string | null;
+  profiles: Array<{ id: string; name: string; isChildProfile: boolean }>;
+};
+
 type RefreshOutcome =
   | { status: 'refreshed' }
   | { status: 'invalid'; failure: ApiFailure }
@@ -33,6 +44,21 @@ export function saveSession(access: string, refresh: string): void {
 export function clearSession(): void {
   window.localStorage.removeItem('bb_access_token');
   window.localStorage.removeItem('bb_refresh_token');
+}
+
+export async function selectProfile(profileId: string): Promise<void> {
+  const currentRefreshToken = refreshToken();
+  if (!currentRefreshToken) {
+    throw { code: 'refresh_token_missing', message: 'Sessionen er udløbet. Log ind igen.' } satisfies ApiFailure;
+  }
+  const response = await fetch('/api/v1/auth/refresh', {
+    method: 'POST',
+    cache: 'no-store',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ refreshToken: currentRefreshToken, profileId }),
+  });
+  const tokens = await parseResponse<TokenPair>(response);
+  saveSession(tokens.accessToken, tokens.refreshToken);
 }
 
 function randomUuidV4(): string {

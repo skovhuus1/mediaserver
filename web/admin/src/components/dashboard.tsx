@@ -4,7 +4,7 @@ import { Activity, Database, Film, HardDrive, Radio, Server, Tv } from 'lucide-r
 import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { api, clearSession } from '@/lib/api';
+import { api, clearSession, type SessionUser } from '@/lib/api';
 import { t } from '@/lib/messages';
 import { AppShell } from './app-shell';
 import { CatalogView } from './catalog-view';
@@ -55,17 +55,26 @@ export function Dashboard() {
   const [health, setHealth] = useState<Health | null>(null);
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
   const [scanPending, setScanPending] = useState(false);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      api<unknown>('/auth/me'),
-      api<Media[]>('/media'),
-      api<Library[]>('/libraries'),
-      api<Session[]>('/playback/sessions'),
-      api<Health>('/system/health', {}, false),
-    ]).then(([, mediaItems, libraryItems, activeSessions, status]) => {
+    api<SessionUser>('/auth/me').then((session) => {
+      if (!session.roles.some((role) => role === 'admin' || role === 'operator')) {
+        router.replace('/watch');
+        return null;
+      }
+      setAuthorized(true);
+      return Promise.all([
+        api<Media[]>('/media'),
+        api<Library[]>('/libraries'),
+        api<Session[]>('/playback/sessions'),
+        api<Health>('/system/health', {}, false),
+      ]);
+    }).then((result) => {
+      if (!result) return;
+      const [mediaItems, libraryItems, activeSessions, status] = result;
       setMedia(mediaItems);
       setLibraries(libraryItems);
       setSessions(activeSessions);
@@ -77,11 +86,12 @@ export function Dashboard() {
   }, [router]);
 
   useEffect(() => {
+    if (!authorized) return;
     const timer = window.setInterval(() => {
       void api<Library[]>('/libraries').then(setLibraries).catch(() => undefined);
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [authorized]);
 
   const query = (searchParams.get('q') ?? '').trim().toLocaleLowerCase('da');
   const requestedType = searchParams.get('type');
@@ -115,6 +125,8 @@ export function Dashboard() {
       setScanPending(false);
     }
   };
+
+  if (!authorized) return <main className="watch-loading" aria-busy="true" />;
 
   return (
     <AppShell rail={<StatusRail health={health} sessions={sessions} mediaCount={media.length} libraries={libraries} scanPending={scanPending} scanMessage={scanMessage} onScan={queueScan} />}>

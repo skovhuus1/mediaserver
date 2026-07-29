@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Brand } from '@/components/brand';
-import { api, deviceFingerprint, saveSession, type ApiFailure } from '@/lib/api';
+import { api, deviceFingerprint, saveSession, type ApiFailure, type SessionUser } from '@/lib/api';
 import { t } from '@/lib/messages';
 
 type LoginResult = { accessToken: string; refreshToken: string };
@@ -31,7 +31,9 @@ export default function LoginPage() {
         }),
       }, false);
       saveSession(result.accessToken, result.refreshToken);
-      router.replace('/');
+      const session = await api<SessionUser>('/auth/me');
+      const isAdmin = session.roles.some((role) => role === 'admin' || role === 'operator');
+      router.replace(isAdmin ? '/' : session.profiles.length > 1 ? '/profiles' : '/watch');
     } catch (failure) {
       const apiFailure = failure as ApiFailure;
       setError(apiFailure.message ?? 'Login mislykkedes');
@@ -46,7 +48,7 @@ export default function LoginPage() {
         <Brand />
         <span className="eyebrow">SECURE ACCESS</span>
         <h1>{t.loginTitle}</h1>
-        <p>Administrer bibliotek, streams og serveropdateringer.</p>
+        <p>Log ind på din BoltBytes-server for at se medier eller administrere serveren.</p>
         <form onSubmit={submit}>
           <label>{t.email}<input name="email" type="email" autoComplete="email" required /></label>
           <label>{t.password}<input name="password" type="password" autoComplete="current-password" minLength={8} required /></label>

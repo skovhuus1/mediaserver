@@ -276,3 +276,10 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 - Alternate/DVD/streaming episode orders kan endnu ikke vælges manuelt; standardordenen bruges.
 - Manuel metadata-matchning ved forkerte eller tvetydige serienavne mangler.
 - TVDB-liveflow kræver fortsat en gyldig nøgle på installationsserveren og verificeres først dér.
+## Separat kundeportal og adminområde (2026-07-29)
+
+- Login router nu efter serverens roller: `admin`/`operator` åbner serveradministrationen, mens almindelige brugere åbner profilvalg eller `/watch`.
+- `/watch` er en separat kundeoplevelse med egen header, søgning, film, serier, fortsæt med at se, discovery-rækker, metadata, kvalitetsbadges og webplayer. Ingen serverstatus, logs, biblioteker, planer eller updater vises.
+- `/profiles` vælger aktiv profil ved sikker refresh-token-rotation. Playback-historik og fortsæt-position følger dermed den valgte profil.
+- Adminområdet har knappen `Kundevisning`, og kundeportalen viser `Admin`-returknappen kun for admin/operator-roller.
+- Admin-dashboardet kontrollerer rollen via `/auth/me`, før det kalder administrative endpoints. Serverens eksisterende `@Roles`-checks er fortsat den autoritative sikkerhedsgrænse; frontend-routing er kun UX-laget.
