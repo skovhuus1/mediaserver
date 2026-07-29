@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import type { AuthenticatedUser } from '@boltbytes/contracts';
+import { detectVideoSignalProfile, type AuthenticatedUser } from '@boltbytes/contracts';
 import { Prisma } from '@prisma/client';
 import { readdir, realpath } from 'node:fs/promises';
 import { posix } from 'node:path';
@@ -183,16 +183,14 @@ export class CatalogService {
             durationMs: true,
             videoCodec: true,
             audioCodec: true,
+            probe: true,
           },
         },
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
-    return items.map((item) => ({
-      ...item,
-      file: item.file ? { ...item.file, sizeBytes: item.file.sizeBytes.toString() } : null,
-    }));
+    return items.map((item) => this.serializeMedia(item));
   }
 
   async listCatalog(actor: AuthenticatedUser, query: CatalogQueryDto) {
@@ -294,6 +292,7 @@ export class CatalogService {
               durationMs: true,
               videoCodec: true,
               audioCodec: true,
+              probe: true,
             },
           },
         },
@@ -489,10 +488,15 @@ export class CatalogService {
     return where;
   }
 
-  private serializeMedia<T extends { file?: { sizeBytes: bigint } | null }>(item: T) {
+  private serializeMedia<T extends { file?: { sizeBytes: bigint; probe?: unknown } | null }>(item: T) {
+    const signal = detectVideoSignalProfile(item.file?.probe);
+    const file = item.file
+      ? (({ probe: _probe, ...publicFile }) => ({ ...publicFile, sizeBytes: item.file!.sizeBytes.toString() }))(item.file)
+      : null;
     return {
       ...item,
-      file: item.file ? { ...item.file, sizeBytes: item.file.sizeBytes.toString() } : null,
+      hdr: signal.hdr,
+      file,
     };
   }
 

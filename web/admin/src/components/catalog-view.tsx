@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { requestPlayback } from './web-player';
+import { PosterQualityBadges } from './poster-quality-badges';
 import playerStyles from './playback.module.css';
 
 type CatalogItem = {
@@ -22,6 +23,9 @@ type CatalogItem = {
   metadataProvider?: string | null;
   posterPath?: string | null;
   backdropPath?: string | null;
+  width?: number | null;
+  height?: number | null;
+  hdr?: 'hdr10' | 'hlg' | 'dolby_vision' | null;
   codec?: string | null;
   container?: string | null;
   library?: { id: string; name: string; type: string };
@@ -166,6 +170,7 @@ export function CatalogView() {
           {catalog.items.map((item, index) => (
             <button className="catalog-card" onClick={() => void openItem(item)} key={`${item.type}-${item.id}`}>
               <span className={`poster poster-${index % 6}${imageUrl(item.posterPath, 'w500') ? ' has-image' : ''}`} style={imageStyle(item.posterPath, 'w500')}>
+                <PosterQualityBadges media={item} />
                 {item.type === 'movie' ? <Film /> : <Tv />}
                 <span>{item.category ?? (item.type === 'series' ? 'Serie' : 'Ukategoriseret')}</span>
               </span>

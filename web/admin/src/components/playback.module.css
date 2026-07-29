@@ -442,6 +442,7 @@
 
 .continueArt {
   display: block;
+  position: relative;
   aspect-ratio: 16 / 9;
   background:
     linear-gradient(0deg, rgba(6, 8, 11, .32), transparent),

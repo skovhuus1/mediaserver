@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { AuthenticatedUser } from '@boltbytes/contracts';
+import { detectVideoSignalProfile, type AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { PlaybackProgressDto } from './playback-history.dto';
 import { normalizePlaybackProgress } from './playback-progress';
@@ -115,6 +115,9 @@ export class PlaybackHistoryService {
         backdropPath: entry.media.backdropPath,
         codec: entry.media.codec,
         container: entry.media.container,
+        width: entry.media.width,
+        height: entry.media.height,
+        hdr: detectVideoSignalProfile(entry.media.file?.probe).hdr,
         library: entry.media.library,
         file: entry.media.file
           ? { ...entry.media.file, sizeBytes: entry.media.file.sizeBytes.toString() }
