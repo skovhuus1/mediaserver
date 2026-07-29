@@ -1,5 +1,9 @@
 # BoltBytes Media Server
 
+> Docker-buildet prøver nu Prisma engine-downloaden op til fire gange med
+> stigende ventetid i både API- og worker-images. Midlertidige udfald mod
+> `binaries.prisma.sh` stopper derfor ikke updateren ved første netværksfejl.
+
 > Updateren kan nulstille en fastlåst persistent status direkte fra
 > adminpanelet. Nulstilling tillades kun, når Docker-runneren ikke længere er
 > aktiv. Runner-loggens statusmarkører håndterer også terminalfarvekoder, så en
