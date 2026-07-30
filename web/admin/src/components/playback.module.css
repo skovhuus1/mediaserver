@@ -837,7 +837,6 @@
     min-width: 55px;
   }
 
-  .optionControls button:last-child,
   .optionControls button span {
     display: none;
   }

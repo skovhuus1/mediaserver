@@ -162,7 +162,9 @@ export class RecommendationsService {
           signals,
           feedback.get(media.id) as 'like' | 'dislike' | 'hidden' | undefined,
         );
-        const title = sanitizeMediaTitle(media.seriesTitle ?? media.title);
+        const title = sanitizeMediaTitle(
+          media.seriesDisplayTitle ?? media.seriesTitle ?? media.title,
+        );
         return {
           id: media.id,
           mediaType: media.type === 'episode' ? 'series' : 'movie',
@@ -171,7 +173,7 @@ export class RecommendationsService {
           seriesDisplayTitle: media.seriesDisplayTitle,
           seriesMetadataProviderId: media.seriesMetadataProviderId,
           category: media.category ?? 'uncategorized',
-          summary: media.overview,
+          summary: media.seriesOverview ?? media.overview,
           posterPath: media.posterPath,
           backdropPath: media.backdropPath,
           releaseYear: media.releaseYear,
@@ -180,8 +182,10 @@ export class RecommendationsService {
             ? result.reason
             : 'Populært i dit lokale bibliotek',
           score: result.score,
-          dedupeKey: media.seriesTitle
-            ? `series:${normalizeRecommendationKey(media.seriesTitle)}`
+          dedupeKey: media.seriesMetadataProviderId
+            ? `series:provider:${media.seriesMetadataProviderId}`
+            : media.seriesTitle
+            ? `series:${normalizeRecommendationKey(media.seriesDisplayTitle ?? media.seriesTitle)}`
             : `movie:${media.releaseYear ?? 0}:${normalizeRecommendationKey(title)}`,
         } satisfies RankedRecommendation;
       })

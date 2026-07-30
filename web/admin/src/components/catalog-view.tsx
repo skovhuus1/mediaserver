@@ -123,20 +123,8 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
     if (key !== 'page') params.delete('page');
     router.push(`${basePath}?${params.toString()}`);
   };
-  const openItem = async (item: CatalogItem) => {
-    setDetailLoading(true);
-    setError(null);
-    try {
-      if (item.type === 'series' || item.type === 'episode') {
-        setDetail(await fetchSeriesDetail(item));
-      } else {
-        setDetail({ kind: 'media', item: await api<CatalogItem>(`/media/${encodeURIComponent(item.id)}`) });
-      }
-    } catch (failure) {
-      setError(errorMessage(failure));
-    } finally {
-      setDetailLoading(false);
-    }
+  const openItem = (item: CatalogItem) => {
+    router.push(`/watch/title/${encodeURIComponent(item.id)}`);
   };
   const heading = searchParams.get('q')
     ? `Søgning: ${searchParams.get('q')}`

@@ -74,9 +74,7 @@ function DiscoveryRow({ title, items, allHref }: { title: string; items: WatchIt
       <header><h2>{title}</h2><Link href={allHref}>Se alle <ArrowRight size={14} /></Link></header>
       <div>
         {items.slice(0, 6).map((item) => {
-          const href = item.type === 'series'
-            ? `/watch?type=series&media=${encodeURIComponent(item.id)}`
-            : `/watch?type=movie&media=${encodeURIComponent(item.id)}`;
+          const href = `/watch/title/${encodeURIComponent(item.id)}`;
           return <Link className="watch-card" href={href} key={`${item.type}-${item.id}`}><span className="watch-poster" style={posterStyle(item.posterPath)}><PosterQualityBadges media={item} /></span><strong>{item.title}</strong><small>{item.releaseYear ?? (item.type === 'series' ? 'Serie' : 'Film')}</small></Link>;
         })}
       </div>
