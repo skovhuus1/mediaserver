@@ -1,5 +1,11 @@
 # BoltBytes Media Server
 
+> Kundeportalen har nu server-side serieaggregater og en rigtig
+> `/watch/title/:id`-detaljeside med sæsoner, episoder, næste episode og resume.
+> Katalog og anbefalinger linker konsekvent til samme titelobjekt. Playeren
+> matcher lyd og undertekster på tværs af to- og trebogstavskoder, skifter HLS
+> niveau direkte og viser korrekt ikon for start og afslutning af fullscreen.
+
 > Docker-buildet prøver nu Prisma engine-downloaden op til fire gange med
 > stigende ventetid i både API- og worker-images. Midlertidige udfald mod
 > `binaries.prisma.sh` stopper derfor ikke updateren ved første netværksfejl.

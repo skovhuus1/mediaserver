@@ -16,6 +16,7 @@ import {
   Info,
   ListVideo,
   Maximize,
+  Minimize,
   Pause,
   Play,
   RotateCcw,
@@ -364,7 +365,9 @@ export function WebPlayer() {
           const defaultSubtitle = next.playbackPreferences.subtitleMode === 'off'
             ? null
             : next.playbackPreferences.preferredSubtitleLanguages
-                .map((language) => subtitleCandidates.find((track) => track.language === language))
+                .map((language) => subtitleCandidates.find(
+                  (track) => subtitleLanguageCode(track.language) === subtitleLanguageCode(language),
+                ))
                 .find(Boolean)?.id ?? null;
           activeSubtitleRef.current = defaultSubtitle;
           setActiveSubtitle(defaultSubtitle);
@@ -451,7 +454,9 @@ export function WebPlayer() {
         })));
         const preferredAudioTrack = authorization.playbackPreferences.preferredAudioLanguages
           .map((language) =>
-            hls.audioTracks.findIndex((track) => track.lang?.toLowerCase().startsWith(language)),
+            hls.audioTracks.findIndex(
+              (track) => subtitleLanguageCode(track.lang || '') === subtitleLanguageCode(language),
+            ),
           )
           .find((index) => index !== undefined && index >= 0);
         if (preferredAudioTrack !== undefined) {
@@ -692,7 +697,7 @@ export function WebPlayer() {
     const selected = normalizePlaybackQualitySelection(index, hls.levels.length);
     setQualitySelection(selected);
     setQualitySwitching(selected === -1 || selected === hls.currentLevel ? null : selected);
-    hls.nextLevel = selected;
+    hls.currentLevel = selected;
     setMenu(null);
   };
 
@@ -1130,7 +1135,10 @@ export function WebPlayer() {
                 </small>
                 <span>Kvalitet</span>
               </button>
-              <button onClick={() => void toggleFullscreen()}><Maximize /><span>{isFullscreen ? 'Afslut fuld skærm' : 'Fuld skærm'}</span></button>
+              <button onClick={() => void toggleFullscreen()}>
+                {isFullscreen ? <Minimize /> : <Maximize />}
+                <span>{isFullscreen ? 'Afslut fuld skærm' : 'Fuld skærm'}</span>
+              </button>
             </div>
           </div>
           <div className={styles.volume}>

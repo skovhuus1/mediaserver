@@ -332,6 +332,74 @@ export class CatalogService {
     return this.serializeMedia(item);
   }
 
+  async getMediaDetails(actor: AuthenticatedUser, mediaId: string) {
+    const seed = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      include: {
+        library: { select: { id: true, name: true, type: true } },
+        file: true,
+      },
+    });
+    if (!seed) {
+      throw new NotFoundException({
+        code: 'media_missing',
+        message: 'Media does not exist in this account',
+      });
+    }
+    if (seed.type !== 'episode') {
+      return { kind: 'movie' as const, item: this.serializeMedia(seed), seasons: [] };
+    }
+
+    const episodes = await this.prisma.mediaItem.findMany({
+      where: {
+        accountId: actor.accountId,
+        type: 'episode',
+        ...(seed.seriesMetadataProviderId
+          ? { seriesMetadataProviderId: seed.seriesMetadataProviderId }
+          : seed.seriesDisplayTitle
+            ? { seriesDisplayTitle: { equals: seed.seriesDisplayTitle, mode: 'insensitive' } }
+            : { seriesTitle: { equals: seed.seriesTitle ?? seed.title, mode: 'insensitive' } }),
+      },
+      include: {
+        library: { select: { id: true, name: true, type: true } },
+        file: true,
+      },
+      orderBy: [{ seasonNumber: 'asc' }, { episodeNumber: 'asc' }, { title: 'asc' }],
+    });
+    const representative = [...episodes].sort(
+      (left, right) => seriesMetadataScore(right) - seriesMetadataScore(left),
+    )[0] ?? seed;
+    const serializedEpisodes = episodes.map((episode) => this.serializeMedia(episode));
+    const seasonNumbers = [...new Set(episodes.map((episode) => episode.seasonNumber ?? 0))]
+      .sort((left, right) => left - right);
+    const releaseYears = episodes.flatMap((episode) =>
+      episode.releaseYear === null ? [] : [episode.releaseYear],
+    );
+    return {
+      kind: 'series' as const,
+      item: {
+        ...this.serializeMedia(representative),
+        id: seed.id,
+        type: 'series',
+        title: representative.seriesDisplayTitle
+          ?? sanitizeMediaTitle(representative.seriesTitle ?? representative.title),
+        overview: representative.seriesOverview ?? representative.overview,
+        releaseYear: releaseYears.length ? Math.min(...releaseYears) : null,
+        episodeCount: episodes.length,
+      },
+      seasons: seasonNumbers.map((number) => ({
+        number,
+        title: number === 0 ? 'Specials' : `Sæson ${number}`,
+        posterPath: episodes.find(
+          (episode) => (episode.seasonNumber ?? 0) === number && episode.seasonPosterPath,
+        )?.seasonPosterPath ?? null,
+        episodes: serializedEpisodes.filter(
+          (episode) => (episode.seasonNumber ?? 0) === number,
+        ),
+      })),
+    };
+  }
+
   async metadataStatus(actor: AuthenticatedUser) {
     const [latestJob, settings] = await Promise.all([
       this.prisma.systemJob.findFirst({

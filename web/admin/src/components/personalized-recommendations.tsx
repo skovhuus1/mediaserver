@@ -67,8 +67,8 @@ export function PersonalizedRecommendations() {
             <h1>{data.hero.title}</h1>
             <p>{data.hero.summary}</p>
             <div className={styles.actions}>
-              <Link href={data.hero.mediaType === 'movie' ? `/watch?play=${data.hero.id}` : `/watch?media=${data.hero.id}`}><Play size={17} fill="currentColor" />Afspil</Link>
-              <Link href={`/watch?media=${data.hero.id}`}><Info size={17} />Info</Link>
+              <Link href={data.hero.mediaType === 'movie' ? `/watch?play=${data.hero.id}` : `/watch/title/${data.hero.id}`}><Play size={17} fill="currentColor" />Afspil</Link>
+              <Link href={`/watch/title/${data.hero.id}`}><Info size={17} />Info</Link>
               {controls(data.hero)}
             </div>
           </div>
@@ -80,7 +80,7 @@ export function PersonalizedRecommendations() {
           <div data-horizontal-scroller>
             {section.items.map((item) => (
               <article className={styles.card} key={item.id}>
-                <Link href={`/watch?media=${item.id}`}>
+                <Link href={`/watch/title/${item.id}`}>
                   {item.posterPath ? <img src={item.posterPath} alt="" /> : <div className={styles.placeholder} />}
                   <strong>{item.title}</strong><small>{item.reason}</small>
                 </Link>

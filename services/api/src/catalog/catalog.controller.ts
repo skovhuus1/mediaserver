@@ -70,6 +70,11 @@ export class CatalogController {
     return this.catalog.metadataStatus(actor);
   }
 
+  @Get('media/:id/details')
+  mediaDetailPage(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.catalog.getMediaDetails(actor, id);
+  }
+
   @Post('media/metadata/jobs')
   @Roles('admin', 'operator')
   queueMetadata(@CurrentUser() actor: AuthenticatedUser, @Body() dto: QueueMetadataDto) {
