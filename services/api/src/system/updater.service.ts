@@ -162,6 +162,14 @@ export class UpdaterService {
     });
     try {
       const branch = await this.selectedBranch(accountId);
+      await this.advanceProgress(
+        accountId,
+        runId,
+        8,
+        'permissions',
+        'Kontrollerer repository-ejerskab.',
+      );
+      await this.repairRepositoryOwnership();
       before = (await this.run('git', ['rev-parse', 'HEAD'])).stdout.trim();
       await this.advanceProgress(accountId, runId, 12, 'worktree', 'Kontrollerer lokale ændringer.', { previousCommit: before });
       const dirty = (await this.run('git', ['status', '--porcelain', '--untracked-files=no'])).stdout.trim();
@@ -381,7 +389,7 @@ export class UpdaterService {
       '--volume',
       '/var/run/docker.sock:/var/run/docker.sock',
       '--volume',
-      `${this.repositoryPath}:${this.repositoryPath}`,
+      `${this.repositoryPath}:${this.repositoryPath}:ro`,
       '--workdir',
       this.repositoryPath,
       '--entrypoint',
@@ -390,6 +398,42 @@ export class UpdaterService {
       '-lc',
       'sh scripts/run-update.sh',
     ], 60_000);
+  }
+
+  private async repairRepositoryOwnership(): Promise<void> {
+    if (this.restartMode !== 'docker-compose') return;
+    const uid = process.getuid?.();
+    const gid = process.getgid?.();
+    const containerId = process.env.HOSTNAME;
+    if (uid === undefined || gid === undefined || !containerId) {
+      throw new ServiceUnavailableException({
+        code: 'update_ownership_repair_unavailable',
+        message: 'Updater could not determine the API process ownership',
+      });
+    }
+    const image = (
+      await this.run('docker', ['inspect', '--format={{.Image}}', containerId])
+    ).stdout.trim();
+    if (!image) {
+      throw new ServiceUnavailableException({
+        code: 'update_ownership_repair_unavailable',
+        message: 'Updater could not identify its Docker image',
+      });
+    }
+    await this.run('docker', [
+      'run',
+      '--rm',
+      '--user',
+      '0:0',
+      '--volume',
+      `${this.repositoryPath}:${this.repositoryPath}`,
+      '--entrypoint',
+      'chown',
+      image,
+      '-R',
+      `${uid}:${gid}`,
+      this.repositoryPath,
+    ], 120_000);
   }
 
   private async dockerRunnerProgress(): Promise<Partial<UpdateProgress> | null> {

@@ -1,5 +1,10 @@
 # BoltBytes Media Server
 
+> Docker-updateren reparerer repository-ejerskab til API-processens UID/GID
+> før Git-status, fetch og checkout. Build-runneren monterer derefter
+> kildekoden read-only, så root-kørslen ikke kan efterlade tracked filer eller
+> mapper, som næste opdatering ikke kan erstatte.
+
 > Kundeportalen har nu server-side serieaggregater og en rigtig
 > `/watch/title/:id`-detaljeside med sæsoner, episoder, næste episode og resume.
 > Katalog og anbefalinger linker konsekvent til samme titelobjekt. Playeren
