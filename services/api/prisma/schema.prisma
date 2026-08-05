@@ -388,6 +388,9 @@ model Library {
   storageRootId String        @map("storage_root_id")
   name          String
   type          LibraryType
+  autoScanEnabled Boolean      @default(false) @map("auto_scan_enabled")
+  scanIntervalMinutes Int      @default(60) @map("scan_interval_minutes")
+  lastScheduledScanAt DateTime? @map("last_scheduled_scan_at")
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")
   account       Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -441,6 +444,7 @@ model MediaItem {
   posterPath           String?           @map("poster_path")
   backdropPath         String?           @map("backdrop_path")
   metadataUpdatedAt    DateTime?         @map("metadata_updated_at")
+  metadataLocked       Boolean           @default(false) @map("metadata_locked")
   genres               Json?
   credits              Json?
   similarProviderIds   Json?             @map("similar_provider_ids")

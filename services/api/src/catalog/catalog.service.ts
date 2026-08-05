@@ -88,6 +88,8 @@ export class CatalogService {
         storageRootId: root.id,
         name: dto.name.trim(),
         type: dto.type,
+        autoScanEnabled: dto.autoScanEnabled,
+        scanIntervalMinutes: dto.scanIntervalMinutes,
         paths: { create: { path: resolvedPath, recursive: dto.recursive } },
       },
       include: { paths: true },
@@ -117,6 +119,8 @@ export class CatalogService {
           storageRootId: root.id,
           name: dto.name?.trim() ?? library.name,
           type: dto.type ?? library.type,
+          autoScanEnabled: dto.autoScanEnabled ?? library.autoScanEnabled,
+          scanIntervalMinutes: dto.scanIntervalMinutes ?? library.scanIntervalMinutes,
         },
       });
       await tx.libraryPath.deleteMany({ where: { libraryId: library.id } });
@@ -462,6 +466,73 @@ export class CatalogService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
+  async queueMediaMetadata(actor: AuthenticatedUser, mediaId: string) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: { id: true, type: true },
+    });
+    if (!media) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+    const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
+    if (!settings.tmdbToken && !settings.tvdbApiKey) {
+      throw new ConflictException({ code: 'metadata_provider_disabled', message: 'TMDB or TVDB must be configured first' });
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:media-metadata-item'),
+          hashtext(CAST(${mediaId} AS text))
+        )::text AS lock_result
+      `;
+      const active = await tx.systemJob.findFirst({
+        where: { accountId: actor.accountId, type: 'media.metadata', status: { in: ['queued', 'running'] } },
+      });
+      if (active) throw new ConflictException({ code: 'metadata_job_active', message: 'A metadata job is already queued or running' });
+      const job = await tx.systemJob.create({
+        data: {
+          accountId: actor.accountId,
+          type: 'media.metadata',
+          status: 'queued',
+          payload: { mediaId, onlyMissing: false, force: true, requestedBy: actor.sub },
+          maxAttempts: 3,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: actor.profileId,
+          action: 'media.metadata.refresh',
+          outcome: 'allowed',
+          code: 'media_metadata_refresh',
+          details: { mediaId, jobId: job.id },
+        },
+      });
+      return job;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  async setMetadataLock(actor: AuthenticatedUser, mediaId: string, locked: boolean) {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.mediaItem.updateMany({
+        where: { id: mediaId, accountId: actor.accountId },
+        data: { metadataLocked: locked },
+      });
+      if (!updated.count) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+      await tx.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: actor.profileId,
+          action: 'media.metadata.lock',
+          outcome: 'allowed',
+          code: 'media_metadata_lock',
+          details: { mediaId, locked },
+        },
+      });
+      return { id: mediaId, metadataLocked: locked };
+    });
+  }
+
   listScans(actor: AuthenticatedUser, libraryId: string) {
     return this.prisma.libraryScan.findMany({
       where: { accountId: actor.accountId, libraryId },
@@ -503,6 +574,7 @@ export class CatalogService {
           maxAttempts: 3,
         },
       });
+      await tx.library.update({ where: { id: library.id }, data: { lastScheduledScanAt: new Date() } });
       return tx.libraryScan.update({ where: { id: scan.id }, data: { jobId: job.id } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }

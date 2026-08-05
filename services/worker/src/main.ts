@@ -57,6 +57,7 @@ async function resolveConfiguredLibraryPath(
   }
 }
 let stopping = false;
+let lastLibraryScheduleCheck = 0;
 
 type ClaimedJob = SystemJob & { attemptNumber: number };
 type ProbeMetadata = {
@@ -206,6 +207,26 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
           discovered.add(relativePath);
           filesSeen += 1;
           const fileStat = await stat(resolvedPath);
+          const existingFile = await prisma.mediaFile.findUnique({
+            where: { libraryId_relativePath: { libraryId: library.id, relativePath } },
+            select: { id: true, sizeBytes: true, modifiedAt: true, status: true },
+          });
+          if (
+            existingFile
+            && existingFile.status !== 'missing'
+            && existingFile.sizeBytes === BigInt(fileStat.size)
+            && existingFile.modifiedAt.getTime() === fileStat.mtime.getTime()
+          ) {
+            await prisma.mediaFile.update({
+              where: { id: existingFile.id },
+              data: { lastSeenScanId: scan.id },
+            });
+            await prisma.libraryScan.update({
+              where: { id: scan.id },
+              data: { filesSeen, filesCreated, filesUpdated, errors },
+            });
+            return;
+          }
           let probe: ProbeMetadata | null = null;
           try {
             probe = await probeFile(resolvedPath);
@@ -606,7 +627,9 @@ async function enrichMetadata(job: ClaimedJob): Promise<void> {
   await enrichLibraryMetadata(prisma, {
     accountId: job.accountId,
     ...(typeof payload.libraryId === 'string' ? { libraryId: payload.libraryId } : {}),
+    ...(typeof payload.mediaId === 'string' ? { mediaId: payload.mediaId } : {}),
     onlyMissing: payload.onlyMissing === true,
+    force: payload.force === true,
     mediaType,
     onProgress: () => renewJobLease(job.id),
   });
@@ -859,6 +882,44 @@ async function ensureRecurringLeaseJob(): Promise<void> {
   });
 }
 
+async function queueDueLibraryScans(): Promise<void> {
+  const now = new Date();
+  const libraries = await prisma.library.findMany({
+    where: { autoScanEnabled: true },
+    include: { scans: { orderBy: { createdAt: 'desc' }, take: 1 } },
+  });
+  for (const library of libraries) {
+    const last = library.lastScheduledScanAt ?? library.scans[0]?.createdAt ?? null;
+    if (last && now.getTime() - last.getTime() < library.scanIntervalMinutes * 60_000) continue;
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:library-scan'),
+          hashtext(CAST(${library.id} AS text))
+        )::text AS lock_result
+      `;
+      const active = await tx.libraryScan.findFirst({
+        where: { libraryId: library.id, status: { in: ['queued', 'running'] } },
+      });
+      if (active) return;
+      const scan = await tx.libraryScan.create({
+        data: { accountId: library.accountId, libraryId: library.id, status: 'queued' },
+      });
+      const job = await tx.systemJob.create({
+        data: {
+          accountId: library.accountId,
+          type: 'library.scan',
+          status: 'queued',
+          payload: { libraryId: library.id, scanId: scan.id, requestedBy: 'scheduler' },
+          maxAttempts: 3,
+        },
+      });
+      await tx.libraryScan.update({ where: { id: scan.id }, data: { jobId: job.id } });
+      await tx.library.update({ where: { id: library.id }, data: { lastScheduledScanAt: now } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+}
+
 async function rescheduleRecurringJob(job: ClaimedJob): Promise<void> {
   const payload = job.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
@@ -880,6 +941,19 @@ async function loop(): Promise<void> {
   if (workerMode === 'jobs') await ensureRecurringLeaseJob();
   console.info(JSON.stringify({ level: 'info', component: 'worker', workerId, workerMode, message: 'Worker started' }));
   while (!stopping) {
+    if (workerMode === 'jobs' && Date.now() - lastLibraryScheduleCheck >= 30_000) {
+      lastLibraryScheduleCheck = Date.now();
+      try {
+        await queueDueLibraryScans();
+      } catch (error) {
+        console.error(JSON.stringify({
+          level: 'error',
+          component: 'library-scheduler',
+          workerId,
+          error: error instanceof Error ? error.message : 'Unknown library scheduler failure',
+        }));
+      }
+    }
     const job = await claimNextJob();
     if (!job) {
       await delay(pollIntervalMs);

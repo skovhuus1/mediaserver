@@ -137,4 +137,33 @@ describe('library scan queue concurrency', () => {
       else process.env.TMDB_API_TOKEN = previousToken;
     }
   });
+
+  it('queues an item metadata refresh and preserves an audited metadata lock', async () => {
+    const account = await prisma.account.create({ data: { name: `metadata-item-test-${Date.now()}` } });
+    accountId = account.id;
+    const user = await prisma.user.create({
+      data: {
+        accountId,
+        email: `metadata-item-${Date.now()}@example.test`,
+        displayName: 'Metadata item',
+        passwordHash: 'unused',
+      },
+    });
+    const root = await prisma.storageRoot.create({ data: { accountId, label: 'metadata-item', mountPath: '/media' } });
+    const library = await prisma.library.create({ data: { accountId, storageRootId: root.id, name: 'Metadata item', type: 'movie' } });
+    const media = await prisma.mediaItem.create({ data: { accountId, libraryId: library.id, title: 'Arrival', type: 'movie' } });
+    const actor: AuthenticatedUser = { sub: user.id, accountId, profileId: null, deviceId: null, roles: ['admin'] };
+    const previousToken = process.env.TMDB_API_TOKEN;
+    process.env.TMDB_API_TOKEN = 'integration-test-token';
+    try {
+      await expect(catalog.setMetadataLock(actor, media.id, true)).resolves.toEqual({ id: media.id, metadataLocked: true });
+      const job = await catalog.queueMediaMetadata(actor, media.id);
+      expect(job.payload).toMatchObject({ mediaId: media.id, force: true, onlyMissing: false });
+      expect(await prisma.auditLog.count({ where: { accountId, action: { in: ['media.metadata.lock', 'media.metadata.refresh'] } } })).toBe(2);
+      expect(await prisma.mediaItem.findUnique({ where: { id: media.id } })).toMatchObject({ metadataLocked: true });
+    } finally {
+      if (previousToken === undefined) delete process.env.TMDB_API_TOKEN;
+      else process.env.TMDB_API_TOKEN = previousToken;
+    }
+  });
 });

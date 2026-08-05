@@ -28,6 +28,7 @@ type CatalogItem = {
   overview?: string | null;
   rating?: number | null;
   metadataProvider?: string | null;
+  metadataLocked?: boolean;
   posterPath?: string | null;
   backdropPath?: string | null;
   width?: number | null;
@@ -82,6 +83,7 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const adminMode = basePath !== '/watch';
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -124,7 +126,21 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
     router.push(`${basePath}?${params.toString()}`);
   };
   const openItem = (item: CatalogItem) => {
-    router.push(`/watch/title/${encodeURIComponent(item.id)}`);
+    if (!adminMode) {
+      router.push(`/watch/title/${encodeURIComponent(item.id)}`);
+      return;
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('media', item.id);
+    router.push(`${basePath}?${params.toString()}`);
+  };
+  const closeDetail = () => {
+    setDetail(null);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('media');
+    params.delete('info');
+    params.delete('play');
+    router.push(`${basePath}?${params.toString()}`);
   };
   const heading = searchParams.get('q')
     ? `Søgning: ${searchParams.get('q')}`
@@ -185,10 +201,10 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
         <button disabled={catalog.page >= catalog.totalPages || loading} onClick={() => updateFilter('page', String(catalog.page + 1))}>Næste <ChevronRight size={15} /></button>
       </nav>
       {(detail || detailLoading) && (
-        <div className="detail-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setDetail(null)}>
+        <div className="detail-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeDetail()}>
           <aside className={`media-detail${detail?.kind === 'series' ? ' series-detail' : ''}`} role="dialog" aria-modal="true" aria-label="Mediedetaljer">
-            <button className="detail-close" onClick={() => setDetail(null)} aria-label="Luk"><X size={18} /></button>
-            {detailLoading && !detail ? <p>Henter mediedetaljer...</p> : detail && <DetailContent detail={detail} />}
+            <button className="detail-close" onClick={closeDetail} aria-label="Luk"><X size={18} /></button>
+            {detailLoading && !detail ? <p>Henter mediedetaljer...</p> : detail && <DetailContent key={detail.item.id} detail={detail} adminMode={adminMode} />}
           </aside>
         </div>
       )}
@@ -196,8 +212,39 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
   );
 }
 
-function DetailContent({ detail }: { detail: DetailState }) {
+function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: boolean }) {
   const item = detail.item;
+  const [metadataLocked, setMetadataLocked] = useState(item.metadataLocked ?? false);
+  const [metadataBusy, setMetadataBusy] = useState(false);
+  const [metadataMessage, setMetadataMessage] = useState('');
+
+  async function refreshMetadata() {
+    setMetadataBusy(true);
+    setMetadataMessage('');
+    try {
+      await api(`/media/${encodeURIComponent(item.id)}/metadata/jobs`, { method: 'POST' });
+      setMetadataMessage('Metadataopdateringen er sat i kø.');
+    } catch (failure) {
+      setMetadataMessage(errorMessage(failure));
+    } finally {
+      setMetadataBusy(false);
+    }
+  }
+
+  async function toggleMetadataLock() {
+    setMetadataBusy(true);
+    setMetadataMessage('');
+    try {
+      const next = !metadataLocked;
+      await api(`/media/${encodeURIComponent(item.id)}/metadata-lock`, { method: 'PATCH', body: JSON.stringify({ locked: next }) });
+      setMetadataLocked(next);
+      setMetadataMessage(next ? 'Automatiske metadataændringer er låst.' : 'Automatiske metadataændringer er tilladt.');
+    } catch (failure) {
+      setMetadataMessage(errorMessage(failure));
+    } finally {
+      setMetadataBusy(false);
+    }
+  }
   return (
     <>
       <span className={`detail-art${imageUrl(item.backdropPath, 'w780') ? ' has-image' : ''}`} style={imageStyle(item.backdropPath, 'w780')}>{item.type === 'movie' ? <Film size={38} /> : <Tv size={38} />}</span>
@@ -208,6 +255,7 @@ function DetailContent({ detail }: { detail: DetailState }) {
       {item.rating !== null && item.rating !== undefined && <p className="metadata-credit">TMDB rating {item.rating.toFixed(1)}/10</p>}
       {item.metadataProvider === 'tvdb' && <p className="metadata-credit">Metadata via <a href="https://thetvdb.com/" target="_blank" rel="noreferrer">TheTVDB.com</a></p>}
       {item.metadataProvider === 'tmdb' && <p className="metadata-credit">Metadata via TMDB</p>}
+      {adminMode && <div className="metadata-actions"><button disabled={metadataBusy} onClick={() => void refreshMetadata()}>{metadataBusy ? 'Arbejder...' : 'Opdater metadata'}</button><button disabled={metadataBusy} onClick={() => void toggleMetadataLock()}>{metadataLocked ? 'Lås metadata op' : 'Lås metadata'}</button>{metadataMessage && <small>{metadataMessage}</small>}</div>}
       {detail.kind !== 'series' && <button className={playerStyles.playButton} onClick={() => requestPlayback(item)}><Play size={16} /> Afspil</button>}
       {detail.kind === 'series' ? (
         <SeriesEpisodes key={item.seriesTitle ?? item.title} episodes={detail.episodes} next={detail.next} />

@@ -45,7 +45,9 @@ export async function enrichLibraryMetadata(
   input: {
     accountId: string;
     libraryId?: string;
+    mediaId?: string;
     onlyMissing: boolean;
+    force?: boolean;
     mediaType?: 'all' | 'movie' | 'series';
     onProgress: () => Promise<void>;
   },
@@ -57,7 +59,9 @@ export async function enrichLibraryMetadata(
   const items = await prisma.mediaItem.findMany({
     where: {
       accountId: input.accountId,
+      ...(input.mediaId ? { id: input.mediaId } : {}),
       ...(input.libraryId ? { libraryId: input.libraryId } : {}),
+      ...(!input.force ? { metadataLocked: false } : {}),
       type: {
         in: input.mediaType === 'movie' ? ['movie'] : input.mediaType === 'series' ? ['episode'] : ['movie', 'episode'],
       },

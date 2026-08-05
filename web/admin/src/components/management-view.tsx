@@ -7,7 +7,7 @@ import { api, type ApiFailure } from '@/lib/api';
 
 type Root = { id: string; label: string; mountPath: string; isReadOnly: boolean };
 type Scan = { id: string; status: string; filesSeen: number; filesCreated: number; errors: number; error: string | null };
-type Library = { id: string; name: string; type: string; storageRoot: Root; paths: Array<{ path: string; recursive: boolean }>; scans: Scan[] };
+type Library = { id: string; name: string; type: string; autoScanEnabled: boolean; scanIntervalMinutes: number; lastScheduledScanAt: string | null; storageRoot: Root; paths: Array<{ path: string; recursive: boolean }>; scans: Scan[] };
 type DirectoryListing = { currentPath: string; parentPath: string | null; directories: Array<{ name: string; path: string }> };
 type UserProfile = {
   id: string;
@@ -85,6 +85,8 @@ function LibrariesView() {
   const [libraryName, setLibraryName] = useState('');
   const [libraryType, setLibraryType] = useState('movie');
   const [recursive, setRecursive] = useState(true);
+  const [autoScanEnabled, setAutoScanEnabled] = useState(false);
+  const [scanIntervalMinutes, setScanIntervalMinutes] = useState(60);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -107,6 +109,13 @@ function LibrariesView() {
 
   useEffect(() => { void refresh().catch((error) => setMessage(errorMessage(error))); }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void api<Library[]>('/libraries').then(setLibraries).catch(() => undefined);
+    }, 3_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -114,7 +123,7 @@ function LibrariesView() {
     try {
       await api(editingId ? `/libraries/${editingId}` : '/libraries', {
         method: editingId ? 'PATCH' : 'POST',
-        body: JSON.stringify({ storageRootId: selectedRoot, name: libraryName, type: libraryType, path: selectedPath, recursive }),
+        body: JSON.stringify({ storageRootId: selectedRoot, name: libraryName, type: libraryType, path: selectedPath, recursive, autoScanEnabled, scanIntervalMinutes }),
       });
       setMessage(editingId ? 'Biblioteket er opdateret.' : 'Biblioteket er oprettet.');
       cancelEdit();
@@ -134,6 +143,8 @@ function LibrariesView() {
       setLibraryName(library.name);
       setLibraryType(library.type);
       setRecursive(library.paths[0]?.recursive ?? true);
+      setAutoScanEnabled(library.autoScanEnabled);
+      setScanIntervalMinutes(library.scanIntervalMinutes);
       setSelectedRoot(library.storageRoot.id);
       await browse(library.storageRoot.id, library.paths[0]?.path);
     } catch (error) {
@@ -148,6 +159,8 @@ function LibrariesView() {
     setLibraryName('');
     setLibraryType('movie');
     setRecursive(true);
+    setAutoScanEnabled(false);
+    setScanIntervalMinutes(60);
   }
 
   async function remove(library: Library) {
@@ -190,7 +203,9 @@ function LibrariesView() {
           <label>Navn<input value={libraryName} onChange={(event) => setLibraryName(event.target.value)} required placeholder="Film" /></label>
           <label>Type<select value={libraryType} onChange={(event) => setLibraryType(event.target.value)}><option value="movie">Film</option><option value="series">Serier</option><option value="mixed">Blandet</option></select></label>
           <label>Valgt mappe<input value={selectedPath} readOnly /></label>
-          <label><input type="checkbox" checked={recursive} onChange={(event) => setRecursive(event.target.checked)} /> Scan undermapper</label>
+          <label className="management-check"><input type="checkbox" checked={recursive} onChange={(event) => setRecursive(event.target.checked)} /> Scan undermapper</label>
+          <label className="management-check"><input type="checkbox" checked={autoScanEnabled} onChange={(event) => setAutoScanEnabled(event.target.checked)} /> Automatisk ændringsscan</label>
+          <label>Scaninterval i minutter<input type="number" min={5} max={10_080} value={scanIntervalMinutes} disabled={!autoScanEnabled} onChange={(event) => setScanIntervalMinutes(Number(event.target.value))} /><small>Workeren kontrollerer biblioteket uden at genanalysere uændrede filer.</small></label>
           <div className="folder-picker">
             <button type="button" disabled={!listing?.parentPath} onClick={() => listing?.parentPath && void browse(selectedRoot, listing.parentPath)}>Et niveau op</button>
             {listing?.directories.map((directory) => <button type="button" key={directory.path} onClick={() => void browse(selectedRoot, directory.path)}>{directory.name}</button>)}
@@ -204,7 +219,7 @@ function LibrariesView() {
           {libraries.map((library) => {
             const latest = library.scans[0];
             const active = latest?.status === 'queued' || latest?.status === 'running';
-            return <div className="data-row" key={library.id}><div><strong>{library.name}</strong><small>{library.type} · {library.paths[0]?.path}</small><small>Scan: {latest?.status ?? 'aldrig kørt'}{latest ? ` · set ${latest.filesSeen} · nye ${latest.filesCreated} · fejl ${latest.errors}` : ''}</small>{latest?.error && <small className="scan-error">{latest.error}</small>}</div><div className="row-actions"><button disabled={busy || active} onClick={() => void edit(library)}>Rediger</button><button disabled={busy || active} onClick={() => void scan(library.id)}>Scan nu</button><button disabled={busy || active} onClick={() => void remove(library)}>Slet</button></div></div>;
+            return <div className="data-row" key={library.id}><div><strong>{library.name}</strong><small>{library.type} · {library.paths[0]?.path}</small><small>Automatik: {library.autoScanEnabled ? `hver ${library.scanIntervalMinutes} min.` : 'deaktiveret'}{library.lastScheduledScanAt ? ` · senest sat i kø ${new Date(library.lastScheduledScanAt).toLocaleString('da-DK')}` : ''}</small><small>Scan: {latest?.status ?? 'aldrig kørt'}{latest ? ` · set ${latest.filesSeen} · nye ${latest.filesCreated} · fejl ${latest.errors}` : ''}</small>{latest?.error && <small className="scan-error">{latest.error}</small>}</div><div className="row-actions"><button disabled={busy || active} onClick={() => void edit(library)}>Rediger</button><button disabled={busy || active} onClick={() => void scan(library.id)}>Scan nu</button><button disabled={busy || active} onClick={() => void remove(library)}>Slet</button></div></div>;
           })}
         </div>
       </div>
