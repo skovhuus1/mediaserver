@@ -19,6 +19,17 @@ export class CreateLibraryDto {
   @IsOptional()
   @IsBoolean()
   recursive = true;
+
+  @IsOptional()
+  @IsBoolean()
+  autoScanEnabled = false;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(10_080)
+  scanIntervalMinutes = 60;
 }
 
 export class UpdateLibraryDto {
@@ -43,6 +54,17 @@ export class UpdateLibraryDto {
   @IsOptional()
   @IsBoolean()
   recursive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  autoScanEnabled?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(10_080)
+  scanIntervalMinutes?: number;
 }
 
 export class BrowseLibraryDirectoriesDto {
@@ -149,4 +171,9 @@ export class QueueMetadataDto {
   @IsOptional()
   @IsIn(['all', 'movie', 'series'])
   mediaType: 'all' | 'movie' | 'series' = 'all';
+}
+
+export class SetMetadataLockDto {
+  @IsBoolean()
+  locked!: boolean;
 }

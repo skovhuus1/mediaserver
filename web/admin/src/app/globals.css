@@ -508,6 +508,12 @@ a { color: inherit; text-decoration: none; }
 .management-form label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; }
 .management-form label > span { color: #d8dbe1; font-size: 10px; font-weight: 650; }
 .management-form label > small { color: #6f7782; font-size: 8px; line-height: 1.4; }
+.management-form .management-check { display: flex; align-items: center; gap: 9px; color: #d8dbe1; font-size: 10px; }
+.management-form .management-check input { min-height: 0; width: 16px; height: 16px; margin: 0; accent-color: #9a5bec; }
+.metadata-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.metadata-actions button { padding: 8px 11px; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; color: #f5f2fa; background: #151a20; cursor: pointer; }
+.metadata-actions button:hover:not(:disabled) { border-color: rgba(177,104,255,.55); }
+.metadata-actions small { flex-basis: 100%; color: var(--muted); }
 .server-settings-form { margin-top: 18px; }
 .server-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px 18px; }
 .server-settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 5px; padding-top: 16px; border-top: 1px solid var(--line); }

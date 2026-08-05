@@ -163,6 +163,8 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Atomisk stream reservation med Prisma-kompatibel, namespaced PostgreSQL advisory lock, frisk `READ COMMITTED`-visning efter låseventet, lease/heartbeat og kryptografisk stream-token.
 - Vedvarende worker-kø med `FOR UPDATE SKIP LOCKED`, jobforsøg, retry/backoff og lease-cleanup.
 - Manuel biblioteksscanning via durable `library.scan` jobs med sikker realpath-kontrol, symlink-afvisning, `ffprobe`-metadata og markering af manglende filer uden automatisk sletning.
+- Valgfri planlagt biblioteksscanning pr. bibliotek fra hvert 5. minut til hver 7. dag. Workeren bruger durable jobs og PostgreSQL advisory locks, så parallelle workerinstanser ikke opretter dobbelte scanninger.
+- Inkrementel ændringsdetektion sammenligner filstørrelse og ændringstid og genbruger eksisterende probe-data for uændrede filer. Nye, ændrede og tidligere manglende filer analyseres fortsat med `ffprobe`.
 - Direkte medielevering med HTTP `HEAD`, single-range `GET`, `206 Partial Content`, suffix ranges og hash-valideret session-token; query strings udelades fra API-logs, og stream-access logs er deaktiveret i nginx.
 - Integreret fuldskærms-webafspiller med egen tidslinje, play/pause, 10-sekunders hop, lydstyrke, hastighed, lydspor, faktiske undertekstspor, kvalitetsvalg, information, tastaturstyring og responsivt mobillayout. Server-side authorize, kortlivet stream-token, 30-sekunders lease-heartbeat, fremdriftslagring hvert 10. sekund og sikker frigivelse af stream-plads ved stop er bevaret.
 - Konto-, bruger- og profilafgrænset playback-historik med idempotent upsert, positions-clamping, automatisk afslutning ved 90 procent og en live `Fortsæt med at se`-sektion, der genoptager fra den gemte position.
@@ -178,6 +180,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Valgfri TMDB-metadata gennem durable, deduplikerede `media.metadata` jobs. En vellykket scan køer kun manglende metadata, mens admin kan gennemtvinge en opdatering. Overview, rating, udgivelsesdato, provider-id, plakat og backdrop gemmes server-side; API-tokenet eksponeres aldrig.
 - TMDB-token og metadata-sprog kan ændres uden container-genstart fra indstillingspanelet. Tokenet valideres mod TMDB, lagres AES-256-GCM-krypteret i `system_settings`, og API/worker bruger miljøvariablen som bagudkompatibel fallback.
 - `Kør metadata` i indstillingerne kan gennemtvinge en ny TMDB-opdatering for alle medier, kun film eller kun serieepisoder gennem den durable worker-kø.
+- Admin-katalogets detaljepanel kan sætte en titel-specifik metadata-refresh i kø og låse verificerede metadata mod automatiske overskrivninger. Begge handlinger er kontoafgrænsede, kun for administratorer og auditlogges.
 - Biblioteksformularer bevarer deres DOM-reference gennem async API-kald, og scannerens lagrede workerfejl vises direkte i bibliotek- og statusvisningen.
 - Indstillinger indeholder en durable fejllog med fejlede og delvist fejlede scanninger, worker-jobforsøg, tidsstempler og diagnostiske detaljer; updaterfejl viser også den konkrete kommandofejl.
 - Next.js adminskal inspireret af den godkendte BoltBytes-reference med rigtige API-data og tomme tilstande uden mock-film.
@@ -196,7 +199,7 @@ Lokalt valideret med Node.js 22 og npm 10:
 - Prisma client generation og schema validation.
 - ESLint.
 - TypeScript typecheck for shared contracts, API, worker og admin.
-- 35 unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
+- 93 unit tests; en citeret cross-platform glob holder alle database-integrationstests i det separate `test:integration`-step, som kun kører mod en URL med `bbmedia_test`.
 - Produktionsbuild af shared contracts, NestJS API, worker og Next.js admin.
 
 PostgreSQL-integrationstesten og Docker Compose/container-build kan ikke køres lokalt på den aktuelle Windows-maskine uden lokal PostgreSQL-testdatabase og Docker. De er verificeret i [GitHub Actions-run 30304933724](https://github.com/skovhuus1/mediaserver/actions/runs/30304933724), hvor følgende gates passerede:
@@ -234,6 +237,8 @@ Biblioteker kan oprettes, redigeres, flyttes mellem storage roots og slettes fra
 Bibliotekssletning blokeres også, mens et medie har en aktiv, ikke-udløbet playback-lease. Når biblioteket kan slettes, fjernes dets afsluttede sessions, reservationer og historik transaktionelt før katalogdataene, så referentiel integritet bevares uden at røre mediefilerne.
 
 Biblioteksscanneren klassificerer filer deterministisk før ekstern metadataopslag. Film får renset titel, årstal og kategori fra mappestrukturen. Serie- og mixed-biblioteker genkender `S01E02`, `1x02`, `Season 01`, `Sæson 01` og `S01`, og gemmer kategori, serienavn, sæson og episode server-side. CI verificerer klassifikationen gennem en rigtig scannet MP4 og unit tests dækker film, serier og mixed-biblioteker.
+
+Automatisk scanning aktiveres under `Biblioteker > Rediger bibliotek`. Intervallet gemmes i databasen, og bibliotekssiden opdaterer queued/running/completed/failed-status hvert tredje sekund. Schedulerens kontrol kører hvert 30. sekund, men opretter først et job, når bibliotekets valgte interval er udløbet. En schedulerfejl logges isoleret og stopper ikke workerens øvrige jobbehandling.
 
 ## Ikke implementeret endnu
 

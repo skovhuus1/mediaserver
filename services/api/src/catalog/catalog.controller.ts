@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto } from './catalog.dto';
+import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, SetMetadataLockDto, UpdateLibraryDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -79,6 +79,22 @@ export class CatalogController {
   @Roles('admin', 'operator')
   queueMetadata(@CurrentUser() actor: AuthenticatedUser, @Body() dto: QueueMetadataDto) {
     return this.catalog.queueMetadata(actor, dto);
+  }
+
+  @Post('media/:id/metadata/jobs')
+  @Roles('admin')
+  queueMediaMetadata(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.catalog.queueMediaMetadata(actor, id);
+  }
+
+  @Patch('media/:id/metadata-lock')
+  @Roles('admin')
+  setMetadataLock(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SetMetadataLockDto,
+  ) {
+    return this.catalog.setMetadataLock(actor, id, dto.locked);
   }
 
   @Get('media/:id')
