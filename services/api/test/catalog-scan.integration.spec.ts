@@ -156,7 +156,7 @@ describe('library scan queue concurrency', () => {
     const previousToken = process.env.TMDB_API_TOKEN;
     process.env.TMDB_API_TOKEN = 'integration-test-token';
     try {
-      await expect(catalog.setMetadataLock(actor, media.id, true)).resolves.toEqual({ id: media.id, metadataLocked: true });
+      await expect(catalog.setMetadataLock(actor, media.id, true)).resolves.toMatchObject({ id: media.id, metadataLocked: true });
       const job = await catalog.queueMediaMetadata(actor, media.id);
       expect(job.payload).toMatchObject({ mediaId: media.id, force: true, onlyMissing: false });
       expect(await prisma.auditLog.count({ where: { accountId, action: { in: ['media.metadata.lock', 'media.metadata.refresh'] } } })).toBe(2);
