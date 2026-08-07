@@ -46,6 +46,7 @@ export async function enrichLibraryMetadata(
     accountId: string;
     libraryId?: string;
     mediaId?: string;
+    seriesTitle?: string;
     onlyMissing: boolean;
     force?: boolean;
     mediaType?: 'all' | 'movie' | 'series';
@@ -61,6 +62,7 @@ export async function enrichLibraryMetadata(
       accountId: input.accountId,
       ...(input.mediaId ? { id: input.mediaId } : {}),
       ...(input.libraryId ? { libraryId: input.libraryId } : {}),
+      ...(input.seriesTitle ? { seriesTitle: { equals: input.seriesTitle, mode: 'insensitive' } } : {}),
       ...(!input.force ? { metadataLocked: false } : {}),
       type: {
         in: input.mediaType === 'movie' ? ['movie'] : input.mediaType === 'series' ? ['episode'] : ['movie', 'episode'],
@@ -73,6 +75,13 @@ export async function enrichLibraryMetadata(
   const tvdbToken = needsTvdb ? await loginTvdb(settings.tvdbApiKey!, settings.tvdbPin) : null;
   const tmdbCache = new Map<string, Promise<ProviderCandidate | null>>();
   const tvdbCache = new Map<string, Promise<TvdbSeriesMatch | null>>();
+  const bindings = await prisma.metadataBinding.findMany({
+    where: { accountId: input.accountId },
+  });
+  const bindingMap = new Map(bindings.map((binding) => [
+    `${binding.libraryId}:${binding.mediaType}:${binding.localKey}`,
+    binding,
+  ]));
   let matched = 0;
   let unmatched = 0;
 
@@ -81,6 +90,102 @@ export async function enrichLibraryMetadata(
     const title = movie ? item.title : item.seriesTitle;
     if (!title) {
       unmatched += 1;
+      await input.onProgress();
+      continue;
+    }
+
+    const bindingType = movie ? 'movie' : 'series';
+    const bindingLocalKey = movie
+      ? item.id
+      : title.normalize('NFKC').trim().toLocaleLowerCase('en-US');
+    const binding = bindingMap.get(`${item.libraryId}:${bindingType}:${bindingLocalKey}`);
+    if (binding?.provider === 'tvdb') {
+      if (movie) throw new Error('manual_metadata_binding_invalid: TVDB cannot be used for movies');
+      if (!tvdbToken) throw new Error('manual_metadata_provider_disabled: TVDB is required by the saved match');
+      const cacheKey = `manual:${binding.providerId}`;
+      let pending = tvdbCache.get(cacheKey);
+      if (!pending) {
+        pending = getTvdbSeriesById(tvdbToken, settings.language, Number.parseInt(binding.providerId, 10));
+        tvdbCache.set(cacheKey, pending);
+      }
+      const match = await pending;
+      if (!match) throw new Error('manual_metadata_match_missing: Saved TVDB series no longer exists');
+      const episode = item.seasonNumber !== null && item.episodeNumber !== null
+        ? match.episodes.get(episodeKey(item.seasonNumber, item.episodeNumber)) ?? null
+        : null;
+      const season = item.seasonNumber !== null ? match.seasons.get(item.seasonNumber) ?? null : null;
+      const tmdbFeatures = settings.tmdbToken
+        ? await searchTmdb(settings.tmdbToken, settings.language, 'tv', match.series.title, match.series.releaseYear ?? null).catch(() => null)
+        : null;
+      await prisma.mediaItem.update({
+        where: { id: item.id },
+        data: {
+          title: episode?.title ?? item.title,
+          overview: episode?.overview ?? item.overview ?? match.series.overview,
+          rating: null,
+          metadataProvider: 'tvdb',
+          metadataProviderId: episode ? String(episode.id) : null,
+          seriesDisplayTitle: match.series.title,
+          seriesOverview: match.series.overview,
+          seriesMetadataProviderId: String(match.series.id),
+          seasonMetadataProviderId: season ? String(season.id) : null,
+          seasonPosterPath: season?.posterPath ?? null,
+          episodeStillPath: episode?.stillPath ?? null,
+          posterPath: match.series.posterPath,
+          backdropPath: match.series.backdropPath,
+          metadataUpdatedAt: new Date(),
+          metadataLocked: binding.locked,
+          releaseYear: item.releaseYear ?? match.series.releaseYear ?? null,
+          releaseDate: episode?.airedAt ?? item.releaseDate,
+          genres: tmdbFeatures?.genres ?? match.series.genres,
+          credits: tmdbFeatures?.credits ?? match.series.credits,
+          similarProviderIds: tmdbFeatures
+            ? [`tmdb:${tmdbFeatures.id}`, ...tmdbFeatures.similarProviderIds]
+            : match.series.similarProviderIds,
+          recommendationUpdatedAt: new Date(),
+        },
+      });
+      matched += 1;
+      await input.onProgress();
+      continue;
+    }
+    if (binding?.provider === 'tmdb') {
+      if (!settings.tmdbToken) throw new Error('manual_metadata_provider_disabled: TMDB is required by the saved match');
+      const kind = movie ? 'movie' : 'tv';
+      const cacheKey = `manual:${kind}:${binding.providerId}`;
+      let pending = tmdbCache.get(cacheKey);
+      if (!pending) {
+        pending = getTmdbById(settings.tmdbToken, settings.language, kind, Number.parseInt(binding.providerId, 10));
+        tmdbCache.set(cacheKey, pending);
+      }
+      const candidate = await pending;
+      if (!candidate) throw new Error('manual_metadata_match_missing: Saved TMDB title no longer exists');
+      await prisma.mediaItem.update({
+        where: { id: item.id },
+        data: {
+          overview: movie ? candidate.overview : item.overview ?? candidate.overview,
+          rating: candidate.rating,
+          metadataProvider: 'tmdb',
+          metadataProviderId: String(candidate.id),
+          seriesDisplayTitle: movie ? null : candidate.title,
+          seriesOverview: movie ? null : candidate.overview,
+          seriesMetadataProviderId: movie ? null : String(candidate.id),
+          seasonMetadataProviderId: null,
+          seasonPosterPath: null,
+          episodeStillPath: null,
+          posterPath: candidate.posterPath,
+          backdropPath: candidate.backdropPath,
+          metadataUpdatedAt: new Date(),
+          metadataLocked: binding.locked,
+          releaseYear: item.releaseYear ?? candidate.releaseYear ?? null,
+          releaseDate: item.releaseDate ?? candidate.releaseDate,
+          genres: candidate.genres,
+          credits: candidate.credits,
+          similarProviderIds: candidate.similarProviderIds,
+          recommendationUpdatedAt: new Date(),
+        },
+      });
+      matched += 1;
       await input.onProgress();
       continue;
     }
@@ -241,6 +346,44 @@ async function searchTmdb(
   return { ...selected, ...features };
 }
 
+async function getTmdbById(
+  token: string,
+  language: string,
+  kind: 'movie' | 'tv',
+  providerId: number,
+): Promise<ProviderCandidate | null> {
+  if (!Number.isInteger(providerId) || providerId < 1) return null;
+  const response = await fetch(
+    `https://api.themoviedb.org/3/${kind}/${providerId}?language=${encodeURIComponent(language)}`,
+    {
+      headers: { accept: 'application/json', authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`metadata_provider_http_${response.status}: TMDB details failed`);
+  const result = await response.json() as Record<string, unknown>;
+  const title = stringValue(kind === 'movie' ? result.title : result.name);
+  if (!title) return null;
+  const releaseDate = parseDate(stringValue(kind === 'movie' ? result.release_date : result.first_air_date));
+  const features = await requestTmdbRecommendationFeatures(token, language, kind, providerId)
+    .catch(() => ({ genres: [], credits: [], similarProviderIds: [] }));
+  return {
+    id: providerId,
+    provider: 'tmdb',
+    title,
+    originalTitle: stringValue(kind === 'movie' ? result.original_title : result.original_name),
+    releaseYear: releaseDate?.getUTCFullYear() ?? null,
+    popularity: numberValue(result.popularity),
+    overview: stringValue(result.overview),
+    rating: numberValue(result.vote_average),
+    posterPath: tmdbImagePath(result.poster_path),
+    backdropPath: tmdbImagePath(result.backdrop_path),
+    releaseDate,
+    ...features,
+  };
+}
+
 async function requestTmdb(
   token: string,
   language: string,
@@ -363,22 +506,50 @@ async function searchTvdbSeries(
   const candidates = await requestTvdbSearch(token, language, title, year);
   const selected = selectMetadataCandidate(candidates, title, year);
   if (!selected) return null;
-  const response = await requestTvdb(`/series/${selected.id}/extended?short=false`, token);
+  return getTvdbSeriesById(token, language, selected.id, selected);
+}
+
+async function getTvdbSeriesById(
+  token: string,
+  language: string,
+  seriesId: number,
+  selected?: ProviderCandidate,
+): Promise<TvdbSeriesMatch | null> {
+  if (!Number.isInteger(seriesId) || seriesId < 1) return null;
+  const response = await requestTvdb(`/series/${seriesId}/extended?short=false`, token);
   const payload = await response.json() as { data?: Record<string, unknown> };
   const extended = payload.data ?? {};
+  const extendedTitle = stringValue(extended.name);
+  if (!extendedTitle) return null;
   const artworks = parseTvdbArtwork(extended.artworks);
   const releaseDate = parseDate(stringValue(extended.firstAired));
+  const fallback: ProviderCandidate = selected ?? {
+    id: seriesId,
+    provider: 'tvdb',
+    title: extendedTitle,
+    originalTitle: null,
+    releaseYear: integerValue(extended.year),
+    popularity: null,
+    overview: stringValue(extended.overview),
+    rating: null,
+    posterPath: tvdbImageUrl(extended.image),
+    backdropPath: null,
+    releaseDate,
+    genres: [],
+    credits: [],
+    similarProviderIds: [],
+  };
   const series: ProviderCandidate = {
-    ...selected,
-    title: stringValue(extended.name) ?? selected.title,
-    overview: stringValue(extended.overview) ?? selected.overview,
-    posterPath: artworks.poster ?? tvdbImageUrl(extended.image) ?? selected.posterPath,
+    ...fallback,
+    title: extendedTitle,
+    overview: stringValue(extended.overview) ?? fallback.overview,
+    posterPath: artworks.poster ?? tvdbImageUrl(extended.image) ?? fallback.posterPath,
     backdropPath: artworks.backdrop,
     releaseDate,
-    releaseYear: releaseDate?.getUTCFullYear() ?? integerValue(extended.year) ?? selected.releaseYear ?? null,
+    releaseYear: releaseDate?.getUTCFullYear() ?? integerValue(extended.year) ?? fallback.releaseYear ?? null,
   };
   const seasons = parseTvdbSeasons(extended.seasons);
-  const episodes = await fetchTvdbEpisodes(selected.id, token, language);
+  const episodes = await fetchTvdbEpisodes(seriesId, token, language);
   return { series, seasons, episodes };
 }
 

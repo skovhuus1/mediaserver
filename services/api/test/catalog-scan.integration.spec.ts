@@ -1,5 +1,5 @@
 import type { AuthenticatedUser } from '@boltbytes/contracts';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CatalogService } from '../src/catalog/catalog.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -156,7 +156,7 @@ describe('library scan queue concurrency', () => {
     const previousToken = process.env.TMDB_API_TOKEN;
     process.env.TMDB_API_TOKEN = 'integration-test-token';
     try {
-      await expect(catalog.setMetadataLock(actor, media.id, true)).resolves.toEqual({ id: media.id, metadataLocked: true });
+      await expect(catalog.setMetadataLock(actor, media.id, true)).resolves.toMatchObject({ id: media.id, metadataLocked: true });
       const job = await catalog.queueMediaMetadata(actor, media.id);
       expect(job.payload).toMatchObject({ mediaId: media.id, force: true, onlyMissing: false });
       expect(await prisma.auditLog.count({ where: { accountId, action: { in: ['media.metadata.lock', 'media.metadata.refresh'] } } })).toBe(2);
@@ -164,6 +164,75 @@ describe('library scan queue concurrency', () => {
     } finally {
       if (previousToken === undefined) delete process.env.TMDB_API_TOKEN;
       else process.env.TMDB_API_TOKEN = previousToken;
+    }
+  });
+
+  it('persists one validated TVDB binding and applies its lock to the complete local series', async () => {
+    const account = await prisma.account.create({ data: { name: `manual-match-${Date.now()}` } });
+    accountId = account.id;
+    const user = await prisma.user.create({
+      data: {
+        accountId,
+        email: `manual-match-${Date.now()}@example.test`,
+        displayName: 'Manual matcher',
+        passwordHash: 'unused',
+      },
+    });
+    const root = await prisma.storageRoot.create({ data: { accountId, label: 'manual-match', mountPath: '/media' } });
+    const library = await prisma.library.create({ data: { accountId, storageRootId: root.id, name: 'Series', type: 'series' } });
+    const episodes = await Promise.all([1, 2].map((episodeNumber) => prisma.mediaItem.create({
+      data: {
+        accountId,
+        libraryId: library.id,
+        title: `Episode ${episodeNumber}`,
+        type: 'episode',
+        seriesTitle: 'Local Wrong Name',
+        seasonNumber: 1,
+        episodeNumber,
+      },
+    })));
+    const actor: AuthenticatedUser = { sub: user.id, accountId, profileId: null, deviceId: null, roles: ['admin'] };
+    const previousKey = process.env.TVDB_API_KEY;
+    process.env.TVDB_API_KEY = 'integration-tvdb-key';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/v4/login')) {
+        return new Response(JSON.stringify({ data: { token: 'tvdb-test-token' } }), { status: 200 });
+      }
+      if (url.includes('/series/371028/extended')) {
+        return new Response(JSON.stringify({ data: { id: 371028, name: 'Correct Series', year: 2020, overview: 'Provider overview' } }), { status: 200 });
+      }
+      throw new Error(`Unexpected provider request: ${url}`);
+    });
+    try {
+      const result = await catalog.applyMetadataMatch(actor, episodes[0]!.id, {
+        provider: 'tvdb',
+        providerId: '371028',
+        locked: true,
+      });
+      expect(result.affectedItems).toBe(2);
+      expect(result.job.payload).toMatchObject({
+        libraryId: library.id,
+        seriesTitle: 'Local Wrong Name',
+        onlyMissing: false,
+        force: true,
+      });
+      expect(await prisma.metadataBinding.findFirst({ where: { accountId } })).toMatchObject({
+        libraryId: library.id,
+        mediaType: 'series',
+        localKey: 'local wrong name',
+        provider: 'tvdb',
+        providerId: '371028',
+        providerTitle: 'Correct Series',
+        locked: true,
+      });
+      expect(await prisma.mediaItem.count({ where: { libraryId: library.id, metadataLocked: true } })).toBe(2);
+      await expect(catalog.setMetadataLock(actor, episodes[0]!.id, false)).resolves.toMatchObject({ affectedItems: 2 });
+      expect(await prisma.metadataBinding.findFirst({ where: { accountId } })).toMatchObject({ locked: false });
+    } finally {
+      fetchMock.mockRestore();
+      if (previousKey === undefined) delete process.env.TVDB_API_KEY;
+      else process.env.TVDB_API_KEY = previousKey;
     }
   });
 });

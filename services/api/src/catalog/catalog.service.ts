@@ -10,9 +10,10 @@ import { readdir, realpath } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
-import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
 import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metadata-settings';
+import { searchMetadataProviders, validateMetadataSelection } from './metadata-provider';
 
 @Injectable()
 export class CatalogService {
@@ -511,13 +512,149 @@ export class CatalogService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  async setMetadataLock(actor: AuthenticatedUser, mediaId: string, locked: boolean) {
+  async searchMetadataMatches(actor: AuthenticatedUser, mediaId: string, query: string) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: { id: true, type: true },
+    });
+    if (!media) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+    const kind = media.type === 'movie' ? 'movie' as const : 'series' as const;
+    const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
+    return {
+      mediaId,
+      kind,
+      candidates: await searchMetadataProviders(settings, kind, query),
+    };
+  }
+
+  async applyMetadataMatch(actor: AuthenticatedUser, mediaId: string, dto: ApplyMetadataMatchDto) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: { id: true, type: true, libraryId: true, seriesTitle: true, title: true },
+    });
+    if (!media) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+    const kind = media.type === 'movie' ? 'movie' as const : 'series' as const;
+    if (kind === 'series' && !media.seriesTitle?.trim()) {
+      throw new ConflictException({ code: 'series_identity_missing', message: 'Serien mangler en stabil lokal serieidentitet og skal scannes igen.' });
+    }
+    const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
+    const selected = await validateMetadataSelection(settings, kind, dto.provider, dto.providerId);
+    const localKey = kind === 'movie'
+      ? media.id
+      : media.seriesTitle!.normalize('NFKC').trim().toLocaleLowerCase('en-US');
+    const itemScope: Prisma.MediaItemWhereInput = kind === 'movie'
+      ? { id: media.id, accountId: actor.accountId }
+      : {
+          accountId: actor.accountId,
+          libraryId: media.libraryId,
+          type: 'episode',
+          seriesTitle: { equals: media.seriesTitle!, mode: 'insensitive' },
+        };
+
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.mediaItem.updateMany({
-        where: { id: mediaId, accountId: actor.accountId },
-        data: { metadataLocked: locked },
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:manual-metadata-match'),
+          hashtext(CAST(${actor.accountId} AS text))
+        )::text AS lock_result
+      `;
+      const active = await tx.systemJob.findFirst({
+        where: { accountId: actor.accountId, type: 'media.metadata', status: { in: ['queued', 'running'] } },
       });
-      if (!updated.count) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+      if (active) {
+        throw new ConflictException({ code: 'metadata_job_active', message: 'Vent til den aktive metadataopdatering er afsluttet.' });
+      }
+      const binding = await tx.metadataBinding.upsert({
+        where: {
+          accountId_libraryId_mediaType_localKey: {
+            accountId: actor.accountId,
+            libraryId: media.libraryId,
+            mediaType: kind,
+            localKey,
+          },
+        },
+        create: {
+          accountId: actor.accountId,
+          libraryId: media.libraryId,
+          mediaType: kind,
+          localKey,
+          provider: selected.provider,
+          providerId: selected.providerId,
+          providerTitle: selected.title,
+          locked: dto.locked,
+          matchedBy: actor.sub,
+        },
+        update: {
+          provider: selected.provider,
+          providerId: selected.providerId,
+          providerTitle: selected.title,
+          locked: dto.locked,
+          matchedBy: actor.sub,
+        },
+      });
+      const affected = await tx.mediaItem.updateMany({ where: itemScope, data: { metadataLocked: dto.locked } });
+      const job = await tx.systemJob.create({
+        data: {
+          accountId: actor.accountId,
+          type: 'media.metadata',
+          status: 'queued',
+          payload: {
+            ...(kind === 'movie' ? { mediaId: media.id } : { libraryId: media.libraryId, seriesTitle: media.seriesTitle }),
+            onlyMissing: false,
+            force: true,
+            requestedBy: actor.sub,
+            metadataBindingId: binding.id,
+          },
+          maxAttempts: 3,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: actor.profileId,
+          action: 'media.metadata.match',
+          outcome: 'allowed',
+          code: 'media_metadata_match',
+          details: {
+            mediaId,
+            scope: kind,
+            provider: selected.provider,
+            providerId: selected.providerId,
+            providerTitle: selected.title,
+            affectedItems: affected.count,
+            jobId: job.id,
+          },
+        },
+      });
+      return { binding, job, affectedItems: affected.count };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  async setMetadataLock(actor: AuthenticatedUser, mediaId: string, locked: boolean) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: { id: true, type: true, libraryId: true, seriesTitle: true },
+    });
+    if (!media) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+    const kind = media.type === 'movie' ? 'movie' : 'series';
+    const localKey = kind === 'movie'
+      ? media.id
+      : media.seriesTitle?.normalize('NFKC').trim().toLocaleLowerCase('en-US') ?? media.id;
+    const itemScope: Prisma.MediaItemWhereInput = kind === 'movie' || !media.seriesTitle
+      ? { id: media.id, accountId: actor.accountId }
+      : {
+          accountId: actor.accountId,
+          libraryId: media.libraryId,
+          type: 'episode',
+          seriesTitle: { equals: media.seriesTitle, mode: 'insensitive' },
+        };
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.mediaItem.updateMany({ where: itemScope, data: { metadataLocked: locked } });
+      await tx.metadataBinding.updateMany({
+        where: { accountId: actor.accountId, libraryId: media.libraryId, mediaType: kind, localKey },
+        data: { locked },
+      });
       await tx.auditLog.create({
         data: {
           accountId: actor.accountId,
@@ -526,10 +663,10 @@ export class CatalogService {
           action: 'media.metadata.lock',
           outcome: 'allowed',
           code: 'media_metadata_lock',
-          details: { mediaId, locked },
+          details: { mediaId, locked, scope: kind, affectedItems: updated.count },
         },
       });
-      return { id: mediaId, metadataLocked: locked };
+      return { id: mediaId, metadataLocked: locked, affectedItems: updated.count };
     });
   }
 

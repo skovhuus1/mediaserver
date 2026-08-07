@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, SetMetadataLockDto, UpdateLibraryDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MetadataMatchQueryDto, QueueMetadataDto, SetMetadataLockDto, UpdateLibraryDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -85,6 +85,26 @@ export class CatalogController {
   @Roles('admin')
   queueMediaMetadata(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.catalog.queueMediaMetadata(actor, id);
+  }
+
+  @Get('media/:id/metadata/matches')
+  @Roles('admin')
+  metadataMatches(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Query() query: MetadataMatchQueryDto,
+  ) {
+    return this.catalog.searchMetadataMatches(actor, id, query.q);
+  }
+
+  @Post('media/:id/metadata/match')
+  @Roles('admin')
+  applyMetadataMatch(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ApplyMetadataMatchDto,
+  ) {
+    return this.catalog.applyMetadataMatch(actor, id, dto);
   }
 
   @Patch('media/:id/metadata-lock')

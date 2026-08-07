@@ -99,6 +99,7 @@ model Account {
   storageRoots         StorageRoot[]
   libraries            Library[]
   mediaItems           MediaItem[]
+  metadataBindings     MetadataBinding[]
   mediaFiles           MediaFile[]
   libraryScans         LibraryScan[]
   playbackSessions     PlaybackSession[]
@@ -399,6 +400,7 @@ model Library {
   mediaItems    MediaItem[]
   mediaFiles    MediaFile[]
   scans         LibraryScan[]
+  metadataBindings MetadataBinding[]
 
   @@index([accountId])
   @@map("libraries")
@@ -465,6 +467,27 @@ model MediaItem {
   @@index([accountId, seriesMetadataProviderId])
   @@index([accountId, metadataProvider, metadataProviderId])
   @@map("media_items")
+}
+
+model MetadataBinding {
+  id            String   @id @default(uuid())
+  accountId     String   @map("account_id")
+  libraryId     String   @map("library_id")
+  mediaType     String   @map("media_type")
+  localKey      String   @map("local_key")
+  provider      String
+  providerId    String   @map("provider_id")
+  providerTitle String   @map("provider_title")
+  locked        Boolean  @default(true)
+  matchedBy     String?  @map("matched_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  library       Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, libraryId, mediaType, localKey])
+  @@index([accountId, provider, providerId])
+  @@map("metadata_bindings")
 }
 
 model MediaFile {
