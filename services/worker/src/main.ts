@@ -628,6 +628,7 @@ async function enrichMetadata(job: ClaimedJob): Promise<void> {
     accountId: job.accountId,
     ...(typeof payload.libraryId === 'string' ? { libraryId: payload.libraryId } : {}),
     ...(typeof payload.mediaId === 'string' ? { mediaId: payload.mediaId } : {}),
+    ...(typeof payload.seriesTitle === 'string' ? { seriesTitle: payload.seriesTitle } : {}),
     onlyMissing: payload.onlyMissing === true,
     force: payload.force === true,
     mediaType,

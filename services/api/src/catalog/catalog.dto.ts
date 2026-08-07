@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
 
 export class CreateLibraryDto {
   @IsUUID()
@@ -176,4 +176,24 @@ export class QueueMetadataDto {
 export class SetMetadataLockDto {
   @IsBoolean()
   locked!: boolean;
+}
+
+export class MetadataMatchQueryDto {
+  @IsString()
+  @Length(1, 120)
+  @Transform(({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value)
+  q!: string;
+}
+
+export class ApplyMetadataMatchDto {
+  @IsIn(['tmdb', 'tvdb'])
+  provider!: 'tmdb' | 'tvdb';
+
+  @IsString()
+  @Matches(/^\d{1,12}$/)
+  providerId!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  locked = true;
 }

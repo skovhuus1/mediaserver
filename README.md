@@ -97,7 +97,7 @@ TMDB_API_TOKEN=
 TMDB_LANGUAGE=da-DK
 ```
 
-Tokenet bruges kun af API/worker. TMDB dækker både film og serier i den nuværende pipeline, så en TVDB-nøgle er ikke påkrævet. TVDB kan senere tilføjes som en separat provider, hvis der opstår et konkret behov for TVDB-specifikke ids eller metadata.
+Nøglerne bruges kun af API/worker. TMDB leverer film, anbefalingsdata og kan bruges som fallback til serier. TVDB leverer serie-, sæson- og episodemetadata, når en TVDB API-nøgle er konfigureret.
 
 ## Direkte installation uden Docker
 
@@ -181,6 +181,8 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - TMDB-token og metadata-sprog kan ændres uden container-genstart fra indstillingspanelet. Tokenet valideres mod TMDB, lagres AES-256-GCM-krypteret i `system_settings`, og API/worker bruger miljøvariablen som bagudkompatibel fallback.
 - `Kør metadata` i indstillingerne kan gennemtvinge en ny TMDB-opdatering for alle medier, kun film eller kun serieepisoder gennem den durable worker-kø.
 - Admin-katalogets detaljepanel kan sætte en titel-specifik metadata-refresh i kø og låse verificerede metadata mod automatiske overskrivninger. Begge handlinger er kontoafgrænsede, kun for administratorer og auditlogges.
+- `Find korrekt match` søger de konfigurerede TMDB/TVDB-providere og viser provider-id, titel, årstal, plakat og beskrivelse før administratorens valg. Valget valideres igen server-side mod providerens detail-endpoint før lagring.
+- Manuelle film-match bindes til den enkelte katalogpost. Seriematch bindes til bibliotekets normaliserede lokale serienavn, opdaterer alle nuværende episoder og genbruges automatisk til fremtidige episoder fra senere scans.
 - Biblioteksformularer bevarer deres DOM-reference gennem async API-kald, og scannerens lagrede workerfejl vises direkte i bibliotek- og statusvisningen.
 - Indstillinger indeholder en durable fejllog med fejlede og delvist fejlede scanninger, worker-jobforsøg, tidsstempler og diagnostiske detaljer; updaterfejl viser også den konkrete kommandofejl.
 - Next.js adminskal inspireret af den godkendte BoltBytes-reference med rigtige API-data og tomme tilstande uden mock-film.
@@ -239,6 +241,8 @@ Bibliotekssletning blokeres også, mens et medie har en aktiv, ikke-udløbet pla
 Biblioteksscanneren klassificerer filer deterministisk før ekstern metadataopslag. Film får renset titel, årstal og kategori fra mappestrukturen. Serie- og mixed-biblioteker genkender `S01E02`, `1x02`, `Season 01`, `Sæson 01` og `S01`, og gemmer kategori, serienavn, sæson og episode server-side. CI verificerer klassifikationen gennem en rigtig scannet MP4 og unit tests dækker film, serier og mixed-biblioteker.
 
 Automatisk scanning aktiveres under `Biblioteker > Rediger bibliotek`. Intervallet gemmes i databasen, og bibliotekssiden opdaterer queued/running/completed/failed-status hvert tredje sekund. Schedulerens kontrol kører hvert 30. sekund, men opretter først et job, når bibliotekets valgte interval er udløbet. En schedulerfejl logges isoleret og stopper ikke workerens øvrige jobbehandling.
+
+Manuel metadata-matchning åbnes fra en titel i admin-katalogets detaljepanel. `GET /api/v1/media/:id/metadata/matches?q=...` udfører kun søgning, mens `POST /api/v1/media/:id/metadata/match` validerer provider-id'et, opretter eller erstatter den varige binding, låser de berørte katalogposter og opretter et durable `media.metadata`-job. Kun administratorer har adgang; valg, omfang, provider-id, job-id og antal berørte katalogposter gemmes i auditloggen. Oplåsning bevarer bindingen, men tillader automatiske metadataopdateringer fra den samme valgte provider.
 
 ## Ikke implementeret endnu
 
@@ -341,7 +345,7 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 ### Kendte rester
 
 - Alternate/DVD/streaming episode orders kan endnu ikke vælges manuelt; standardordenen bruges.
-- Manuel metadata-matchning ved forkerte eller tvetydige serienavne mangler.
+- Manuel sæson- eller episode-specifik override ud over seriens valgte provider mangler fortsat; den nuværende binding er bevidst på film- eller serieniveau.
 - TVDB-liveflow kræver fortsat en gyldig nøgle på installationsserveren og verificeres først dér.
 ## Separat kundeportal og adminområde (2026-07-29)
 
@@ -394,7 +398,7 @@ Denne leverance tilføjer komplet administrativ onboarding uden SMTP:
 
 Produktionsdomænet er `https://media.boltbytes.com`, mens Docker fortsat bruger host-port `6555` som intern upstream. DNS, certifikat, Nginx Proxy Manager, firewall, Range-streaming, fejlsøgning og rollback er dokumenteret i [`docs/domain-nginx-proxy-manager.md`](docs/domain-nginx-proxy-manager.md).
 
-Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, planlagte scans/file-watcher, manuel metadata-match, hardware-transcoding, egen Chromecast receiver samt Android- og TV-klienter.
+Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, native file-watcher, hardware-transcoding, egen Chromecast receiver samt Android- og TV-klienter.
 
 CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, så health-, Direct Play-, subtitle-, HLS- og transcode-kontroller rammer den publicerede testport.
 

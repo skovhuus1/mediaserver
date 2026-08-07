@@ -2,7 +2,7 @@
 
 import { ChevronLeft, ChevronRight, Film, FolderOpen, Play, SearchX, Tv, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { requestPlayback } from './web-player';
 import { PosterQualityBadges } from './poster-quality-badges';
@@ -64,6 +64,15 @@ type DetailState =
   | { kind: 'series'; item: CatalogItem; episodes: CatalogItem[]; next: SeriesNext | null };
 
 type SeriesNext = { media: CatalogItem; resumePositionMs: number };
+type MetadataMatchCandidate = {
+  provider: 'tmdb' | 'tvdb';
+  providerId: string;
+  title: string;
+  originalTitle: string | null;
+  releaseYear: number | null;
+  overview: string | null;
+  posterPath: string | null;
+};
 
 const emptyCatalog: CatalogResponse = {
   items: [],
@@ -217,6 +226,9 @@ function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: 
   const [metadataLocked, setMetadataLocked] = useState(item.metadataLocked ?? false);
   const [metadataBusy, setMetadataBusy] = useState(false);
   const [metadataMessage, setMetadataMessage] = useState('');
+  const [matchOpen, setMatchOpen] = useState(false);
+  const [matchQuery, setMatchQuery] = useState(item.seriesTitle ?? item.title);
+  const [matchCandidates, setMatchCandidates] = useState<MetadataMatchCandidate[]>([]);
 
   async function refreshMetadata() {
     setMetadataBusy(true);
@@ -245,6 +257,42 @@ function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: 
       setMetadataBusy(false);
     }
   }
+
+  async function searchMatches(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMetadataBusy(true);
+    setMetadataMessage('');
+    try {
+      const result = await api<{ candidates: MetadataMatchCandidate[] }>(
+        `/media/${encodeURIComponent(item.id)}/metadata/matches?q=${encodeURIComponent(matchQuery.trim())}`,
+      );
+      setMatchCandidates(result.candidates);
+      if (!result.candidates.length) setMetadataMessage('Ingen match blev fundet. Prøv en anden titel.');
+    } catch (failure) {
+      setMetadataMessage(errorMessage(failure));
+    } finally {
+      setMetadataBusy(false);
+    }
+  }
+
+  async function applyMatch(candidate: MetadataMatchCandidate) {
+    setMetadataBusy(true);
+    setMetadataMessage('');
+    try {
+      const result = await api<{ affectedItems: number }>(`/media/${encodeURIComponent(item.id)}/metadata/match`, {
+        method: 'POST',
+        body: JSON.stringify({ provider: candidate.provider, providerId: candidate.providerId, locked: true }),
+      });
+      setMetadataLocked(true);
+      setMatchOpen(false);
+      setMatchCandidates([]);
+      setMetadataMessage(`Match til "${candidate.title}" er gemt og ${result.affectedItems} katalogpost(er) er sat i kø til opdatering.`);
+    } catch (failure) {
+      setMetadataMessage(errorMessage(failure));
+    } finally {
+      setMetadataBusy(false);
+    }
+  }
   return (
     <>
       <span className={`detail-art${imageUrl(item.backdropPath, 'w780') ? ' has-image' : ''}`} style={imageStyle(item.backdropPath, 'w780')}>{item.type === 'movie' ? <Film size={38} /> : <Tv size={38} />}</span>
@@ -255,7 +303,25 @@ function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: 
       {item.rating !== null && item.rating !== undefined && <p className="metadata-credit">TMDB rating {item.rating.toFixed(1)}/10</p>}
       {item.metadataProvider === 'tvdb' && <p className="metadata-credit">Metadata via <a href="https://thetvdb.com/" target="_blank" rel="noreferrer">TheTVDB.com</a></p>}
       {item.metadataProvider === 'tmdb' && <p className="metadata-credit">Metadata via TMDB</p>}
-      {adminMode && <div className="metadata-actions"><button disabled={metadataBusy} onClick={() => void refreshMetadata()}>{metadataBusy ? 'Arbejder...' : 'Opdater metadata'}</button><button disabled={metadataBusy} onClick={() => void toggleMetadataLock()}>{metadataLocked ? 'Lås metadata op' : 'Lås metadata'}</button>{metadataMessage && <small>{metadataMessage}</small>}</div>}
+      {adminMode && <div className="metadata-actions">
+        <button disabled={metadataBusy} onClick={() => void refreshMetadata()}>{metadataBusy ? 'Arbejder...' : 'Opdater metadata'}</button>
+        <button disabled={metadataBusy} onClick={() => void toggleMetadataLock()}>{metadataLocked ? 'Lås metadata op' : 'Lås metadata'}</button>
+        <button disabled={metadataBusy} onClick={() => setMatchOpen((open) => !open)}>{matchOpen ? 'Luk matchning' : 'Find korrekt match'}</button>
+        {metadataMessage && <small>{metadataMessage}</small>}
+        {matchOpen && <div className="metadata-match-panel">
+          <form onSubmit={searchMatches}>
+            <label htmlFor={`metadata-query-${item.id}`}>Søg efter korrekt {item.type === 'movie' ? 'film' : 'serie'}</label>
+            <div><input id={`metadata-query-${item.id}`} value={matchQuery} maxLength={120} onChange={(event) => setMatchQuery(event.target.value)} required /><button disabled={metadataBusy || !matchQuery.trim()}>Søg</button></div>
+          </form>
+          <div className="metadata-match-results">
+            {matchCandidates.map((candidate) => <article key={`${candidate.provider}:${candidate.providerId}`}>
+              <span className="metadata-match-poster" style={imageStyle(candidate.posterPath, 'w500')} />
+              <div><strong>{candidate.title}</strong><small>{candidate.provider.toUpperCase()} #{candidate.providerId}{candidate.releaseYear ? ` · ${candidate.releaseYear}` : ''}</small>{candidate.originalTitle && candidate.originalTitle !== candidate.title && <small>{candidate.originalTitle}</small>}<p>{candidate.overview ?? 'Ingen beskrivelse fra provideren.'}</p></div>
+              <button disabled={metadataBusy} onClick={() => void applyMatch(candidate)}>Vælg match</button>
+            </article>)}
+          </div>
+        </div>}
+      </div>}
       {detail.kind !== 'series' && <button className={playerStyles.playButton} onClick={() => requestPlayback(item)}><Play size={16} /> Afspil</button>}
       {detail.kind === 'series' ? (
         <SeriesEpisodes key={item.seriesTitle ?? item.title} episodes={detail.episodes} next={detail.next} />
