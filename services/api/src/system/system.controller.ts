@@ -8,6 +8,7 @@ import { UpdaterService } from './updater.service';
 import { SetUpdateBranchDto, UpdateServerSettingsDto } from './system.dto';
 import { SaveMetadataSettingsDto } from './metadata-settings.dto';
 import { metadataSettingsStatus, saveMetadataSettings } from './metadata-settings';
+import { resolveTranscoderStatus } from './transcoder-status';
 import { collectDefaultMetrics, register } from 'prom-client';
 import { cpus, freemem, loadavg, totalmem, uptime } from 'node:os';
 
@@ -88,8 +89,38 @@ export class SystemController {
 
   @Get('stats')
   @Roles('admin', 'operator')
-  stats() {
-    return serverStatsSnapshot();
+  async stats(@CurrentUser() actor: AuthenticatedUser) {
+    const now = new Date();
+    const [persistedStatus, running, queued] = await Promise.all([
+      this.prisma.systemSetting.findUnique({
+        where: {
+          accountId_key: {
+            accountId: actor.accountId,
+            key: 'runtime.transcoder.status',
+          },
+        },
+        select: { value: true },
+      }),
+      this.prisma.systemJob.count({
+        where: {
+          accountId: actor.accountId,
+          type: 'playback.transcode',
+          status: 'running',
+          leaseExpiresAt: { gt: now },
+        },
+      }),
+      this.prisma.systemJob.count({
+        where: {
+          accountId: actor.accountId,
+          type: 'playback.transcode',
+          status: 'queued',
+        },
+      }),
+    ]);
+    return {
+      ...serverStatsSnapshot(),
+      transcoder: resolveTranscoderStatus(persistedStatus?.value, { running, queued }, now),
+    };
   }
 
   @Get('errors')

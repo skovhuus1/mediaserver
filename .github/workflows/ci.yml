@@ -78,6 +78,7 @@ jobs:
           node scripts/bootstrap-env.mjs
           docker compose config --quiet
           DOCKER_GID=999 docker compose -f docker-compose.yml -f docker-compose.updater.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.nvidia.yml config --quiet
       - name: Build containers
         run: docker compose build
       - name: Validate HDR transcoder capabilities

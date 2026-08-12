@@ -14,6 +14,12 @@ const workerId = `${workerMode}-${randomUUID()}`;
 const pollIntervalMs = 2_000;
 const leaseMs = 60_000;
 const transcodeRoot = resolve(process.env.TRANSCODE_PATH?.trim() || '/transcode');
+const transcodeMaxConcurrent = Math.max(
+  1,
+  Math.min(16, Number.parseInt(process.env.BB_MEDIA_TRANSCODE_MAX_CONCURRENT?.trim() || '1', 10) || 1),
+);
+const transcodeStatusKey = 'runtime.transcoder.status';
+let lastTranscoderHeartbeat = 0;
 
 function legacyLibraryPathCandidate(rootPath: string, configuredPath: string): string | null {
   const root = posix.resolve('/', rootPath);
@@ -75,6 +81,22 @@ const mediaExtensions = new Set(['.avi', '.m2ts', '.m4v', '.mkv', '.mov', '.mp4'
 
 async function claimNextJob(): Promise<ClaimedJob | null> {
   return prisma.$transaction(async (tx) => {
+    if (workerMode === 'transcode') {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:transcode-capacity'),
+          hashtext('global')
+        )::text AS lock_result
+      `;
+      const running = await tx.systemJob.count({
+        where: {
+          type: 'playback.transcode',
+          status: 'running',
+          leaseExpiresAt: { gt: new Date() },
+        },
+      });
+      if (running >= transcodeMaxConcurrent) return null;
+    }
     const typeFilter = workerMode === 'transcode'
       ? Prisma.sql`type = 'playback.transcode'`
       : Prisma.sql`type <> 'playback.transcode'`;
@@ -427,9 +449,9 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
   }
 
   const nvenc = await availableNvencEncoders();
-  const videoEncoder = preserveHdrRequested
-    ? nvenc.hevc ? 'hevc_nvenc' : 'libx265'
-    : nvenc.h264 ? 'h264_nvenc' : 'libx264';
+  const requestedNvenc = preserveHdrRequested ? nvenc.hevc : nvenc.h264;
+  const hardwareEncoder = preserveHdrRequested ? 'hevc_nvenc' : 'h264_nvenc';
+  const softwareEncoder = preserveHdrRequested ? 'libx265' : 'libx264';
   const subtitleInput = burnInStreamIndex === null
     ? '[0:v:0]null[subtitlePrepared]'
     : `[0:v:0][0:${burnInStreamIndex}]overlay=eof_action=pass:shortest=0[subtitlePrepared]`;
@@ -450,7 +472,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-map', `[v${index}]`,
     '-map', '0:a:0?',
   ]);
-  const streamArguments = renditions.flatMap((rendition, index) => {
+  const streamArguments = (videoEncoder: string) => renditions.flatMap((rendition, index) => {
     const bitrateKbps = Math.round(rendition.bitrate / 1_000);
     return [
       `-c:v:${index}`, videoEncoder,
@@ -465,7 +487,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     ];
   });
   const variantMap = renditions.map((_, index) => `v:${index},a:${index},name:${index}`).join(' ');
-  const cancelled = await runFfmpeg(job.id, session.id, [
+  const transcodeArguments = (videoEncoder: string) => [
     '-hide_banner',
     '-loglevel', 'warning',
     '-nostdin',
@@ -473,7 +495,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-i', inputPath,
     '-filter_complex', filterComplex,
     ...streamMaps,
-    ...streamArguments,
+    ...streamArguments(videoEncoder),
     '-f', 'hls',
     '-hls_time', '4',
     '-hls_list_size', '0',
@@ -483,8 +505,71 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-master_pl_name', 'master.m3u8',
     '-hls_segment_filename', resolve(outputPath, 'segment_%v_%05d.ts'),
     resolve(outputPath, 'stream_%v.m3u8'),
-  ]);
+  ];
+  let selectedEncoder = requestedNvenc ? hardwareEncoder : softwareEncoder;
+  await publishTranscoderStatus({
+    accountId: job.accountId,
+    state: 'transcoding',
+    backend: requestedNvenc ? 'nvenc' : 'software',
+    encoder: selectedEncoder,
+    sessionId: session.id,
+    jobId: job.id,
+    lastError: null,
+  });
+  await annotateTranscodeJob(job, requestedNvenc ? 'nvenc' : 'software', selectedEncoder);
+  let cancelled: boolean;
+  try {
+    cancelled = await runFfmpeg(job.id, session.id, transcodeArguments(selectedEncoder), () => publishTranscoderStatus({
+      accountId: job.accountId,
+      state: 'transcoding',
+      backend: selectedEncoder.includes('_nvenc') ? 'nvenc' : 'software',
+      encoder: selectedEncoder,
+      sessionId: session.id,
+      jobId: job.id,
+      lastError: null,
+    }));
+  } catch (error) {
+    if (!requestedNvenc || !(error instanceof FfmpegExecutionError)) throw error;
+    console.warn(JSON.stringify({
+      level: 'warn',
+      component: 'transcoder',
+      message: 'NVENC failed; retrying the session with software encoding',
+      sessionId: session.id,
+      encoder: selectedEncoder,
+      error: error instanceof Error ? error.message : 'Unknown NVENC failure',
+    }));
+    await removeHlsArtifacts(outputPath);
+    selectedEncoder = softwareEncoder;
+    await publishTranscoderStatus({
+      accountId: job.accountId,
+      state: 'fallback',
+      backend: 'software',
+      encoder: selectedEncoder,
+      sessionId: session.id,
+      jobId: job.id,
+      lastError: error instanceof Error ? error.message : 'Unknown NVENC failure',
+    });
+    await annotateTranscodeJob(job, 'software', selectedEncoder);
+    cancelled = await runFfmpeg(job.id, session.id, transcodeArguments(selectedEncoder), () => publishTranscoderStatus({
+      accountId: job.accountId,
+      state: 'transcoding',
+      backend: 'software',
+      encoder: selectedEncoder,
+      sessionId: session.id,
+      jobId: job.id,
+      lastError: null,
+    }));
+  }
   if (cancelled) await rm(outputPath, { recursive: true, force: true });
+  else await publishTranscoderStatus({
+    accountId: job.accountId,
+    state: 'ready',
+    backend: selectedEncoder.includes('_nvenc') ? 'nvenc' : 'software',
+    encoder: selectedEncoder,
+    sessionId: session.id,
+    jobId: job.id,
+    lastError: null,
+  });
 }
 
 function textSubtitleStreamIndexes(probe: Prisma.JsonValue | null): number[] {
@@ -515,47 +600,160 @@ function imageSubtitleStreamIndexes(probe: Prisma.JsonValue | null): number[] {
   });
 }
 
-let nvencEncoderCache: Promise<{ h264: boolean; hevc: boolean }> | null = null;
+type NvencCapabilities = { h264: boolean; hevc: boolean; gpuName: string | null; checkedAt: string };
+let nvencEncoderCache: Promise<NvencCapabilities> | null = null;
 
-function availableNvencEncoders(): Promise<{ h264: boolean; hevc: boolean }> {
+function availableNvencEncoders(): Promise<NvencCapabilities> {
   if (nvencEncoderCache) return nvencEncoderCache;
-  nvencEncoderCache = new Promise((resolveEncoders) => {
+  nvencEncoderCache = (async () => {
     const runtimeVisible =
       Boolean(process.env.NVIDIA_VISIBLE_DEVICES)
       && process.env.NVIDIA_VISIBLE_DEVICES !== 'void';
     if (!runtimeVisible) {
-      resolveEncoders({ h264: false, hevc: false });
-      return;
+      return { h264: false, hevc: false, gpuName: null, checkedAt: new Date().toISOString() };
     }
-    const child = spawn('ffmpeg', ['-hide_banner', '-encoders'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let output = '';
-    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      output = `${output}${chunk}`.slice(-250_000);
-    });
-    child.stderr.on('data', (chunk: string) => {
-      output = `${output}${chunk}`.slice(-250_000);
-    });
-    child.once('error', () => {
-      clearTimeout(timer);
-      resolveEncoders({ h264: false, hevc: false });
-    });
-    child.once('close', (code) => {
-      clearTimeout(timer);
-      resolveEncoders({
-        h264: code === 0 && /\bh264_nvenc\b/.test(output),
-        hevc: code === 0 && /\bhevc_nvenc\b/.test(output),
-      });
-    });
-  });
+    const [encoderResult, gpuResult] = await Promise.all([
+      execFileAsync('ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8', timeout: 10_000, maxBuffer: 300_000 }).catch(() => ({ stdout: '', stderr: '' })),
+      execFileAsync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { encoding: 'utf8', timeout: 10_000, maxBuffer: 20_000 }).catch(() => ({ stdout: '', stderr: '' })),
+    ]);
+    const advertised = `${encoderResult.stdout}${encoderResult.stderr}`;
+    const h264 = /\bh264_nvenc\b/.test(advertised) && await smokeNvencEncoder('h264_nvenc');
+    const hevc = /\bhevc_nvenc\b/.test(advertised) && await smokeNvencEncoder('hevc_nvenc');
+    return {
+      h264,
+      hevc,
+      gpuName: gpuResult.stdout.trim().split(/\r?\n/)[0] || null,
+      checkedAt: new Date().toISOString(),
+    };
+  })();
   return nvencEncoderCache;
 }
 
-async function runFfmpeg(jobId: string, sessionId: string, args: string[]): Promise<boolean> {
+async function smokeNvencEncoder(encoder: 'h264_nvenc' | 'hevc_nvenc'): Promise<boolean> {
+  try {
+    await execFileAsync('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error', '-nostdin',
+      '-f', 'lavfi', '-i', 'color=c=black:s=128x72:d=0.1',
+      '-frames:v', '1', '-c:v', encoder, '-f', 'null', '-',
+    ], { timeout: 15_000, maxBuffer: 100_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function publishTranscoderStatus(runtime: {
+  accountId: string;
+  state: string;
+  backend: 'nvenc' | 'software';
+  encoder: string | null;
+  sessionId: string | null;
+  jobId: string | null;
+  lastError: string | null;
+}): Promise<void> {
+  const capabilities = nvencEncoderCache ? await nvencEncoderCache : {
+    h264: false,
+    hevc: false,
+    gpuName: null,
+    checkedAt: new Date().toISOString(),
+  };
+  const telemetry = await nvidiaTelemetry();
+  const { accountId, ...status } = runtime;
+  const value = {
+    ...status,
+    capabilities,
+    telemetry,
+    maxConcurrent: transcodeMaxConcurrent,
+    workerId,
+    updatedAt: new Date().toISOString(),
+  };
+  await prisma.systemSetting.upsert({
+    where: { accountId_key: { accountId, key: transcodeStatusKey } },
+    create: {
+      accountId,
+      key: transcodeStatusKey,
+      value,
+    },
+    update: { value },
+  }).catch(() => undefined);
+}
+
+async function annotateTranscodeJob(
+  job: ClaimedJob,
+  backend: 'nvenc' | 'software',
+  encoder: string,
+): Promise<void> {
+  const payload = {
+    ...asJsonObject(job.payload),
+    transcodeBackend: backend,
+    transcodeEncoder: encoder,
+  };
+  await prisma.systemJob.update({
+    where: { id: job.id },
+    data: { payload },
+  });
+  job.payload = payload;
+}
+
+async function removeHlsArtifacts(outputPath: string): Promise<void> {
+  const entries = await readdir(outputPath, { withFileTypes: true });
+  await Promise.all(entries
+    .filter((entry) => entry.isDirectory() || /^(?:master|stream_|segment_)/.test(entry.name))
+    .map((entry) => rm(resolve(outputPath, entry.name), { recursive: true, force: true })));
+}
+
+async function nvidiaTelemetry(): Promise<{
+  utilizationPercent: number;
+  memoryUsedMiB: number;
+  memoryTotalMiB: number;
+  temperatureCelsius: number;
+} | null> {
+  try {
+    const { stdout } = await execFileAsync('nvidia-smi', [
+      '--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu',
+      '--format=csv,noheader,nounits',
+    ], { encoding: 'utf8', timeout: 10_000, maxBuffer: 20_000 });
+    const values = stdout.trim().split(/\r?\n/)[0]?.split(',').map((value) => Number.parseInt(value.trim(), 10));
+    if (!values || values.length < 4 || values.some((value) => !Number.isFinite(value))) return null;
+    return {
+      utilizationPercent: values[0]!,
+      memoryUsedMiB: values[1]!,
+      memoryTotalMiB: values[2]!,
+      temperatureCelsius: values[3]!,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function publishIdleTranscoderStatus(): Promise<void> {
+  const capabilities = await availableNvencEncoders();
+  const nvencAvailable = capabilities.h264 || capabilities.hevc;
+  const accounts = await prisma.account.findMany({ select: { id: true } });
+  await Promise.all(accounts.map(({ id }) => publishTranscoderStatus({
+    accountId: id,
+    state: 'idle',
+    backend: nvencAvailable ? 'nvenc' : 'software',
+    encoder: capabilities.h264 ? 'h264_nvenc' : capabilities.hevc ? 'hevc_nvenc' : null,
+    sessionId: null,
+    jobId: null,
+    lastError: null,
+  })));
+}
+
+class FfmpegExecutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FfmpegExecutionError';
+  }
+}
+
+async function runFfmpeg(
+  jobId: string,
+  sessionId: string,
+  args: string[],
+  onHeartbeat?: () => Promise<void>,
+): Promise<boolean> {
   return new Promise<boolean>((resolveProcess, rejectProcess) => {
     const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
@@ -579,6 +777,7 @@ async function runFfmpeg(jobId: string, sessionId: string, args: string[]): Prom
           where: { id: sessionId },
           select: { status: true, leaseExpiresAt: true },
         }),
+        onHeartbeat?.() ?? Promise.resolve(),
       ]).then(([, currentJob, session]) => {
         if (
           currentJob?.status !== 'running'
@@ -598,7 +797,7 @@ async function runFfmpeg(jobId: string, sessionId: string, args: string[]): Prom
     }, 10_000);
     child.once('error', (error) => {
       clearInterval(timer);
-      rejectProcess(error);
+      rejectProcess(new FfmpegExecutionError(`Unable to start FFmpeg: ${error.message}`));
     });
     child.once('close', (code) => {
       clearInterval(timer);
@@ -611,7 +810,7 @@ async function runFfmpeg(jobId: string, sessionId: string, args: string[]): Prom
         return;
       }
       if (code !== 0) {
-        rejectProcess(new Error(`FFmpeg exited with code ${code}: ${stderr.trim() || 'no diagnostic output'}`));
+        rejectProcess(new FfmpegExecutionError(`FFmpeg exited with code ${code}: ${stderr.trim() || 'no diagnostic output'}`));
         return;
       }
       resolveProcess(false);
@@ -942,6 +1141,15 @@ async function loop(): Promise<void> {
   if (workerMode === 'jobs') await ensureRecurringLeaseJob();
   console.info(JSON.stringify({ level: 'info', component: 'worker', workerId, workerMode, message: 'Worker started' }));
   while (!stopping) {
+    if (workerMode === 'transcode' && Date.now() - lastTranscoderHeartbeat >= 30_000) {
+      lastTranscoderHeartbeat = Date.now();
+      await publishIdleTranscoderStatus().catch((error) => console.warn(JSON.stringify({
+        level: 'warn',
+        component: 'transcoder',
+        message: 'Unable to publish transcoder availability',
+        error: error instanceof Error ? error.message : 'Unknown status failure',
+      })));
+    }
     if (workerMode === 'jobs' && Date.now() - lastLibraryScheduleCheck >= 30_000) {
       lastLibraryScheduleCheck = Date.now();
       try {
@@ -965,6 +1173,18 @@ async function loop(): Promise<void> {
       await finishJob(job);
       await rescheduleRecurringJob(job);
     } catch (error) {
+      if (workerMode === 'transcode') {
+        const payload = asJsonObject(job.payload);
+        await publishTranscoderStatus({
+          accountId: job.accountId,
+          state: 'failed',
+          backend: payload.transcodeBackend === 'nvenc' ? 'nvenc' : 'software',
+          encoder: typeof payload.transcodeEncoder === 'string' ? payload.transcodeEncoder : null,
+          sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : null,
+          jobId: job.id,
+          lastError: error instanceof Error ? error.message : 'Unknown transcode failure',
+        });
+      }
       await failJob(job, error);
       console.error(JSON.stringify({
         level: 'error',

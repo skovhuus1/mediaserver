@@ -114,6 +114,7 @@ services:
       REDIS_URL: redis://redis:6379
       BB_MEDIA_WORKER_MODE: transcode
       TRANSCODE_PATH: /transcode
+      BB_MEDIA_TRANSCODE_MAX_CONCURRENT: ${BB_MEDIA_TRANSCODE_MAX_CONCURRENT:-1}
     volumes:
       - ${MEDIA_PATH:-./media}:/media:ro
       - transcode_data:/transcode

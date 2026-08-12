@@ -248,8 +248,7 @@ Manuel metadata-matchning åbnes fra en titel i admin-katalogets detaljepanel. `
 
 - Automatisk oprettelse af flere biblioteker ud fra mappestrukturen; klassifikation og mappebaserede kategorier er implementeret, men biblioteker oprettes fortsat bevidst af administratoren.
 - Lokal caching/proxying af TMDB-billeder; den nuværende implementation gemmer validerede billedstier og henter billeder direkte fra TMDBs faste image-host.
-- Hardwareacceleration, flere adaptive HLS-renditions og serverstyret transcode-kapacitetsplanlægning; den nuværende separate transcoder bruger softwarebaseret `libx264` og producerer én planbegrænset rendition.
-- Hardwareaccelereret 4K tone mapping/encoding. HDR-pathen bruger i første omgang softwarefiltrene `zscale`/`tonemap` samt `libx265`, mens kompatibel HEVC kan remuxes uden videogenkodning.
+- Hardwareaccelereret videodekodning og CUDA-baseret 4K tone mapping. NVENC-encoding er opt-in og implementeret, mens decode/filtergrafen fortsat kører i software; SDR tone mapping bruger fortsat `zscale`/`tonemap`.
 - Ægte container-remux uden video-reencoding. `direct_stream` vælges derfor bevidst ikke endnu; browserinkompatible containere går gennem transcoding.
 - Automatisk næste episode, intro-/recap-markører og burn-in/OCR af billedbaserede undertekster som PGS/VobSub. Tekstbaserede sidecars og indlejrede tekstspor er implementeret.
 - Egen brandet Chromecast receiver og receiver-ejet heartbeat efter controllerfanen lukkes. Den nuværende Default Media Receiver kræver fortsat, at fanen forbliver aktiv, at `BB_MEDIA_PUBLIC_URL` eller serverens eksterne URL kan nås fra Chromecast-enheden, og at webpanelet åbnes via HTTPS. Ved privat HTTPS skal certifikatet være gyldigt på receiveren.
@@ -398,7 +397,7 @@ Denne leverance tilføjer komplet administrativ onboarding uden SMTP:
 
 Produktionsdomænet er `https://media.boltbytes.com`, mens Docker fortsat bruger host-port `6555` som intern upstream. DNS, certifikat, Nginx Proxy Manager, firewall, Range-streaming, fejlsøgning og rollback er dokumenteret i [`docs/domain-nginx-proxy-manager.md`](docs/domain-nginx-proxy-manager.md).
 
-Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, native file-watcher, hardware-transcoding, egen Chromecast receiver samt Android- og TV-klienter.
+Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, native file-watcher, hardwareaccelereret decode/tone mapping, egen Chromecast receiver samt Android- og TV-klienter.
 
 CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, så health-, Direct Play-, subtitle-, HLS- og transcode-kontroller rammer den publicerede testport.
 
@@ -424,7 +423,7 @@ CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, s
 - Playback authorization beregner et serverstyret kvalitetsloft som minimum af abonnement, servermaksimum, fysisk sk?rmh?jde, enhedens kvalitetstilstand, databesparelse og upscaling-politik.
 - Den f?lles ladder indeholder 360p, 480p, 720p, 1080p, 1440p og 2160p og v?lger h?jst fire j?vnt fordelte renditions. Databesparelse begr?nser output til 720p og cirka 3 Mbps.
 - Workeren producerer renditions i ?n FFmpeg-dekodning med segmentjusterede streams, automatisk mastermanifest og nummererede playlists/segmenter. API-et markerer f?rst streamen klar, n?r alle variant-playlister har et l?sbart f?rste segment.
-- NVIDIA NVENC v?lges kun, n?r container-runtime er synlig og FFmpeg annoncerer den n?dvendige H.264/HEVC-encoder. Ellers bruges libx264/libx265.
+- NVIDIA NVENC vælges kun, når GPU-runtime er synlig, `nvidia-smi` svarer, FFmpeg annoncerer den nødvendige H.264/HEVC-encoder, og en rigtig one-frame encode lykkes. En FFmpeg/NVENC-runtimefejl falder sikkert tilbage til `libx264`/`libx265` uden at slette udtrukne undertekster.
 - HDR bevares som HEVC Main10, n?r klient, plan og HDR-mode tillader det. `force_sdr` bruger tone mapping; opskalerede niveauer m?rkes tydeligt og p?st?r ikke at skabe ny kildedetalje.
 - Hls.js starter i Auto med player-size- og FPS-drop-capping. Manuelle niveauer kan v?lges, og Auto gendannes med level `-1`.
 - Playeren bruger profilens lyd-/undertekstsprog, binder tekstspor efter `loadedmetadata` og `addtrack`, skjuler overlay efter tre sekunders afspilning og holder fullscreen-state synkron med `fullscreenchange`.
@@ -433,7 +432,33 @@ CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, s
 ### Fortsat rester
 
 - `PATCH /playback/sessions/:id/configuration` genbruger stream-token, session-id og logical session ved aktivering eller fjernelse af PGS/VobSub/DVB burn-in.
-- NVENC og HDR/SDR skal staging-smoketestes p? den faktiske NVIDIA-host med rigtige 4K HDR-filer.
+- NVENC og HDR/SDR skal fortsat staging-smoketestes på den faktiske NVIDIA-host med rigtige 4K HDR-filer; CI har ingen fysisk NVIDIA-GPU.
+
+## NVIDIA NVENC og transcode-kapacitet (2026-08-12)
+
+Hardwareencoding er bevidst opt-in. Installér først en kompatibel NVIDIA-driver og [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) på Docker-hosten, og verificér [Docker Compose GPU-understøttelsen](https://docs.docker.com/compose/how-tos/gpu-support/). Sæt derefter følgende i `.env`:
+
+```env
+BB_MEDIA_GPU_ENABLED=true
+BB_MEDIA_TRANSCODE_MAX_CONCURRENT=1
+NVIDIA_VISIBLE_DEVICES=all
+```
+
+Start eller genopbyg installationen med GPU-overlayet:
+
+```bash
+sudo docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.updater.yml \
+  -f docker-compose.nvidia.yml \
+  up -d --build --remove-orphans --wait --wait-timeout 300
+```
+
+Når `BB_MEDIA_GPU_ENABLED=true`, tilføjer den indbyggede updater automatisk `docker-compose.nvidia.yml` ved alle senere builds og genstarter. Uden flaget starter samme kode på CPU og bruger `libx264`/`libx265`; GPU-overlayet er derfor aldrig et krav for en almindelig installation eller CI.
+
+Transcoderen reserverer kapacitet atomisk på tværs af worker-replikaer. Standardgrænsen er én aktiv transcode, og overskydende jobs bliver i den durable kø. Admin-dashboardet opdaterer CPU, RAM, GPU-belastning, kø, aktiv/tilgængelig kapacitet og encoder for hver session cirka hvert andet sekund. Et worker-heartbeat ældre end 90 sekunder vises som offline i stedet for at genbruge gammel GPU-status.
+
+NVENC-smoke-testen og runtime-fallbacken beskytter tilgængeligheden, men dette er hardwareencoding, ikke fuld GPU-pipeline: videodekodning, skalering, subtitle-overlay og HDR-til-SDR tone mapping bruger fortsat CPU. En fysisk 4K HDR/NVIDIA-stagingtest er derfor fortsat en release-gate, før kapacitet eller billedkvalitet kan betegnes som verificeret på serveren.
 - Egen Chromecast receiver er fortsat en senere fase; Default Media Receiver-flowet er bevaret.
 
 
