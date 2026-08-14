@@ -489,8 +489,8 @@ export class PlaybackService {
     });
   }
 
-  list(actor: AuthenticatedUser) {
-    return this.prisma.playbackSession.findMany({
+  async list(actor: AuthenticatedUser) {
+    const sessions = await this.prisma.playbackSession.findMany({
       where: {
         accountId: actor.accountId,
         ...(isPrivileged(actor) ? {} : { userId: actor.sub }),
@@ -517,6 +517,37 @@ export class PlaybackService {
       },
       orderBy: { startedAt: 'desc' },
     });
+    const transcodeJobs = sessions.length
+      ? await this.prisma.systemJob.findMany({
+          where: {
+            accountId: actor.accountId,
+            type: 'playback.transcode',
+            status: { in: ['queued', 'running', 'completed', 'failed'] },
+            OR: sessions.map((session) => ({
+              payload: { path: ['sessionId'], equals: session.id },
+            })),
+          },
+          select: { payload: true },
+          orderBy: { updatedAt: 'desc' },
+        })
+      : [];
+    const engines = new Map<string, { backend: 'nvenc' | 'software'; encoder: string | null }>();
+    for (const job of transcodeJobs) {
+      const payload = job.payload !== null && typeof job.payload === 'object' && !Array.isArray(job.payload)
+        ? job.payload as Record<string, unknown>
+        : {};
+      const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : null;
+      if (!sessionId || engines.has(sessionId)) continue;
+      engines.set(sessionId, {
+        backend: payload.transcodeBackend === 'nvenc' ? 'nvenc' : 'software',
+        encoder: typeof payload.transcodeEncoder === 'string' ? payload.transcodeEncoder : null,
+      });
+    }
+    return sessions.map((session) => ({
+      ...session,
+      transcodeBackend: engines.get(session.id)?.backend ?? null,
+      transcodeEncoder: engines.get(session.id)?.encoder ?? null,
+    }));
   }
 
   private audit(

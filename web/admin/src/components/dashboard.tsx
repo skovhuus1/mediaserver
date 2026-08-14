@@ -34,6 +34,8 @@ type Session = {
   currentBitrate: number | null;
   currentHeight: number | null;
   bufferAheadMs: number | null;
+  transcodeBackend: 'nvenc' | 'software' | null;
+  transcodeEncoder: string | null;
   lastHeartbeatAt: string;
   startedAt: string;
   media: { title: string };
@@ -49,6 +51,26 @@ type ServerStats = {
   loadAverage: number[];
   uptimeSeconds: number;
   sampledAt: string;
+  transcoder?: {
+    state: string;
+    available: boolean;
+    stale: boolean;
+    backend: 'nvenc' | 'software' | null;
+    encoder: string | null;
+    gpuName: string | null;
+    h264Nvenc: boolean;
+    hevcNvenc: boolean;
+    telemetry: {
+      utilizationPercent: number;
+      memoryUsedMiB: number;
+      memoryTotalMiB: number;
+      temperatureCelsius: number;
+    } | null;
+    maxConcurrent: number;
+    running: number;
+    queued: number;
+    lastError: string | null;
+  };
 };
 type LibraryScan = {
   id: string;
@@ -250,12 +272,16 @@ function StatusRail({
         <div className="server-metrics">
           <ServerMetric icon={<Cpu size={14} />} label="CPU" value={stats ? `${stats.cpuPercent.toFixed(0)}%` : '...'} percent={stats?.cpuPercent ?? 0} />
           <ServerMetric icon={<MemoryStick size={14} />} label="RAM" value={stats ? `${stats.memoryPercent.toFixed(0)}%` : '...'} percent={stats?.memoryPercent ?? 0} />
+          <ServerMetric icon={<Activity size={14} />} label="GPU" value={stats?.transcoder?.telemetry ? `${stats.transcoder.telemetry.utilizationPercent.toFixed(0)}%` : stats?.transcoder?.h264Nvenc || stats?.transcoder?.hevcNvenc ? 'Klar' : 'CPU'} percent={stats?.transcoder?.telemetry?.utilizationPercent ?? 0} />
         </div>
         <dl className="status-list">
           <div><dt>Version</dt><dd>{health?.version ?? '...'}</dd></div>
           <div><dt>Medier</dt><dd>{mediaCount}</dd></div>
           <div><dt>Sessions</dt><dd>{sessions.length}</dd></div>
           <div><dt>RAM</dt><dd>{stats ? `${formatBytes(stats.memoryUsedBytes)} / ${formatBytes(stats.memoryTotalBytes)}` : '...'}</dd></div>
+          <div><dt>Transcoder</dt><dd>{stats?.transcoder ? `${stats.transcoder.available ? stats.transcoder.backend?.toUpperCase() ?? 'software' : 'offline'} · ${stats.transcoder.running}/${stats.transcoder.maxConcurrent}` : '...'}</dd></div>
+          <div><dt>Transcode-kø</dt><dd>{stats?.transcoder?.queued ?? '...'}</dd></div>
+          {stats?.transcoder?.gpuName ? <div><dt>GPU</dt><dd>{stats.transcoder.gpuName}</dd></div> : null}
         </dl>
       </section>
       <section className="rail-card sessions-card">
@@ -267,6 +293,7 @@ function StatusRail({
               <strong>{sanitizeMediaTitle(session.media.title) || session.media.title}</strong>
               <small>{session.user.displayName} · {session.device.name}{session.isCastSession ? ' · Cast' : ''}</small>
               <small>{session.method.replaceAll('_', ' ')} · {session.currentHeight ? `${session.currentHeight}p` : 'original'} · {formatBitrate(session.currentBitrate)}</small>
+              {session.transcodeBackend ? <small>{session.transcodeBackend === 'nvenc' ? 'NVENC' : 'Software'}{session.transcodeEncoder ? ` · ${session.transcodeEncoder}` : ''}</small> : null}
               <small>{session.runtimeState === 'buffering' ? 'Buffering' : session.runtimeState === 'paused' ? 'Pauset' : 'Afspiller'} · buffer {formatBuffer(session.bufferAheadMs)}</small>
               {session.durationMs ? <span className="session-progress"><i style={{ width: `${Math.min(100, (session.positionMs / session.durationMs) * 100)}%` }} /></span> : null}
             </span>

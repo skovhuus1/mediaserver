@@ -21,6 +21,9 @@ failed() {
 trap failed EXIT HUP INT TERM
 
 compose_files="-f docker-compose.yml -f docker-compose.updater.yml"
+if [ -f .env ] && grep -Eiq '^[[:space:]]*BB_MEDIA_GPU_ENABLED[[:space:]]*=[[:space:]]*(true|1|yes)[[:space:]]*$' .env; then
+  compose_files="$compose_files -f docker-compose.nvidia.yml"
+fi
 progress 60 runner "Updater-runneren er startet"
 sleep 2
 progress 65 building "Docker images bygges"

@@ -340,7 +340,7 @@ a { color: inherit; text-decoration: none; }
 .rail-card { margin-bottom: 12px; padding: 14px; border: 1px solid rgba(255,255,255,.035); border-radius: 7px; background: linear-gradient(145deg, #171c22, #12171c); box-shadow: 0 10px 28px rgba(0,0,0,.14); }
 .rail-title { display: flex; align-items: center; justify-content: space-between; }
 .rail-title h3, .rail-card > h3 { margin: 0; font: 650 12px var(--font-display), sans-serif; }
-.server-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0; }
+.server-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
 .server-metrics > div { min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.025); }
 .server-metrics span { display: flex; align-items: center; gap: 5px; color: var(--muted); }
 .server-metrics strong { display: block; margin: 7px 0; font-size: 16px; }
