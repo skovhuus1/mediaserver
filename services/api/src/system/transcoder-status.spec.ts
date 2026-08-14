@@ -19,6 +19,14 @@ describe('resolveTranscoderStatus', () => {
         memoryTotalMiB: 4096,
         temperatureCelsius: 58,
       },
+      cpuProfile: {
+        preset: 'veryfast',
+        totalThreads: 7,
+        filterThreads: 1,
+        threadsPerRendition: 2,
+        maxHeight: 1080,
+        maxRenditions: 3,
+      },
     }, { running: 1, queued: 3 }, now)).toMatchObject({
       state: 'transcoding',
       available: true,
@@ -32,6 +40,7 @@ describe('resolveTranscoderStatus', () => {
       running: 1,
       queued: 3,
       sessionId: 'session-1',
+      cpuProfile: { preset: 'veryfast', totalThreads: 7, maxHeight: 1080, maxRenditions: 3 },
     });
   });
 
@@ -59,6 +68,7 @@ describe('resolveTranscoderStatus', () => {
       h264Nvenc: false,
       hevcNvenc: false,
       telemetry: null,
+      cpuProfile: null,
       maxConcurrent: 1,
       running: 0,
       queued: 0,

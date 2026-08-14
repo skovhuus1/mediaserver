@@ -441,6 +441,8 @@ Hardwareencoding er bevidst opt-in. Installér først en kompatibel NVIDIA-drive
 ```env
 BB_MEDIA_GPU_ENABLED=true
 BB_MEDIA_TRANSCODE_MAX_CONCURRENT=1
+BB_MEDIA_MAX_TRANSCODE_HEIGHT=2160
+BB_MEDIA_MAX_TRANSCODE_RENDITIONS=4
 NVIDIA_VISIBLE_DEVICES=all
 ```
 
@@ -459,6 +461,24 @@ Når `BB_MEDIA_GPU_ENABLED=true`, tilføjer den indbyggede updater automatisk `d
 Transcoderen reserverer kapacitet atomisk på tværs af worker-replikaer. Standardgrænsen er én aktiv transcode, og overskydende jobs bliver i den durable kø. Admin-dashboardet opdaterer CPU, RAM, GPU-belastning, kø, aktiv/tilgængelig kapacitet og encoder for hver session cirka hvert andet sekund. Et worker-heartbeat ældre end 90 sekunder vises som offline i stedet for at genbruge gammel GPU-status.
 
 NVENC-smoke-testen og runtime-fallbacken beskytter tilgængeligheden, men dette er hardwareencoding, ikke fuld GPU-pipeline: videodekodning, skalering, subtitle-overlay og HDR-til-SDR tone mapping bruger fortsat CPU. En fysisk 4K HDR/NVIDIA-stagingtest er derfor fortsat en release-gate, før kapacitet eller billedkvalitet kan betegnes som verificeret på serveren.
+
+## CPU-first Direct Play og softwaretranscoding (2026-08-14)
+
+Installationer uden GPU foretrækker nu Direct Play for en kompatibel source, også når enheden står på `Auto`. En managed HLS-transcode oprettes kun, når databesparelse kræver højst 720p/3 Mbps, et fast kvalitetsvalg reelt afviger fra source, den estimerede netværkskapacitet ikke har 25 procents sikkerhedsmargin, eller serveren eksplicit har deaktiveret Direct Play-prioriteten. Det undgår, at en almindelig kompatibel film bruger CPU alene for at fremstille kvalitetsniveauer, som klienten ikke behøver.
+
+FFprobe-aliaser som `avc1`/`h264`, `hvc1`/`hevc`, `mp4a`/`aac` og flerstrengede formatnavne normaliseres før beslutningen. Webklienten sender desuden understøttede lydcodecs separat. Ældre klienter uden feltet forbliver kompatible; nye klienter får en præcis `audio_codec_unsupported`-årsag frem for en Direct Play-session, der først fejler i browseren.
+
+Softwaretranscoding bruger som standard højst `1080p`, et automatisk CPU-budget med én logisk CPU reserveret til API/operativsystem og højst tre adaptive renditions. `veryfast` bruges for både `libx264` og `libx265`, og det samlede budget deles mellem encoderne og FFmpegs filtergraf. Standardkonfigurationen er:
+
+```env
+BB_MEDIA_PREFER_DIRECT_PLAY=true
+BB_MEDIA_MAX_TRANSCODE_HEIGHT=1080
+BB_MEDIA_MAX_TRANSCODE_RENDITIONS=
+BB_MEDIA_CPU_TRANSCODE_PRESET=veryfast
+BB_MEDIA_CPU_TRANSCODE_THREADS=
+```
+
+Tomme thread- og rendition-felter betyder automatisk detektion. Et eksplicit tal kan bruges ved container-CPU-limits, men trådbudgettet begrænses altid til de logiske CPU'er, Node faktisk kan se. Automatisk rendition-antal er højst fire og kræver cirka to CPU-tråde pr. niveau; en typisk 8-trådet CPU får derfor tre niveauer, mens en mindre host får færre. `BB_MEDIA_MAX_TRANSCODE_HEIGHT=2160` er muligt, men softwarebaseret 4K/HDR-transcoding kan være langsommere end realtid; 4K Direct Play påvirkes ikke af 1080p-transcode-loftet. Adminpanelet viser preset, samlet trådbudget, højdeloft og antal renditions sammen med live CPU/RAM/sessionstatus.
 - Egen Chromecast receiver er fortsat en senere fase; Default Media Receiver-flowet er bevaret.
 
 

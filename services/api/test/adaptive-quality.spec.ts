@@ -9,6 +9,7 @@ const defaults = {
   planMaxHeight: 2160,
   planMaxBitrate: 20_000_000,
   serverMaxHeight: 2160,
+  serverMaxRenditions: 4,
   screenHeight: 1080,
   devicePixelRatio: 2,
   estimatedDownlinkMbps: 50,
@@ -46,6 +47,12 @@ describe('adaptive quality plan', () => {
     const plan = buildAdaptiveQualityPlan({ ...defaults, dataSaver: true });
     expect(plan.effectiveMaxHeight).toBe(720);
     expect(plan.effectiveMaxBitrate).toBe(3_000_000);
+  });
+
+  it('limits the ladder to the server CPU rendition budget', () => {
+    const plan = buildAdaptiveQualityPlan({ ...defaults, serverMaxRenditions: 2 });
+    expect(plan.renditions).toHaveLength(2);
+    expect(plan.renditions.map((rendition) => rendition.height)).toEqual([360, 2160]);
   });
 
   it('forces SDR while retaining HDR in automatic mode', () => {

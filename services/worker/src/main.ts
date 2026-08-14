@@ -1,8 +1,9 @@
 import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
-import { classifyMediaPath, detectVideoSignalProfile } from '@boltbytes/contracts';
+import { classifyMediaPath, detectVideoSignalProfile, resolveCpuTranscodeProfile } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { availableParallelism } from 'node:os';
 import { extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { enrichLibraryMetadata, hasTmdbConfiguration } from './metadata.js';
@@ -472,10 +473,23 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-map', `[v${index}]`,
     '-map', '0:a:0?',
   ]);
+  const cpuProfile = resolveCpuTranscodeProfile({
+    availableThreads: availableParallelism(),
+    renditionCount: renditions.length,
+    configuredThreads: process.env.BB_MEDIA_CPU_TRANSCODE_THREADS,
+    configuredRenditions: process.env.BB_MEDIA_MAX_TRANSCODE_RENDITIONS,
+    configuredPreset: process.env.BB_MEDIA_CPU_TRANSCODE_PRESET,
+    configuredMaxHeight: process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT
+      ?? (/^(?:true|1|yes)$/i.test(process.env.BB_MEDIA_GPU_ENABLED?.trim() ?? '') ? 2160 : 1080),
+  });
   const streamArguments = (videoEncoder: string) => renditions.flatMap((rendition, index) => {
     const bitrateKbps = Math.round(rendition.bitrate / 1_000);
     return [
       `-c:v:${index}`, videoEncoder,
+      ...(videoEncoder === 'libx264' || videoEncoder === 'libx265' ? [
+        `-preset:v:${index}`, cpuProfile.preset,
+        `-threads:v:${index}`, String(cpuProfile.threadsPerRendition),
+      ] : []),
       `-b:v:${index}`, `${bitrateKbps}k`,
       `-maxrate:v:${index}`, `${bitrateKbps}k`,
       `-bufsize:v:${index}`, `${bitrateKbps * 2}k`,
@@ -493,6 +507,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-nostdin',
     '-y',
     '-i', inputPath,
+    '-filter_complex_threads', String(cpuProfile.filterThreads),
     '-filter_complex', filterComplex,
     ...streamMaps,
     ...streamArguments(videoEncoder),
@@ -663,6 +678,15 @@ async function publishTranscoderStatus(runtime: {
     ...status,
     capabilities,
     telemetry,
+    cpuProfile: resolveCpuTranscodeProfile({
+      availableThreads: availableParallelism(),
+      renditionCount: Number.parseInt(process.env.BB_MEDIA_MAX_TRANSCODE_RENDITIONS?.trim() || '4', 10) || 4,
+      configuredThreads: process.env.BB_MEDIA_CPU_TRANSCODE_THREADS,
+      configuredRenditions: process.env.BB_MEDIA_MAX_TRANSCODE_RENDITIONS,
+      configuredPreset: process.env.BB_MEDIA_CPU_TRANSCODE_PRESET,
+      configuredMaxHeight: process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT
+        ?? (/^(?:true|1|yes)$/i.test(process.env.BB_MEDIA_GPU_ENABLED?.trim() ?? '') ? 2160 : 1080),
+    }),
     maxConcurrent: transcodeMaxConcurrent,
     workerId,
     updatedAt: new Date().toISOString(),

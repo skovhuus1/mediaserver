@@ -25,6 +25,12 @@ export class PlaybackCapabilitiesDto {
   @IsString({ each: true })
   supportedCodecs!: string[];
 
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(40)
+  @IsString({ each: true })
+  supportedAudioCodecs?: string[];
+
   @IsArray()
   @ArrayMaxSize(40)
   @IsString({ each: true })

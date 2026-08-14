@@ -66,6 +66,14 @@ type ServerStats = {
       memoryTotalMiB: number;
       temperatureCelsius: number;
     } | null;
+    cpuProfile: {
+      preset: string;
+      totalThreads: number;
+      filterThreads: number;
+      threadsPerRendition: number;
+      maxHeight: number;
+      maxRenditions: number;
+    } | null;
     maxConcurrent: number;
     running: number;
     queued: number;
@@ -281,6 +289,7 @@ function StatusRail({
           <div><dt>RAM</dt><dd>{stats ? `${formatBytes(stats.memoryUsedBytes)} / ${formatBytes(stats.memoryTotalBytes)}` : '...'}</dd></div>
           <div><dt>Transcoder</dt><dd>{stats?.transcoder ? `${stats.transcoder.available ? stats.transcoder.backend?.toUpperCase() ?? 'software' : 'offline'} · ${stats.transcoder.running}/${stats.transcoder.maxConcurrent}` : '...'}</dd></div>
           <div><dt>Transcode-kø</dt><dd>{stats?.transcoder?.queued ?? '...'}</dd></div>
+          <div><dt>CPU-profil</dt><dd>{stats?.transcoder?.cpuProfile ? `${stats.transcoder.cpuProfile.preset} · ${stats.transcoder.cpuProfile.totalThreads} tråde · ${stats.transcoder.cpuProfile.maxHeight}p/${stats.transcoder.cpuProfile.maxRenditions}` : '...'}</dd></div>
           {stats?.transcoder?.gpuName ? <div><dt>GPU</dt><dd>{stats.transcoder.gpuName}</dd></div> : null}
         </dl>
       </section>
