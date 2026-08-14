@@ -1182,6 +1182,7 @@ function browserCapabilities() {
     && window.matchMedia('(dynamic-range: high)').matches;
   return {
     supportedCodecs: ['h264', 'avc1', 'aac', 'mp3', 'vp8', 'vp9', 'opus', ...(supportsHevc ? ['hevc', 'h265'] : [])],
+    supportedAudioCodecs: ['aac', 'mp3', 'opus', 'vorbis'],
     supportedContainers: ['mov', 'mp4', 'webm', 'ogg'],
     screenHeight: window.screen.height,
     devicePixelRatio: window.devicePixelRatio || 1,

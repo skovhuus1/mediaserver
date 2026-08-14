@@ -9,6 +9,7 @@ export type AdaptiveQualityInput = {
   planMaxHeight: number;
   planMaxBitrate: number;
   serverMaxHeight?: number;
+  serverMaxRenditions?: number;
   screenHeight?: number | null;
   devicePixelRatio?: number | null;
   estimatedDownlinkMbps?: number | null;
@@ -89,7 +90,10 @@ export function buildAdaptiveQualityPlan(
       [...LEVELS].reverse().find((level) => level.height <= sourceHeight) ?? LEVELS[0];
     levels = [nearest];
   }
-  levels = evenlyDistributed(levels, 4);
+  const maximumRenditions = Number.isFinite(input.serverMaxRenditions)
+    ? Math.max(1, Math.min(4, Math.trunc(input.serverMaxRenditions!)))
+    : 4;
+  levels = evenlyDistributed(levels, maximumRenditions);
 
   return {
     mode: input.qualityMode,

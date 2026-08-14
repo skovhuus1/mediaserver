@@ -1,5 +1,6 @@
 import { ForbiddenException, HttpException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { buildAdaptiveQualityPlan, detectVideoSignalProfile, isHevcCodec, type AuthenticatedUser } from '@boltbytes/contracts';
+import { buildAdaptiveQualityPlan, detectVideoSignalProfile, isHevcCodec, resolveCpuTranscodeProfile, type AuthenticatedUser } from '@boltbytes/contracts';
+import { availableParallelism } from 'node:os';
 import { isPrivileged } from '../common/auth';
 import { correlationId } from '../common/request-context';
 import { EntitlementsService } from '../entitlements/entitlements.service';
@@ -8,10 +9,20 @@ import { PrismaService } from '../prisma/prisma.service';
 import { createCastStreamToken } from './cast-stream-token';
 import { streamTokenMatches } from './direct-stream-policy';
 import { AuthorizePlaybackDto, CastHandoffDto, ReconfigurePlaybackDto } from './playback.dto';
-import { choosePlaybackMethod } from './playback-decision';
+import { choosePlaybackMethod, shouldTranscodeCompatibleSource } from './playback-decision';
 import { StreamReservationService } from './stream-reservation.service';
 import { imageSubtitleDescriptors, SubtitleStreamService } from './subtitle-stream.service';
 import { TranscodeStreamService } from './transcode-stream.service';
+
+const cpuTranscodeProfile = resolveCpuTranscodeProfile({
+  availableThreads: availableParallelism(),
+  renditionCount: 4,
+  configuredThreads: process.env.BB_MEDIA_CPU_TRANSCODE_THREADS,
+  configuredRenditions: process.env.BB_MEDIA_MAX_TRANSCODE_RENDITIONS,
+  configuredPreset: process.env.BB_MEDIA_CPU_TRANSCODE_PRESET,
+  configuredMaxHeight: process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT
+    ?? (/^(?:true|1|yes)$/i.test(process.env.BB_MEDIA_GPU_ENABLED?.trim() ?? '') ? 2160 : 1080),
+});
 
 @Injectable()
 export class PlaybackService {
@@ -79,7 +90,8 @@ export class PlaybackService {
       sourceHdr: Boolean(sourceVideo.hdr),
       planMaxHeight: entitlement.effective.maxVideoResolution,
       planMaxBitrate: entitlement.effective.maxVideoBitrate * 1_000,
-      serverMaxHeight: Number(process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT ?? 2160),
+      serverMaxHeight: cpuTranscodeProfile.maxHeight,
+      serverMaxRenditions: cpuTranscodeProfile.maxRenditions,
       screenHeight: dto.capabilities.screenHeight ?? null,
       devicePixelRatio: dto.capabilities.devicePixelRatio ?? null,
       estimatedDownlinkMbps: dto.capabilities.estimatedDownlinkMbps ?? null,
@@ -97,19 +109,31 @@ export class PlaybackService {
       hdr: sourceVideo.hdr,
       supportsHdr: dto.capabilities.supportsHdr,
       supportedCodecs: dto.capabilities.supportedCodecs,
+      audioCodec: media.file.audioCodec,
+      supportedAudioCodecs: dto.capabilities.supportedAudioCodecs,
       supportedContainers: dto.capabilities.supportedContainers,
       entitlements: entitlement.effective,
+    });
+    const compatibleSourcePolicy = shouldTranscodeCompatibleSource({
+      qualityMode: device.qualityMode as 'auto' | 'fixed' | 'original',
+      sourceHeight: media.height,
+      sourceBitrate: media.bitrate,
+      targetHeight: adaptiveQuality.effectiveMaxHeight,
+      estimatedDownlinkMbps: dto.capabilities.estimatedDownlinkMbps ?? null,
+      dataSaver: device.dataSaver,
+      preferDirectPlay: !/^(?:false|0|no)$/i.test(process.env.BB_MEDIA_PREFER_DIRECT_PLAY?.trim() ?? ''),
     });
     const decision =
       normalDecision.allowed
       && normalDecision.method === 'direct_play'
-      && device.qualityMode !== 'original'
+      && compatibleSourcePolicy.required
       && entitlement.effective.allowVideoTranscode
         ? {
             allowed: true as const,
             method: 'transcode' as const,
             code: 'adaptive_transcode',
-            reason: 'Adaptive quality is enabled for this device',
+            reason: compatibleSourcePolicy.reason,
+            directPlayBlockers: normalDecision.directPlayBlockers,
           }
         : normalDecision;
     if (!decision.allowed) {
@@ -287,7 +311,8 @@ export class PlaybackService {
       sourceHdr: Boolean(sourceVideo.hdr),
       planMaxHeight: entitlement.effective.maxVideoResolution,
       planMaxBitrate: entitlement.effective.maxVideoBitrate * 1_000,
-      serverMaxHeight: Number(process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT ?? 2160),
+      serverMaxHeight: cpuTranscodeProfile.maxHeight,
+      serverMaxRenditions: cpuTranscodeProfile.maxRenditions,
       screenHeight: null,
       devicePixelRatio: null,
       estimatedDownlinkMbps: null,
@@ -572,8 +597,9 @@ export class PlaybackService {
   }
 
   private directContentType(container: string | null): string {
-    if (container === 'webm') return 'video/webm';
-    if (container === 'mov' || container === 'mp4') return 'video/mp4';
+    const containers = container?.toLowerCase().split(',').map((value) => value.trim()) ?? [];
+    if (containers.includes('webm')) return 'video/webm';
+    if (containers.some((value) => value === 'mov' || value === 'mp4')) return 'video/mp4';
     return 'application/octet-stream';
   }
 }
