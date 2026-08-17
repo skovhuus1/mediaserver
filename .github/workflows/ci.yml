@@ -111,6 +111,16 @@ jobs:
             -f lavfi -i anullsrc=r=48000:cl=stereo \
             -shortest -c:v libx264 -c:a aac \
             "/ci-media/CI Smoke (2026).mp4"
+          docker compose run --rm --no-deps \
+            --user 0:0 \
+            --entrypoint ffmpeg \
+            -v "$PWD/media/Film/Action:/ci-media" \
+            worker \
+            -hide_banner -loglevel error \
+            -f lavfi -i testsrc2=s=320x240:r=24:d=1 \
+            -f lavfi -i anullsrc=r=48000:cl=stereo \
+            -shortest -c:v libx264 -g 24 -c:a ac3 \
+            "/ci-media/CI Remux (2026).mkv"
           cat > "media/Film/Action/CI Smoke (2026).da.srt" <<'SUBTITLE'
           1
           00:00:00,000 --> 00:00:00,900
@@ -184,13 +194,15 @@ jobs:
             exit 1
           fi
           test "$(jq -r '.[0].filesSeen' <<<"$scans")" -ge 1
-          test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/media" | jq 'length')" -ge 1
+          test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/media" | jq 'length')" -ge 2
           media="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/media")"
-          test "$(jq -r '.[0].title' <<<"$media")" = "CI Smoke"
-          test "$(jq -r '.[0].type' <<<"$media")" = "movie"
-          test "$(jq -r '.[0].category' <<<"$media")" = "Action"
-          test "$(jq -r '.[0].releaseYear' <<<"$media")" -eq 2026
-          media_id="$(jq -er '.[0].id' <<<"$media")"
+          smoke_media="$(jq -er '.[] | select(.title == "CI Smoke")' <<<"$media")"
+          remux_media="$(jq -er '.[] | select(.title == "CI Remux")' <<<"$media")"
+          test "$(jq -r '.type' <<<"$smoke_media")" = "movie"
+          test "$(jq -r '.category' <<<"$smoke_media")" = "Action"
+          test "$(jq -r '.releaseYear' <<<"$smoke_media")" -eq 2026
+          media_id="$(jq -er '.id' <<<"$smoke_media")"
+          remux_media_id="$(jq -er '.id' <<<"$remux_media")"
           playback_context="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/playback/context")"
           profile_id="$(jq -er '.profileId' <<<"$playback_context")"
           device_id="$(jq -er '.deviceId' <<<"$playback_context")"
@@ -257,6 +269,50 @@ jobs:
             -X DELETE \
             -H "authorization: Bearer $token" \
             "$api_base/playback/sessions/$session_id" >/dev/null
+
+          remux_authorization="$(curl --fail --silent --show-error \
+            -H "authorization: Bearer $token" \
+            -H 'content-type: application/json' \
+            -d "{\"profileId\":\"$profile_id\",\"mediaId\":\"$remux_media_id\",\"deviceId\":\"$device_id\",\"capabilities\":{\"supportedCodecs\":[\"h264\"],\"supportedAudioCodecs\":[\"aac\"],\"supportedContainers\":[\"mov\",\"mp4\"]}}" \
+            "$api_base/playback/authorize")"
+          remux_session_id="$(jq -er '.sessionId' <<<"$remux_authorization")"
+          remux_status_url="$(jq -er '.transcodeStatusUrl' <<<"$remux_authorization")"
+          test "$(jq -r '.method' <<<"$remux_authorization")" = "direct_stream"
+          test "$(jq -r '.contentType' <<<"$remux_authorization")" = "application/x-mpegURL"
+          remux_state=""
+          for _ in $(seq 1 90); do
+            remux_status="$(curl --fail --silent --show-error "http://127.0.0.1:6555$remux_status_url")"
+            remux_state="$(jq -r '.state' <<<"$remux_status")"
+            if [ "$remux_state" = "ready" ] || [ "$remux_state" = "failed" ]; then break; fi
+            sleep 1
+          done
+          if [ "$remux_state" != "ready" ]; then
+            jq . <<<"$remux_status"
+            exit 1
+          fi
+          remux_stream_url="$(jq -er '.streamUrl' <<<"$remux_authorization")"
+          curl --fail --silent --show-error -o /tmp/bb-media-remux-master.m3u8 \
+            "http://127.0.0.1:6555$remux_stream_url"
+          remux_variant_path="$(grep -E '^stream_[0-9]+\.m3u8\?token=' /tmp/bb-media-remux-master.m3u8 | head -n1)"
+          test -n "$remux_variant_path"
+          curl --fail --silent --show-error -o /tmp/bb-media-remux-stream.m3u8 \
+            "http://127.0.0.1:6555/api/v1/playback/sessions/$remux_session_id/hls/$remux_variant_path"
+          remux_init_path="$(sed -n 's/^#EXT-X-MAP:URI="\([^"]*\)".*/\1/p' /tmp/bb-media-remux-stream.m3u8 | head -n1)"
+          remux_segment_path="$(grep -E '^segment_[0-9]+_[0-9]{5}\.m4s\?token=' /tmp/bb-media-remux-stream.m3u8 | head -n1)"
+          test -n "$remux_init_path"
+          test -n "$remux_segment_path"
+          curl --fail --silent --show-error -D /tmp/bb-media-remux-init-headers -o /tmp/bb-media-remux-init.mp4 \
+            "http://127.0.0.1:6555/api/v1/playback/sessions/$remux_session_id/hls/$remux_init_path"
+          curl --fail --silent --show-error -o /tmp/bb-media-remux-segment.m4s \
+            "http://127.0.0.1:6555/api/v1/playback/sessions/$remux_session_id/hls/$remux_segment_path"
+          grep -Eiq '^content-type: video/mp4' /tmp/bb-media-remux-init-headers
+          test -s /tmp/bb-media-remux-init.mp4
+          test -s /tmp/bb-media-remux-segment.m4s
+          remux_probe="$(docker compose exec -T transcoder ffprobe -v error -show_entries stream=codec_type,codec_name -of json "/transcode/$remux_session_id/init_0.mp4")"
+          jq -e '[.streams[] | select(.codec_type == "video" and .codec_name == "h264")] | length == 1' <<<"$remux_probe" >/dev/null
+          jq -e '[.streams[] | select(.codec_type == "audio" and .codec_name == "aac")] | length == 1' <<<"$remux_probe" >/dev/null
+          curl --fail --silent --show-error -X DELETE -H "authorization: Bearer $token" \
+            "$api_base/playback/sessions/$remux_session_id" >/dev/null
 
           adaptive_preferences="$(curl --fail --silent --show-error \
             -X PATCH \

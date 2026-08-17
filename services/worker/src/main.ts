@@ -1,5 +1,5 @@
 import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
-import { classifyMediaPath, detectVideoSignalProfile, resolveCpuTranscodeProfile } from '@boltbytes/contracts';
+import { buildDirectStreamHlsArguments, classifyMediaPath, detectVideoSignalProfile, resolveCpuTranscodeProfile } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
@@ -336,6 +336,7 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
 
 async function transcodePlayback(job: ClaimedJob): Promise<void> {
   const payload = asJsonObject(job.payload);
+  const streamMode = payload.streamMode === 'direct_stream' ? 'direct_stream' : 'transcode';
   const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : null;
   if (!sessionId) throw new Error('playback.transcode payload requires sessionId');
   const session = await prisma.playbackSession.findFirst({
@@ -348,10 +349,10 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       },
     },
   });
-  if (!session || session.method !== 'transcode') throw new Error('Transcode playback session was not found');
+  if (!session || session.method !== streamMode) throw new Error('HLS playback session was not found or changed method');
   if (!['reserving', 'active', 'paused'].includes(session.status) || session.leaseExpiresAt <= new Date()) return;
   const file = session.media.file;
-  if (!file || file.status !== 'ready') throw new Error('Transcode source file is unavailable');
+  if (!file || file.status !== 'ready') throw new Error('HLS source file is unavailable');
 
   const mediaRoot = await realpath(file.storageRoot.mountPath);
   const inputPath = await realpath(resolve(mediaRoot, ...file.relativePath.split('/')));
@@ -447,6 +448,53 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
         error: error instanceof Error ? error.message : 'Unknown subtitle conversion failure',
       }));
     }
+  }
+
+  if (streamMode === 'direct_stream') {
+    const audioMode = payload.audioMode === 'aac' ? 'aac' : 'copy';
+    const encoder = file.audioCodec ? `copy+audio:${audioMode}` : 'copy';
+    await publishTranscoderStatus({
+      accountId: job.accountId,
+      state: 'remuxing',
+      backend: 'software',
+      encoder,
+      sessionId: session.id,
+      jobId: job.id,
+      lastError: null,
+    });
+    await annotateTranscodeJob(job, 'software', encoder);
+    const cancelled = await runFfmpeg(
+      job.id,
+      session.id,
+      buildDirectStreamHlsArguments({
+        inputPath,
+        variantPlaylistPath: resolve(outputPath, 'stream_%v.m3u8'),
+        segmentFilename: resolve(outputPath, 'segment_%v_%05d.m4s'),
+        videoCodec: file.videoCodec,
+        hasAudio: Boolean(file.audioCodec),
+        audioMode,
+      }),
+      () => publishTranscoderStatus({
+        accountId: job.accountId,
+        state: 'remuxing',
+        backend: 'software',
+        encoder,
+        sessionId: session.id,
+        jobId: job.id,
+        lastError: null,
+      }),
+    );
+    if (cancelled) await rm(outputPath, { recursive: true, force: true });
+    else await publishTranscoderStatus({
+      accountId: job.accountId,
+      state: 'ready',
+      backend: 'software',
+      encoder,
+      sessionId: session.id,
+      jobId: job.id,
+      lastError: null,
+    });
+    return;
   }
 
   const nvenc = await availableNvencEncoders();
@@ -722,7 +770,7 @@ async function annotateTranscodeJob(
 async function removeHlsArtifacts(outputPath: string): Promise<void> {
   const entries = await readdir(outputPath, { withFileTypes: true });
   await Promise.all(entries
-    .filter((entry) => entry.isDirectory() || /^(?:master|stream_|segment_)/.test(entry.name))
+    .filter((entry) => entry.isDirectory() || /^(?:master|stream_|segment_|init_)/.test(entry.name))
     .map((entry) => rm(resolve(outputPath, entry.name), { recursive: true, force: true })));
 }
 

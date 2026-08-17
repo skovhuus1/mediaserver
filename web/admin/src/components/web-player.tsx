@@ -414,12 +414,12 @@ export function WebPlayer() {
           setActiveSubtitle(defaultSubtitle);
           setAuthorization(next);
           setPlaybackRate(next.playbackPreferences?.playbackRate ?? 1);
-          if (next.method === 'transcode') {
-            if (!next.transcodeStatusUrl) throw new Error('Transcode-status mangler i serverens svar.');
-            setStatus('FFmpeg forbereder streamen...');
+          if (next.method !== 'direct_play') {
+            if (!next.transcodeStatusUrl) throw new Error('HLS-status mangler i serverens svar.');
+            setStatus(next.method === 'direct_stream' ? 'FFmpeg remuxer streamen...' : 'FFmpeg forbereder streamen...');
             const ready = await waitForTranscode(next.transcodeStatusUrl, () => currentRequest === requestNumber.current);
             if (!ready) return;
-            setStatus(`Transcoding · HLS${formatVideoProfile(next) ? ` · ${formatVideoProfile(next)}` : ''}`);
+            setStatus(`${next.method === 'direct_stream' ? 'Direct Stream' : 'Transcoding'} · HLS${formatVideoProfile(next) ? ` · ${formatVideoProfile(next)}` : ''}`);
           } else {
             setStatus(`${next.method === 'direct_play' ? 'Direkte afspilning' : 'Direct Stream'}${formatVideoProfile(next) ? ` · ${formatVideoProfile(next)}` : ''}`);
           }
@@ -458,7 +458,7 @@ export function WebPlayer() {
     };
     const start = () => {
       if (disposed || started || !applyResume()) return;
-      if (authorization.method === 'transcode') {
+      if (authorization.method !== 'direct_play') {
         const remainingDurationMs = Number.isFinite(video.duration)
           ? Math.max(0, (video.duration - video.currentTime) * 1000)
           : 8_000;
@@ -474,7 +474,7 @@ export function WebPlayer() {
     video.addEventListener('canplay', start);
     video.addEventListener('progress', start);
 
-    if (authorization.method === 'transcode' && Hls.isSupported()) {
+    if (authorization.method !== 'direct_play' && Hls.isSupported()) {
       const hls = new Hls({
         backBufferLength: 90,
         maxBufferLength: 60,
@@ -501,7 +501,10 @@ export function WebPlayer() {
             authorization.adaptiveQuality.renditions[index],
           ),
         })));
-        qualitySelectionRef.current = hls.autoLevelEnabled ? -1 : hls.manualLevel;
+        if (authorization.method === 'direct_stream') hls.loadLevel = 0;
+        qualitySelectionRef.current = authorization.method === 'direct_stream'
+          ? 0
+          : hls.autoLevelEnabled ? -1 : hls.manualLevel;
         setQualitySelection(qualitySelectionRef.current);
         setCurrentQuality(hls.currentLevel);
         setAudioTracks(hls.audioTracks.map((track, index) => ({
@@ -1127,7 +1130,7 @@ export function WebPlayer() {
                     : 'Videoen vises uden undertekster'}
                 </small>
               </div>
-              <button
+              {authorization?.method !== 'direct_stream' && <button
                 className={`${styles.menuRow} ${styles.subtitleRow} ${activeSubtitle === null ? styles.subtitleSelected : ''}`}
                 aria-pressed={activeSubtitle === null}
                 onClick={() => selectSubtitle(null)}
@@ -1137,7 +1140,10 @@ export function WebPlayer() {
                   <span><strong>Fra</strong><small>Vis ingen undertekster</small></span>
                 </span>
                 {activeSubtitle === null && <Check size={18} />}
-              </button>
+              </button>}
+              {authorization?.method === 'direct_stream' && (
+                <div className={styles.emptyMenu}>Original video remuxes uden videokodning. Lavere kvaliteter kræver en transcoding-session.</div>
+              )}
               {subtitleTracks.map((track) => (
                 <button
                   className={`${styles.menuRow} ${styles.subtitleRow} ${activeSubtitle === track.id ? styles.subtitleSelected : ''}`}
@@ -1423,7 +1429,7 @@ function formatVideoProfile(authorization: Authorization): string {
     dolby_vision: 'Dolby Vision',
   } as const)[authorization.videoProfile.output.hdr ?? authorization.videoProfile.source.hdr ?? 'hdr10'];
   const hasHdr = authorization.videoProfile.output.hdr ?? (
-    authorization.method === 'direct_play' ? authorization.videoProfile.source.hdr : null
+    authorization.method !== 'transcode' ? authorization.videoProfile.source.hdr : null
   );
   return [resolution, hasHdr ? hdr : '', authorization.videoProfile.source.bitDepth && hasHdr ? `${authorization.videoProfile.source.bitDepth}-bit` : '']
     .filter(Boolean)
@@ -1440,7 +1446,7 @@ async function waitForTranscode(statusUrl: string, isCurrent: () => boolean): Pr
     if (result.state === 'failed') throw new Error(result.message);
     await new Promise((resolve) => window.setTimeout(resolve, 1_000));
   }
-  throw new Error('Transcoding tog længere end fem minutter om at levere det første segment.');
+  throw new Error('Streamen tog længere end fem minutter om at levere det første segment.');
 }
 
 async function loadCastFramework(retry = false): Promise<{ available: boolean; reason: string }> {

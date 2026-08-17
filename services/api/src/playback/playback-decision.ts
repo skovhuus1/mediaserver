@@ -57,7 +57,28 @@ export function choosePlaybackMethod(input: {
       directPlayBlockers,
     };
   }
-  if (entitlements.allowVideoTranscode) {
+  const directStreamCompatible = directPlayBlockers.every((blocker) =>
+    blocker === 'audio_codec_unsupported'
+    || blocker === 'container_unsupported'
+    || blocker === 'direct_play_disabled',
+  );
+  const audioTranscodeRequired = directPlayBlockers.includes('audio_codec_unsupported');
+  if (
+    directStreamCompatible
+    && entitlements.allowDirectStream
+    && (!audioTranscodeRequired || entitlements.allowAudioTranscode)
+  ) {
+    return {
+      allowed: true,
+      method: 'direct_stream',
+      code: 'playback_method_selected',
+      reason: audioTranscodeRequired
+        ? 'Source video is compatible and will be copied while the unsupported audio track is transcoded to AAC'
+        : 'Source video and audio are compatible and will be remuxed without video re-encoding',
+      directPlayBlockers,
+    };
+  }
+  if (entitlements.allowVideoTranscode && (!audioTranscodeRequired || entitlements.allowAudioTranscode)) {
     return {
       allowed: true,
       method: 'transcode',
@@ -66,11 +87,16 @@ export function choosePlaybackMethod(input: {
       directPlayBlockers,
     };
   }
+  const reason = audioTranscodeRequired && !entitlements.allowAudioTranscode
+    ? `This device requires audio transcoding (${directPlayBlockers.join(', ')}), but the active plan does not allow it`
+    : directStreamCompatible && !entitlements.allowDirectStream
+      ? `This device requires Direct Stream (${directPlayBlockers.join(', ')}), but the active plan does not allow it`
+      : `This device requires video transcoding (${directPlayBlockers.join(', ')}), but the active plan does not allow it`;
   return {
     allowed: false,
     method: null,
     code: 'transcode_required_but_forbidden',
-    reason: `This device requires video transcoding (${directPlayBlockers.join(', ')}), but the active plan does not allow it`,
+    reason,
     directPlayBlockers,
   };
 }

@@ -250,7 +250,7 @@ Manuel metadata-matchning åbnes fra en titel i admin-katalogets detaljepanel. `
 - Automatisk oprettelse af flere biblioteker ud fra mappestrukturen; klassifikation og mappebaserede kategorier er implementeret, men biblioteker oprettes fortsat bevidst af administratoren.
 - Lokal caching/proxying af TMDB-billeder; den nuværende implementation gemmer validerede billedstier og henter billeder direkte fra TMDBs faste image-host.
 - Hardwareaccelereret videodekodning og CUDA-baseret 4K tone mapping. NVENC-encoding er opt-in og implementeret, mens decode/filtergrafen fortsat kører i software; SDR tone mapping bruger fortsat `zscale`/`tonemap`.
-- Ægte container-remux uden video-reencoding. `direct_stream` vælges derfor bevidst ikke endnu; browserinkompatible containere går gennem transcoding.
+- Egen Chromecast receiver er fortsat en senere fase; Direct Stream virker med den nuværende Default Media Receiver gennem en absolut HTTPS-HLS-URL.
 - Automatisk næste episode, intro-/recap-markører og burn-in/OCR af billedbaserede undertekster som PGS/VobSub. Tekstbaserede sidecars og indlejrede tekstspor er implementeret.
 - Egen brandet Chromecast receiver og receiver-ejet heartbeat efter controllerfanen lukkes. Den nuværende Default Media Receiver kræver fortsat, at fanen forbliver aktiv, at `BB_MEDIA_PUBLIC_URL` eller serverens eksterne URL kan nås fra Chromecast-enheden, og at webpanelet åbnes via HTTPS. Ved privat HTTPS skal certifikatet være gyldigt på receiveren.
 - TVDB-provider; TMDB er den aktive provider for både film og serier.
@@ -496,13 +496,21 @@ Tomme thread- og rendition-felter betyder automatisk detektion. Et eksplicit tal
 - Undertekstmenuen kan placere cues øverst, i midten eller nederst og vælge hvid, gul, cyan eller grøn tekst. Placering og farve gemmes lokalt pr. browser/enhed. Et afspilningsspecifikt offset fra `-10,0` til `+10,0` sekunder kan flytte WebVTT-cues tidligere eller senere uden at ændre kildefilen.
 - Chromecast-knappen genprøver indlæsning af Google Cast SDK ved klik og viser resultatet synligt i playeren. Default Media Receiver og kravet om HTTPS samt samme lokale netværk er uændret.
 - Chromes separate, flytbare vindue `Livetekstning / Oversætter` er en browserfunktion, ligger uden for sidens DOM og kan ikke styles eller lukkes af BoltBytes. Luk vinduet med dets `X`, eller slå Live Caption fra i Chrome, hvis kun filens rigtige SRT/WebVTT-spor skal vises.
-- Matroska eller et browser-inkompatibelt lydspor kræver fortsat HLS. Ægte Direct Stream-remux uden videoreencoding er fortsat en separat leverance.
+- Matroska og andre browser-inkompatible containere bruger Direct Stream, når video, HDR, opløsning og bitrate allerede er kompatible. Videoen kopieres bit-identisk til HLS/fMP4, mens kun et inkompatibelt lydspor konverteres til AAC, hvis planen tillader audio-transcoding.
 
 ## Stabil HLS-start og manuelle kvalitetsvalg (2026-08-17)
 
 - Progressive EVENT-playlister starter ved tidsposition `0` i stedet for at følge den voksende live-edge. Det forhindrer playeren i at ramme slutningen af det nyeste firesekunderssegment under opstart.
 - Auto starter konservativt på laveste rendition, bruger større båndbredde-margin før opgradering og har op til 60 sekunders normal buffer. Browseren starter først selve afspilningen med mindst otte sekunders lokal buffer.
 - Et manuelt kvalitetsvalg sætter Hls.js `loadLevel` og deaktiverer dermed ABR. Det eksisterende bufferindhold bevares, og UI'et viser skiftet som færdigt, når det valgte niveau faktisk leveres.
+
+## Direct Stream-remux (2026-08-17)
+
+- Playback-beslutningen vælger nu `direct_stream`, når blokeringerne alene er container, lydcodec eller deaktiveret Direct Play. Video-codec, HDR, opløsning og bitrate skal allerede være understøttet; ellers bruges den eksisterende fulde transcode eller en konkret entitlement-fejl.
+- Workeren producerer én original HLS/fMP4-rendition med `-c:v copy`. Kompatibel lyd kopieres, mens inkompatibel lyd alene kodes til AAC stereo ved 192 kbps. HEVC mærkes `hvc1`, så kompatible MSE-browsere og Chromecast kan genkende streamen uden videoreencoding.
+- Init-segmenter og `.m4s`-segmenter er underlagt samme path-allowlist, stream-token, CORS og lease-kontrol som MPEG-TS. `EXT-X-MAP` omskrives med et kortlivet token, og traversal afvises.
+- Webplayeren behandler Direct Stream som HLS, venter på en stabil startbuffer og viser kun originalniveauet. Burn-in-rekonfiguration beholder samme logical session og skifter kontrolleret til fuld transcode.
+- CI genererer en rigtig H264/AC3 Matroska-fil, kræver `direct_stream`, henter master, variant, init og mediesegment gennem nginx og verificerer med FFprobe, at output fortsat er H264-video med AAC-lyd. Unit tests låser desuden FFmpeg-kontrakten til `-c:v copy` og tester fMP4-tokenisering.
 
 
 ## Burn-in og session-rekonfiguration (2026-07-29)
