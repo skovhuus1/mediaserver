@@ -29,7 +29,7 @@ describe('series catalog aggregation', () => {
       type: 'series',
       page: 1,
       pageSize: 24,
-      sort: 'updated',
+      sort: 'newest',
     });
 
     expect(result.items).toEqual([expect.objectContaining({
