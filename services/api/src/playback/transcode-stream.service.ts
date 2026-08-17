@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { AdaptiveQualityPlan } from '@boltbytes/contracts';
+import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { access, readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -18,6 +19,7 @@ import {
   hlsPlaylistSegments,
   hlsPlaylistInitializationAssets,
   isAllowedHlsAsset,
+  isAllowedHlsGeneration,
   isHlsStartupBufferReady,
   resolveHlsStartupSegments,
   rewriteHlsPlaylist,
@@ -43,13 +45,16 @@ export class TranscodeStreamService {
   constructor(private readonly prisma: PrismaService) {}
 
   async enqueue(sessionId: string, accountId: string, limits: TranscodeLimits) {
+    const generationId = randomUUID();
     await this.prisma.systemJob.create({
       data: {
+        id: generationId,
         accountId,
         type: 'playback.transcode',
         status: 'queued',
         payload: {
           sessionId,
+          generationId,
           streamMode: limits.streamMode,
           ...(limits.streamMode === 'direct_stream' ? { audioMode: limits.audioMode ?? 'copy' } : {}),
           maxVideoResolution: limits.maxVideoResolution,
@@ -67,6 +72,7 @@ export class TranscodeStreamService {
         maxAttempts: 1,
       },
     });
+    return generationId;
   }
 
   async enqueueSubtitles(sessionId: string, accountId: string) {
@@ -81,9 +87,32 @@ export class TranscodeStreamService {
     });
   }
 
-  async status(sessionId: string, token: string | undefined) {
+  async status(sessionId: string, token: string | undefined, requestedGeneration?: string) {
     const session = await this.validSession(sessionId, token);
-    const manifestPath = this.assetPath(session.id, 'master.m3u8');
+    const generation = this.requestedGeneration(requestedGeneration);
+    const job = await this.prisma.systemJob.findFirst({
+      where: {
+        ...(generation ? { id: generation } : {}),
+        accountId: session.accountId,
+        type: 'playback.transcode',
+        payload: { path: ['sessionId'], equals: session.id },
+        NOT: { payload: { path: ['streamMode'], equals: 'subtitle_only' } },
+      },
+      include: { attempts: { orderBy: { number: 'desc' }, take: 1 } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!job) return { state: 'failed', message: 'The HLS preparation job was not found' };
+    const jobGeneration = hlsJobGeneration(job.id, job.payload);
+    if (generation && generation !== jobGeneration) {
+      return { state: 'failed', message: 'The requested HLS generation was not found' };
+    }
+    if (job.status === 'failed') {
+      return {
+        state: 'failed',
+        message: job.attempts[0]?.error ?? 'FFmpeg could not prepare this media file',
+      };
+    }
+    const manifestPath = this.assetPath(session.id, 'master.m3u8', jobGeneration);
     try {
       const master = await readFile(manifestPath, 'utf8');
       const variants = master
@@ -95,7 +124,7 @@ export class TranscodeStreamService {
         if (!isAllowedHlsAsset(variant) || !variant.endsWith('.m3u8')) {
           throw new Error('HLS master contains an invalid variant');
         }
-        const playlist = await readFile(this.assetPath(session.id, variant), 'utf8');
+        const playlist = await readFile(this.assetPath(session.id, variant, jobGeneration), 'utf8');
         const segments = hlsPlaylistSegments(playlist);
         if (!isHlsStartupBufferReady(playlist, this.requiredStartupSegments)) {
           throw new Error('HLS variant does not have a stable startup buffer');
@@ -104,7 +133,7 @@ export class TranscodeStreamService {
           [
             ...hlsPlaylistInitializationAssets(playlist),
             ...segments.slice(0, this.requiredStartupSegments),
-          ].map((asset) => access(this.assetPath(session.id, asset))),
+          ].map((asset) => access(this.assetPath(session.id, asset, jobGeneration))),
         );
       }
       return {
@@ -115,22 +144,6 @@ export class TranscodeStreamService {
       // The event playlists grow atomically while FFmpeg prepares a stable startup buffer.
     }
 
-    const job = await this.prisma.systemJob.findFirst({
-      where: {
-        accountId: session.accountId,
-        type: 'playback.transcode',
-        payload: { path: ['sessionId'], equals: session.id },
-      },
-      include: { attempts: { orderBy: { number: 'desc' }, take: 1 } },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!job) return { state: 'failed', message: 'The HLS preparation job was not found' };
-    if (job.status === 'failed') {
-      return {
-        state: 'failed',
-        message: job.attempts[0]?.error ?? 'FFmpeg could not prepare this media file',
-      };
-    }
     if (job.status === 'completed') {
       return { state: 'failed', message: 'FFmpeg completed without producing an HLS manifest' };
     }
@@ -146,19 +159,34 @@ export class TranscodeStreamService {
     sessionId: string,
     asset: string,
     token: string | undefined,
+    requestedGeneration: string | undefined,
     origin: string | undefined,
     response: Response,
   ): Promise<void> {
     applyMediaCors(response, origin);
     const session = await this.validSession(sessionId, token);
+    let generation = this.requestedGeneration(requestedGeneration);
+    if (!generation) {
+      const latestJob = await this.prisma.systemJob.findFirst({
+        where: {
+          accountId: session.accountId,
+          type: 'playback.transcode',
+          payload: { path: ['sessionId'], equals: session.id },
+          NOT: { payload: { path: ['streamMode'], equals: 'subtitle_only' } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      generation = latestJob ? hlsJobGeneration(latestJob.id, latestJob.payload) : null;
+    }
     if (!isAllowedHlsAsset(asset)) {
       throw new NotFoundException({ code: 'hls_asset_missing', message: 'HLS asset was not found' });
     }
-    const sessionRoot = await realpath(resolve(this.transcodeRoot, session.id)).catch(() => null);
+    const assetRootCandidate = resolve(this.transcodeRoot, session.id, ...(generation ? [generation] : []));
+    const sessionRoot = await realpath(assetRootCandidate).catch(() => null);
     if (!sessionRoot || !isPathWithin(this.transcodeRoot, sessionRoot)) {
       throw new NotFoundException({ code: 'hls_not_ready', message: 'HLS stream is not ready' });
     }
-    const candidate = this.assetPath(session.id, asset);
+    const candidate = this.assetPath(session.id, asset, generation);
     const mediaPath = await realpath(candidate).catch(() => null);
     if (!mediaPath || !isPathWithin(sessionRoot, mediaPath)) {
       throw new NotFoundException({ code: 'hls_asset_missing', message: 'HLS asset was not found' });
@@ -169,7 +197,7 @@ export class TranscodeStreamService {
       response.status(200);
       response.setHeader('Content-Type', 'application/x-mpegURL');
       response.setHeader('Cache-Control', 'private, no-store');
-      response.send(rewriteHlsPlaylist(playlist, token!));
+      response.send(rewriteHlsPlaylist(playlist, token!, generation ?? undefined));
       return;
     }
 
@@ -190,12 +218,20 @@ export class TranscodeStreamService {
     });
   }
 
-  private assetPath(sessionId: string, asset: string): string {
-    const candidate = resolve(this.transcodeRoot, sessionId, asset);
+  private assetPath(sessionId: string, asset: string, generation: string | null = null): string {
+    const candidate = resolve(this.transcodeRoot, sessionId, ...(generation ? [generation] : []), asset);
     if (!isPathWithin(this.transcodeRoot, candidate)) {
       throw new UnauthorizedException({ code: 'hls_path_invalid', message: 'HLS path escapes the transcode root' });
     }
     return candidate;
+  }
+
+  private requestedGeneration(value: string | undefined): string | null {
+    if (value === undefined) return null;
+    if (!isAllowedHlsGeneration(value)) {
+      throw new UnauthorizedException({ code: 'hls_generation_invalid', message: 'HLS generation is invalid' });
+    }
+    return value;
   }
 
   private async validSession(sessionId: string, token: string | undefined) {
@@ -214,4 +250,9 @@ export class TranscodeStreamService {
     }
     return session;
   }
+}
+
+function hlsJobGeneration(jobId: string, payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  return (payload as Record<string, unknown>).generationId === jobId ? jobId : null;
 }

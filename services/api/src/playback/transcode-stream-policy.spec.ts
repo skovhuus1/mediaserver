@@ -3,6 +3,7 @@ import {
   hlsPlaylistSegments,
   hlsPlaylistInitializationAssets,
   isAllowedHlsAsset,
+  isAllowedHlsGeneration,
   isHlsStartupBufferReady,
   resolveHlsStartupSegments,
   rewriteHlsPlaylist,
@@ -30,6 +31,16 @@ describe('transcode stream policy', () => {
       .toBe('#EXTM3U\n#EXT-X-MAP:URI="init_0.mp4?token=a%2Bb"\nsegment_0_00000.m4s?token=a%2Bb\n');
     expect(() => rewriteHlsPlaylist('#EXTM3U\n#EXT-X-MAP:URI="../init.mp4"\n', 'token'))
       .toThrow('Unexpected HLS initialization asset');
+  });
+
+  it('pins every rewritten asset to one validated HLS generation', () => {
+    const generation = '11111111-1111-4111-8111-111111111111';
+    expect(isAllowedHlsGeneration(generation)).toBe(true);
+    expect(isAllowedHlsGeneration('../old-stream')).toBe(false);
+    expect(rewriteHlsPlaylist('#EXTM3U\nstream.m3u8\n', 'token', generation))
+      .toBe(`#EXTM3U\nstream.m3u8?token=token&generation=${generation}\n`);
+    expect(() => rewriteHlsPlaylist('#EXTM3U\nstream.m3u8\n', 'token', '../old-stream'))
+      .toThrow('Unexpected HLS generation');
   });
 
   it('counts fMP4 media segments and discovers only safe initialization assets', () => {

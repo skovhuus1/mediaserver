@@ -372,10 +372,25 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
   if (!isWithin(mediaRoot, inputPath)) throw new Error('Transcode source escapes its storage root');
 
   await mkdir(transcodeRoot, { recursive: true });
-  const outputPath = resolve(transcodeRoot, session.id);
+  const generationId = typeof payload.generationId === 'string' && payload.generationId === job.id
+    ? payload.generationId
+    : null;
+  const sessionOutputPath = resolve(transcodeRoot, session.id);
+  const outputPath = generationId ? resolve(sessionOutputPath, generationId) : sessionOutputPath;
   if (!isWithin(transcodeRoot, outputPath)) throw new Error('Transcode output escapes its storage root');
-  await rm(outputPath, { recursive: true, force: true });
-  await mkdir(outputPath, { recursive: true });
+  if (streamMode === 'subtitle_only') {
+    await mkdir(sessionOutputPath, { recursive: true });
+    await removeSubtitleArtifacts(sessionOutputPath);
+  } else if (generationId) {
+    await mkdir(sessionOutputPath, { recursive: true });
+    await rm(outputPath, { recursive: true, force: true });
+    await mkdir(outputPath, { recursive: true });
+    await removeSubtitleArtifacts(sessionOutputPath);
+  } else {
+    await rm(outputPath, { recursive: true, force: true });
+    await mkdir(outputPath, { recursive: true });
+  }
+  const subtitleOutputPath = generationId ? sessionOutputPath : outputPath;
 
   const sourceVideo = detectVideoSignalProfile(file.probe);
   const adaptive = asJsonObject(payload.adaptiveQuality);
@@ -455,7 +470,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
         '-map', `0:${streamIndex}`,
         '-c:s', 'webvtt',
         '-f', 'webvtt',
-        resolve(outputPath, `embedded-${streamIndex}.vtt`),
+        resolve(subtitleOutputPath, `embedded-${streamIndex}.vtt`),
       ]);
       if (subtitleCancelled) {
         await rm(outputPath, { recursive: true, force: true });
@@ -463,7 +478,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       }
       availableSubtitleTrackIds.push(trackId);
     } catch (error) {
-      await rm(resolve(outputPath, `embedded-${streamIndex}.vtt`), { force: true });
+      await rm(resolve(subtitleOutputPath, `embedded-${streamIndex}.vtt`), { force: true });
       unavailableSubtitleTrackIds.push(trackId);
       console.warn(JSON.stringify({
         level: 'warn',
@@ -475,8 +490,8 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       }));
     }
   }
-  const subtitleManifest = resolve(outputPath, 'subtitle-status.json');
-  const subtitleManifestTemporary = resolve(outputPath, `subtitle-status-${job.id}.tmp`);
+  const subtitleManifest = resolve(subtitleOutputPath, 'subtitle-status.json');
+  const subtitleManifestTemporary = resolve(subtitleOutputPath, `subtitle-status-${job.id}.tmp`);
   await writeFile(subtitleManifestTemporary, JSON.stringify({
     availableTrackIds: availableSubtitleTrackIds,
     unavailableTrackIds: unavailableSubtitleTrackIds,
@@ -823,6 +838,13 @@ async function removeHlsArtifacts(outputPath: string): Promise<void> {
   await Promise.all(entries
     .filter((entry) => entry.isDirectory() || /^(?:master|stream_|segment_|init_)/.test(entry.name))
     .map((entry) => rm(resolve(outputPath, entry.name), { recursive: true, force: true })));
+}
+
+async function removeSubtitleArtifacts(outputPath: string): Promise<void> {
+  const entries = await readdir(outputPath, { withFileTypes: true });
+  await Promise.all(entries
+    .filter((entry) => entry.isFile() && /^(?:embedded-\d+\.vtt|subtitle-status(?:-[^.]+)?\.(?:json|tmp))$/.test(entry.name))
+    .map((entry) => rm(resolve(outputPath, entry.name), { force: true })));
 }
 
 async function nvidiaTelemetry(): Promise<{

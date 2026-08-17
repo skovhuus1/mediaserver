@@ -176,9 +176,10 @@ export class PlaybackService {
       const deliveryQuality = decision.method === 'direct_stream'
         ? this.directStreamQuality(adaptiveQuality, media, Boolean(sourceVideo.hdr))
         : adaptiveQuality;
+      let hlsGeneration: string | null = null;
       if (decision.method !== 'direct_play') {
         try {
-          await this.transcodeStream.enqueue(session.id, actor.accountId, {
+          hlsGeneration = await this.transcodeStream.enqueue(session.id, actor.accountId, {
             streamMode: decision.method,
             ...(decision.method === 'direct_stream'
               ? {
@@ -212,9 +213,12 @@ export class PlaybackService {
         startPositionMs,
       });
       const token = encodeURIComponent(session.streamToken);
+      const hlsQuery = hlsGeneration
+        ? `token=${token}&generation=${encodeURIComponent(hlsGeneration)}`
+        : `token=${token}`;
       const streamUrl = decision.method === 'direct_play'
         ? `/api/v1/playback/sessions/${session.id}/stream?token=${token}`
-        : `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${token}`;
+        : `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?${hlsQuery}`;
       const subtitleTracks = await this.subtitleStream.listForPlayback(
         session.id,
         session.streamToken,
@@ -275,7 +279,7 @@ export class PlaybackService {
           },
         },
         ...(decision.method !== 'direct_play'
-          ? { transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?token=${token}` }
+          ? { transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?${hlsQuery}` }
           : {}),
         leaseExpiresAt: session.leaseExpiresAt,
         decision: { entitlement, playback: decision },
@@ -414,7 +418,7 @@ export class PlaybackService {
         data: { method: streamMode, lastHeartbeatAt: new Date() },
       }),
     ]);
-    await this.transcodeStream.enqueue(session.id, actor.accountId, {
+    const hlsGeneration = await this.transcodeStream.enqueue(session.id, actor.accountId, {
       streamMode,
       ...(streamMode === 'direct_stream' ? { audioMode: 'aac' as const } : {}),
       maxVideoResolution: entitlement.effective.maxVideoResolution,
@@ -444,17 +448,19 @@ export class PlaybackService {
           forceTranscode: dto.forceTranscode === true,
           subtitleTrackId: dto.subtitleTrackId ?? null,
           startPositionMs,
+          hlsGeneration,
         },
       },
     });
     const token = encodeURIComponent(dto.streamToken);
+    const hlsQuery = `token=${token}&generation=${encodeURIComponent(hlsGeneration)}`;
     return {
       accepted: true,
       sessionId: session.id,
       logicalSessionId: session.logicalSessionId,
       method: streamMode,
-      streamUrl: `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${token}`,
-      transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?token=${token}`,
+      streamUrl: `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?${hlsQuery}`,
+      transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?${hlsQuery}`,
       adaptiveQuality,
     };
   }

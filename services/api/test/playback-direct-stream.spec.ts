@@ -75,7 +75,8 @@ describe('PlaybackService Direct Stream authorization', () => {
       }),
       release: vi.fn(),
     };
-    const transcodeStream = { enqueue: vi.fn().mockResolvedValue(undefined) };
+    const hlsGeneration = '11111111-1111-4111-8111-111111111111';
+    const transcodeStream = { enqueue: vi.fn().mockResolvedValue(hlsGeneration) };
     const subtitleStream = { listForPlayback: vi.fn().mockResolvedValue([]) };
     const service = Object.assign(Object.create(PlaybackService.prototype), {
       prisma,
@@ -110,8 +111,8 @@ describe('PlaybackService Direct Stream authorization', () => {
       logicalSessionId: 'logical-1',
       method: expectedMethod,
       contentType: 'application/x-mpegURL',
-      streamUrl: '/api/v1/playback/sessions/session-1/hls/master.m3u8?token=stream-token',
-      transcodeStatusUrl: '/api/v1/playback/sessions/session-1/transcode-status?token=stream-token',
+      streamUrl: `/api/v1/playback/sessions/session-1/hls/master.m3u8?token=stream-token&generation=${hlsGeneration}`,
+      transcodeStatusUrl: `/api/v1/playback/sessions/session-1/transcode-status?token=stream-token&generation=${hlsGeneration}`,
       adaptiveQuality: { mode: 'original', renditions: [{ height: 1080, upscaled: false }] },
     });
     expect(reservations.reserve).toHaveBeenCalledOnce();
