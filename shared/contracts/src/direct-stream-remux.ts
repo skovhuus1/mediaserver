@@ -37,7 +37,7 @@ export function buildDirectStreamHlsArguments(input: DirectStreamHlsInput): stri
     '-hls_list_size', '0',
     '-hls_playlist_type', 'event',
     '-hls_segment_type', 'fmp4',
-    '-hls_fmp4_init_filename', 'init_%v.mp4',
+    '-hls_fmp4_init_filename', 'init_0.mp4',
     '-hls_flags', 'independent_segments+temp_file',
     '-master_pl_publish_rate', '1',
     '-var_stream_map', input.hasAudio ? 'v:0,a:0,name:0' : 'v:0,name:0',
