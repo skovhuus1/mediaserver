@@ -119,13 +119,14 @@ export class StreamReservationService {
   }
 
   private async writeHeartbeat(
-    session: { id: string; status: string },
+    session: { id: string; status: string; runtimeState: string },
     input: PlaybackHeartbeatDto,
   ) {
     if (!['reserving', 'active', 'paused'].includes(session.status)) {
       throw new BadRequestException({ code: 'session_finished', message: 'The playback session is already finished' });
     }
     const now = new Date();
+    const runtimeStateChanged = input.runtimeState !== undefined && input.runtimeState !== session.runtimeState;
     const result = await this.prisma.playbackSession.updateMany({
       where: {
         id: session.id,
@@ -140,6 +141,14 @@ export class StreamReservationService {
         ...(input.currentBitrate !== undefined ? { currentBitrate: input.currentBitrate } : {}),
         ...(input.currentHeight !== undefined ? { currentHeight: input.currentHeight } : {}),
         ...(input.bufferAheadMs !== undefined ? { bufferAheadMs: input.bufferAheadMs } : {}),
+        ...(input.bandwidthEstimate !== undefined ? { bandwidthEstimate: input.bandwidthEstimate } : {}),
+        ...(input.droppedFrames !== undefined ? { droppedFrames: input.droppedFrames } : {}),
+        ...(input.totalFrames !== undefined ? { totalFrames: input.totalFrames } : {}),
+        ...(input.stallCount !== undefined ? { stallCount: input.stallCount } : {}),
+        ...(input.playbackRate !== undefined ? { playbackRate: input.playbackRate } : {}),
+        ...(input.audioTrack !== undefined ? { audioTrack: input.audioTrack } : {}),
+        ...(input.subtitleTrack !== undefined ? { subtitleTrack: input.subtitleTrack } : {}),
+        ...(runtimeStateChanged ? { lastStateChangedAt: now } : {}),
       },
     });
     if (result.count !== 1) throw new BadRequestException({ code: 'heartbeat_conflict', message: 'The session changed while heartbeat was processed' });

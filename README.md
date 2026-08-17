@@ -1,5 +1,17 @@
 # BoltBytes Media Server
 
+## Playback Certification og live QoE (2026-08-17)
+
+Implementeret i denne leverance:
+
+- Playback-sessioner gemmer nu faktisk bitrate, HLS-båndbreddeestimat, buffer, opløsning, tabte/dekodede frames, stalls, afspilningshastighed og valgte lyd-/undertekstspor.
+- Adminpanelet opdaterer aktive afspilninger hvert andet sekund og klassificerer dem som stabile, startende, pausede, bufferende, ustabile eller uden heartbeat.
+- Chromecast heartbeat bruger samme validerede kontrakt som webplayeren, rapporterer den fulde tidslinjeposition efter seek/resume og sender aldrig den ugyldige runtime-state `idle`.
+- Direct Play, Direct Stream med remux/lydtranscoding, softwaretranscoding, HDR-fallback, serie-kontinuitet og seek/resume dækkes af den samlede playback-certificering.
+- Systemet foretrækker fortsat Direct Play og Direct Stream på servere uden GPU; softwaretranscoding er fallback.
+
+Fysisk Chromecast-certificering kræver fortsat en Cast-enhed på samme netværk og HTTPS. En egen BoltBytes receiver kræver et registreret Google Cast Application ID i `NEXT_PUBLIC_CAST_RECEIVER_APP_ID`; uden dette bruges Google Cast Default Media Receiver sikkert.
+
 > Fremadrettet seek i HLS bruger nu en entydig stream-generation pr. hop. En ny position kan derfor ikke genbruge mastermanifest eller segmenter fra den oprindelige `Fortsæt med at se`-position, og superseded FFmpeg-jobs skriver ikke længere i samme outputmappe.
 
 > Webplayeren parser og renderer nu WebVTT deterministisk mod mediets absolutte tidslinje. Det valgte undertekstspor bevares derfor ved genoptaget afspilning, HLS-opstart og seek, mens Chromecast fortsat modtager de originale WebVTT-spor.
