@@ -82,13 +82,29 @@ describe('library scan queue concurrency', () => {
     const library = await prisma.library.create({
       data: { accountId, storageRootId: root.id, name: 'Catalog', type: 'mixed' },
     });
-    await prisma.mediaItem.createMany({
-      data: [
-        { accountId, libraryId: library.id, title: 'Arrival', type: 'movie', category: 'Drama', releaseYear: 2016 },
-        { accountId, libraryId: library.id, title: 'Pilot', type: 'episode', category: 'Drama', seriesTitle: 'Foundation', seasonNumber: 1, episodeNumber: 1 },
-        { accountId, libraryId: library.id, title: 'The Mathematician', type: 'episode', category: 'Drama', seriesTitle: 'Foundation', seasonNumber: 1, episodeNumber: 2 },
-      ],
-    });
+    const fixtures = [
+      { title: 'Arrival', type: 'movie' as const, category: 'Drama', releaseYear: 2016 },
+      { title: 'Pilot', type: 'episode' as const, category: 'Drama', seriesTitle: 'Foundation', seasonNumber: 1, episodeNumber: 1 },
+      { title: 'The Mathematician', type: 'episode' as const, category: 'Drama', seriesTitle: 'Foundation', seasonNumber: 1, episodeNumber: 2 },
+    ];
+    await Promise.all(fixtures.map((fixture, index) => prisma.mediaItem.create({
+      data: {
+        accountId,
+        libraryId: library.id,
+        ...fixture,
+        file: {
+          create: {
+            accountId,
+            libraryId: library.id,
+            storageRootId: root.id,
+            relativePath: `fixture-${index}.mkv`,
+            sizeBytes: 1_024n,
+            modifiedAt: new Date(),
+            status: 'ready',
+          },
+        },
+      },
+    })));
     const actor: AuthenticatedUser = {
       sub: user.id,
       accountId,
