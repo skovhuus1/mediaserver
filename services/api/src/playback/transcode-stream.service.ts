@@ -14,7 +14,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { resolveStreamToken } from './cast-stream-token';
 import { isPathWithin, streamTokenMatches } from './direct-stream-policy';
 import { applyMediaCors } from './media-cors';
-import { isAllowedHlsAsset, rewriteHlsPlaylist } from './transcode-stream-policy';
+import {
+  hlsPlaylistSegments,
+  isAllowedHlsAsset,
+  isHlsStartupBufferReady,
+  resolveHlsStartupSegments,
+  rewriteHlsPlaylist,
+} from './transcode-stream-policy';
 
 type TranscodeLimits = {
   maxVideoResolution: number;
@@ -28,6 +34,7 @@ type TranscodeLimits = {
 @Injectable()
 export class TranscodeStreamService {
   private readonly transcodeRoot = resolve(process.env.TRANSCODE_PATH?.trim() || '/transcode');
+  private readonly requiredStartupSegments = resolveHlsStartupSegments(process.env.BB_MEDIA_HLS_STARTUP_SEGMENTS);
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -68,18 +75,17 @@ export class TranscodeStreamService {
           throw new Error('HLS master contains an invalid variant');
         }
         const playlist = await readFile(this.assetPath(session.id, variant), 'utf8');
-        const firstSegment = playlist
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .find((line) => line && !line.startsWith('#'));
-        if (!firstSegment || !isAllowedHlsAsset(firstSegment)) {
-          throw new Error('HLS variant has no playable segment');
+        const segments = hlsPlaylistSegments(playlist);
+        if (!isHlsStartupBufferReady(playlist, this.requiredStartupSegments)) {
+          throw new Error('HLS variant does not have a stable startup buffer');
         }
-        await access(this.assetPath(session.id, firstSegment));
+        await Promise.all(
+          segments.slice(0, this.requiredStartupSegments).map((segment) => access(this.assetPath(session.id, segment))),
+        );
       }
       return { state: 'ready', message: 'HLS stream is ready' };
     } catch {
-      // The worker writes the manifest atomically after the first complete segment.
+      // The event playlists grow atomically while FFmpeg prepares a stable startup buffer.
     }
 
     const job = await this.prisma.systemJob.findFirst({
