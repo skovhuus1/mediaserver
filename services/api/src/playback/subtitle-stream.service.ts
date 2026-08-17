@@ -81,12 +81,25 @@ export class SubtitleStreamService {
     const session = await this.validSession(sessionId, token);
     const embedded = embeddedSubtitleDescriptors(session.media.file!.probe);
     if (!embedded.length) return { state: 'ready', message: 'No embedded text subtitles require preparation' };
+    const expectedTrackIds = embedded.map((track) => `embedded-${track.streamIndex}`);
+    const manifest = await readSubtitleManifest(resolve(this.transcodeRoot, session.id, 'subtitle-status.json'));
+    if (manifest) {
+      const available = new Set(manifest.availableTrackIds);
+      const unavailableTrackIds = expectedTrackIds.filter((trackId) => !available.has(trackId));
+      return {
+        state: 'ready',
+        message: unavailableTrackIds.length
+          ? 'Embedded subtitles are ready with unavailable tracks omitted'
+          : 'Embedded subtitles are ready',
+        unavailableTrackIds,
+      };
+    }
     const ready = await Promise.all(embedded.map((track) =>
       access(resolve(this.transcodeRoot, session.id, `embedded-${track.streamIndex}.vtt`))
         .then(() => true)
         .catch(() => false),
     ));
-    if (ready.every(Boolean)) return { state: 'ready', message: 'Embedded subtitles are ready' };
+    if (ready.every(Boolean)) return { state: 'ready', message: 'Embedded subtitles are ready', unavailableTrackIds: [] };
     const job = await this.prisma.systemJob.findFirst({
       where: {
         accountId: session.accountId,
@@ -96,12 +109,15 @@ export class SubtitleStreamService {
       include: { attempts: { orderBy: { number: 'desc' }, take: 1 } },
       orderBy: { createdAt: 'desc' },
     });
-    if (!job || job.status === 'failed' || job.status === 'completed') {
+    if (job?.status === 'failed' || job?.status === 'completed') {
+      const unavailableTrackIds = expectedTrackIds.filter((_trackId, index) => !ready[index]);
       return {
-        state: 'failed',
-        message: job?.attempts[0]?.error ?? 'Embedded subtitles could not be prepared',
+        state: 'ready',
+        message: job.attempts[0]?.error ?? 'Unavailable embedded subtitle tracks were omitted',
+        unavailableTrackIds,
       };
     }
+    if (!job) return { state: 'failed', message: 'The subtitle preparation job was not found' };
     return {
       state: job.status === 'running' ? 'running' : 'queued',
       message: job.status === 'running' ? 'FFmpeg is preparing embedded subtitles' : 'Waiting for a subtitle worker',
@@ -193,6 +209,25 @@ export class SubtitleStreamService {
       throw new NotFoundException({ code: 'media_file_unavailable', message: 'Scanned media file is unavailable' });
     }
     return session;
+  }
+}
+
+type SubtitlePreparationManifest = {
+  availableTrackIds: string[];
+  unavailableTrackIds: string[];
+};
+
+async function readSubtitleManifest(path: string): Promise<SubtitlePreparationManifest | null> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as Partial<SubtitlePreparationManifest>;
+    if (!Array.isArray(parsed.availableTrackIds) || !Array.isArray(parsed.unavailableTrackIds)) return null;
+    if (![...parsed.availableTrackIds, ...parsed.unavailableTrackIds].every((value) => typeof value === 'string')) return null;
+    return {
+      availableTrackIds: parsed.availableTrackIds,
+      unavailableTrackIds: parsed.unavailableTrackIds,
+    };
+  } catch {
+    return null;
   }
 }
 

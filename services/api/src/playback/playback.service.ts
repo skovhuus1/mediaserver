@@ -238,7 +238,7 @@ export class PlaybackService {
         streamUrl,
         contentType: decision.method === 'direct_play' ? this.directContentType(media.container) : 'application/x-mpegURL',
         subtitleTracks,
-        ...(decision.method === 'direct_play' && embeddedSubtitles
+        ...(embeddedSubtitles
           ? { subtitlePreparationStatusUrl: `/api/v1/playback/sessions/${session.id}/subtitle-status?token=${token}` }
           : {}),
         playbackPreferences: {
@@ -365,11 +365,22 @@ export class PlaybackService {
       ),
     );
     const streamMode = dto.burnIn
-      || (startPositionMs > 0 && entitlement.effective.allowVideoTranscode)
+      || dto.forceTranscode === true
+      || startPositionMs > 0
       ? 'transcode' as const
       : session.method === 'direct_stream'
         ? 'direct_stream' as const
         : 'transcode' as const;
+    if (
+      streamMode === 'transcode'
+      && !dto.burnIn
+      && !entitlement.effective.allowVideoTranscode
+    ) {
+      throw new ForbiddenException({
+        code: 'video_transcode_not_allowed',
+        message: 'The active plan does not allow video transcoding for playback recovery',
+      });
+    }
     const adaptiveQuality = buildAdaptiveQualityPlan({
       sourceWidth: session.media.width,
       sourceHeight: session.media.height,
@@ -430,6 +441,7 @@ export class PlaybackService {
           sessionId: session.id,
           logicalSessionId: session.logicalSessionId,
           burnIn: dto.burnIn,
+          forceTranscode: dto.forceTranscode === true,
           subtitleTrackId: dto.subtitleTrackId ?? null,
           startPositionMs,
         },

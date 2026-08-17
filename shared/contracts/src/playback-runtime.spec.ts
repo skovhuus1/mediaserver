@@ -16,6 +16,14 @@ describe('playback runtime policy', () => {
     ], ['da'], 'forced')).toBe('forced-da');
   });
 
+  it('prefers a complete subtitle over forced and SDH tracks in the same language', () => {
+    expect(chooseDefaultWebVttSubtitle([
+      { id: 'forced-da', language: 'dan', label: 'Dansk (tvungen)', delivery: 'webvtt' },
+      { id: 'sdh-da', language: 'da', label: 'Dansk (hørehæmmede)', delivery: 'webvtt' },
+      { id: 'full-da', language: 'da', label: 'Dansk', delivery: 'webvtt' },
+    ], ['da'], 'auto')).toBe('full-da');
+  });
+
   it('caps Auto at the highest native rendition until the upscale buffer gate opens', () => {
     expect(deferredUpscaleLevelCap([
       { height: 360, upscaled: false },

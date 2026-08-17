@@ -1,5 +1,19 @@
 # BoltBytes Media Server
 
+> Playback-resume er nu hærdet mod tre konkrete fejl. Standardundertekster
+> prioriterer et komplet normalt spor over korte forced/SDH-spor på samme
+> sprog, og workeren skriver et atomisk manifest over de indlejrede tekstspor,
+> som faktisk kunne konverteres. Ét defekt spor stopper derfor ikke længere
+> filmen eller serien. Tidslinjen har separat scrub-state, så playerens løbende
+> `timeupdate` ikke kan trække seek-knappen tilbage, mens brugeren spoler.
+>
+> Hvis browseren overrapporterer codec-understøttelse, eller en sikker
+> Direct Stream-remux fejler, kan playeren bede om én fuld transcoding-fallback
+> i den eksisterende playback-session og logical session. API'et foretager en
+> ny entitlementkontrol før fallbacken; planer uden video-transcoding omgås
+> ikke, og den oprindelige fejl vises sammen med FFmpeg-fejlen, hvis begge
+> leveringsmetoder fejler.
+
 > Docker-updateren reparerer repository-ejerskab til API-processens UID/GID
 > før Git-status, fetch og checkout. Build-runneren monterer derefter
 > kildekoden read-only, så root-kørslen ikke kan efterlade tracked filer eller

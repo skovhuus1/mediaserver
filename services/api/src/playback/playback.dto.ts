@@ -87,6 +87,10 @@ export class ReconfigurePlaybackDto {
   burnIn!: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  forceTranscode?: boolean;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
