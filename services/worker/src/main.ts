@@ -406,6 +406,10 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     && renditions.every((rendition) => rendition.hdr);
   const subtitleTrackId =
     typeof payload.subtitleTrackId === 'string' ? payload.subtitleTrackId : null;
+  const startPositionMs = Math.max(0, finiteInteger(payload.startPositionMs) ?? 0);
+  const inputSeekArguments = startPositionMs > 0
+    ? ['-ss', (startPositionMs / 1_000).toFixed(3)]
+    : [];
   const burnInStreamIndex = subtitleTrackId
     ? finiteInteger(subtitleTrackId.match(/\d+/)?.[0])
     : null;
@@ -463,17 +467,22 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       lastError: null,
     });
     await annotateTranscodeJob(job, 'software', encoder);
+    const directStreamArguments = buildDirectStreamHlsArguments({
+      inputPath,
+      variantPlaylistPath: resolve(outputPath, 'stream_%v.m3u8'),
+      segmentFilename: resolve(outputPath, 'segment_%v_%05d.m4s'),
+      videoCodec: file.videoCodec,
+      hasAudio: Boolean(file.audioCodec),
+      audioMode,
+    });
+    const inputArgumentIndex = directStreamArguments.indexOf('-i');
+    if (inputSeekArguments.length && inputArgumentIndex >= 0) {
+      directStreamArguments.splice(inputArgumentIndex, 0, ...inputSeekArguments);
+    }
     const cancelled = await runFfmpeg(
       job.id,
       session.id,
-      buildDirectStreamHlsArguments({
-        inputPath,
-        variantPlaylistPath: resolve(outputPath, 'stream_%v.m3u8'),
-        segmentFilename: resolve(outputPath, 'segment_%v_%05d.m4s'),
-        videoCodec: file.videoCodec,
-        hasAudio: Boolean(file.audioCodec),
-        audioMode,
-      }),
+      directStreamArguments,
       () => publishTranscoderStatus({
         accountId: job.accountId,
         state: 'remuxing',
@@ -554,6 +563,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-loglevel', 'warning',
     '-nostdin',
     '-y',
+    ...inputSeekArguments,
     '-i', inputPath,
     '-filter_complex_threads', String(cpuProfile.filterThreads),
     '-filter_complex', filterComplex,

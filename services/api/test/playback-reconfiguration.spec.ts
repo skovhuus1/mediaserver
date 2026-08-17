@@ -21,6 +21,7 @@ describe('playback session reconfiguration', () => {
         height: 1080,
         bitrate: 8_000_000,
         file: {
+          durationMs: 3_600_000,
           probe: {
             streams: [
               {
@@ -107,7 +108,82 @@ describe('playback session reconfiguration', () => {
     expect(transcodeStream.enqueue).toHaveBeenCalledWith(
       'session-1',
       'account-1',
-      expect.objectContaining({ subtitleTrackId: 'burnin-4' }),
+      expect.objectContaining({ subtitleTrackId: 'burnin-4', startPositionMs: 0 }),
+    );
+  });
+
+  it('preserves Direct Stream and clamps an on-demand seek to the source duration', async () => {
+    const streamToken = 'b'.repeat(48);
+    const session = {
+      id: 'session-2',
+      logicalSessionId: 'logical-2',
+      accountId: 'account-1',
+      userId: 'user-1',
+      profileId: 'profile-1',
+      mediaId: 'media-1',
+      deviceId: 'device-1',
+      method: 'direct_stream',
+      streamTokenHash: createHash('sha256').update(streamToken).digest('hex'),
+      status: 'active',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      media: {
+        width: 1920,
+        height: 1080,
+        bitrate: 8_000_000,
+        file: { durationMs: 3_600_000, probe: { streams: [] } },
+      },
+      device: {
+        qualityMode: 'auto',
+        fixedQualityHeight: null,
+        allowUpscale: true,
+        dataSaver: false,
+        hdrMode: 'auto',
+      },
+    };
+    const prisma = {
+      playbackSession: {
+        findFirst: vi.fn().mockResolvedValue(session),
+        update: vi.fn().mockResolvedValue(session),
+      },
+      systemJob: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-2' }) },
+      $transaction: vi.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
+    };
+    const transcodeStream = { enqueue: vi.fn().mockResolvedValue(undefined) };
+    const service = Object.assign(Object.create(PlaybackService.prototype), {
+      prisma,
+      entitlements: {
+        evaluate: vi.fn().mockResolvedValue({
+          allowed: true,
+          code: 'allowed',
+          reasons: [],
+          effective: { maxVideoResolution: 2160, maxVideoBitrate: 20_000 },
+        }),
+      },
+      transcodeStream,
+    }) as PlaybackService;
+
+    const result = await service.reconfigure({
+      sub: 'user-1', accountId: 'account-1', profileId: 'profile-1', deviceId: 'device-1', roles: [],
+    }, 'session-2', {
+      streamToken,
+      burnIn: false,
+      startPositionMs: 4_000_000,
+    });
+
+    expect(result.method).toBe('direct_stream');
+    expect(prisma.playbackSession.update).toHaveBeenCalledWith({
+      where: { id: 'session-2' },
+      data: expect.objectContaining({ method: 'direct_stream' }),
+    });
+    expect(transcodeStream.enqueue).toHaveBeenCalledWith(
+      'session-2',
+      'account-1',
+      expect.objectContaining({
+        streamMode: 'direct_stream',
+        audioMode: 'aac',
+        startPositionMs: 3_599_000,
+      }),
     );
   });
 });

@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { Brand } from './brand';
 import { WebPlayer } from './web-player';
+import { CastSdkLoader } from './cast-sdk-loader';
 import { logoutSession, type SessionUser } from '@/lib/api';
 
 export function CustomerShell({ user, children }: { user: SessionUser; children: ReactNode }) {
@@ -45,6 +46,7 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
         </div>
       </header>
       <main className="watch-main">{children}</main>
+      <CastSdkLoader />
       <WebPlayer />
     </div>
   );

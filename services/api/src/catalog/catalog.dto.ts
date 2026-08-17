@@ -130,6 +130,15 @@ export class CatalogQueryDto {
   sort: 'newest' | 'title' | 'year' = 'newest';
 }
 
+export class MediaDetailsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(10_000)
+  season?: number;
+}
+
 export class CreateMediaDto {
   @IsUUID()
   libraryId!: string;

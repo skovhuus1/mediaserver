@@ -3,6 +3,8 @@
 import Hls from 'hls.js';
 import {
   normalizePlaybackQualitySelection,
+  chooseDefaultWebVttSubtitle,
+  deferredUpscaleLevelCap,
   playbackResumeTargetSeconds,
   presentPlaybackQualityLevel,
   sanitizeMediaTitle,
@@ -30,6 +32,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { accessToken, api, type ApiFailure } from '@/lib/api';
 import { Brand } from './brand';
+import { ensureCastSdk } from './cast-sdk-loader';
 import styles from './playback.module.css';
 
 export type PlayableMedia = {
@@ -37,6 +40,8 @@ export type PlayableMedia = {
   title: string;
   type?: string;
   seriesTitle?: string | null;
+  seriesDisplayTitle?: string | null;
+  seriesMetadataProviderId?: string | null;
   seasonNumber?: number | null;
   episodeNumber?: number | null;
   releaseYear?: number | null;
@@ -182,6 +187,7 @@ type CastWindow = Window & {
   };
   chrome?: {
     cast?: {
+      AutoJoinPolicy?: { ORIGIN_SCOPED: string };
       media?: {
         DEFAULT_MEDIA_RECEIVER_APP_ID: string;
         MediaInfo: new (url: string, contentType: string) => CastMediaInfo;
@@ -199,7 +205,6 @@ type CastWindow = Window & {
 
 const requestEvent = 'bb:request-playback';
 const historyEvent = 'bb:playback-history-changed';
-const castScriptId = 'bb-google-cast-sdk';
 const subtitleAppearanceStorageKey = 'bb-media-subtitle-appearance-v1';
 const subtitlePositions: Array<{ value: SubtitlePosition; label: string }> = [
   { value: 'top', label: 'Øverst' },
@@ -237,6 +242,8 @@ export function WebPlayer() {
   const lastProgressAt = useRef(0);
   const requestNumber = useRef(0);
   const qualitySelectionRef = useRef(-1);
+  const timelineOffsetRef = useRef(0);
+  const upscaleUnlockedRef = useRef(false);
   const [media, setMedia] = useState<PlayableMedia | null>(null);
   const [authorization, setAuthorization] = useState<Authorization | null>(null);
   const [sourceReady, setSourceReady] = useState(false);
@@ -254,6 +261,7 @@ export function WebPlayer() {
   const [qualitySelection, setQualitySelection] = useState(-1);
   const [currentQuality, setCurrentQuality] = useState(-1);
   const [qualitySwitching, setQualitySwitching] = useState<number | null>(null);
+  const [upscaleUnlocked, setUpscaleUnlocked] = useState(false);
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
   const [subtitleCue, setSubtitleCue] = useState('');
   const [subtitlePosition, setSubtitlePosition] = useState<SubtitlePosition>('bottom');
@@ -271,10 +279,13 @@ export function WebPlayer() {
     const sessionId = sessionRef.current;
     const video = videoRef.current;
     const remote = castingRef.current ? castRemotePlayerRef.current : null;
-    const positionSeconds = remote?.currentTime ?? video?.currentTime;
+    const positionSeconds = remote
+      ? timelineOffsetRef.current + remote.currentTime
+      : video ? timelineOffsetRef.current + video.currentTime : undefined;
     if (!sessionId || positionSeconds === undefined) return;
     const fallbackDuration = mediaRef.current?.file?.durationMs ?? undefined;
-    const playbackDuration = remote?.duration ?? video?.duration;
+    const playbackDuration = remote?.duration
+      ?? (fallbackDuration ? fallbackDuration / 1000 : video ? timelineOffsetRef.current + video.duration : undefined);
     const durationMs = typeof playbackDuration === 'number' && Number.isFinite(playbackDuration) && playbackDuration > 0
       ? Math.round(playbackDuration * 1000)
       : fallbackDuration;
@@ -331,6 +342,9 @@ export function WebPlayer() {
     setQualitySelection(-1);
     setCurrentQuality(-1);
     setQualitySwitching(null);
+    timelineOffsetRef.current = 0;
+    upscaleUnlockedRef.current = false;
+    setUpscaleUnlocked(false);
   }, [saveProgress]);
 
   const togglePlay = useCallback(() => {
@@ -344,18 +358,94 @@ export function WebPlayer() {
     else video.pause();
   }, []);
 
-  const seekBy = useCallback((seconds: number) => {
+  const restartStreamAt = useCallback(async (targetSeconds: number) => {
+    const currentAuthorization = authorization;
+    const video = videoRef.current;
+    if (!currentAuthorization || !video || currentAuthorization.method === 'direct_play') return;
+    const fullDuration = mediaRef.current?.file?.durationMs
+      ? mediaRef.current.file.durationMs / 1000
+      : duration;
+    const target = Math.max(0, Math.min(Math.max(0, fullDuration - 1), targetSeconds));
+    const activeTrack = currentAuthorization.subtitleTracks.find(
+      (track) => track.id === activeSubtitleRef.current,
+    );
+    setControlsVisible(true);
+    setError('');
+    setStatus(`Forbereder stream fra ${formatTime(target)}...`);
+    await saveProgress(false).catch(() => undefined);
+    setSourceReady(false);
+    try {
+      const configuration = await api<{
+        method: 'direct_stream' | 'transcode';
+        streamUrl: string;
+        transcodeStatusUrl: string;
+        adaptiveQuality: Authorization['adaptiveQuality'];
+      }>(`/playback/sessions/${currentAuthorization.sessionId}/configuration`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          streamToken: currentAuthorization.streamToken,
+          burnIn: activeTrack?.delivery === 'burn_in',
+          ...(activeTrack?.delivery === 'burn_in' ? { subtitleTrackId: activeTrack.id } : {}),
+          startPositionMs: Math.round(target * 1_000),
+        }),
+      });
+      const ready = await waitForTranscode(
+        configuration.transcodeStatusUrl,
+        () => sessionRef.current === currentAuthorization.sessionId,
+      );
+      if (!ready) return;
+      timelineOffsetRef.current = target;
+      resumeRef.current = 0;
+      resumeAppliedRef.current = true;
+      setCurrentTime(target);
+      setAuthorization({
+        ...currentAuthorization,
+        method: configuration.method,
+        streamUrl: configuration.streamUrl,
+        transcodeStatusUrl: configuration.transcodeStatusUrl,
+        adaptiveQuality: configuration.adaptiveQuality,
+      });
+      setStatus(`${configuration.method === 'direct_stream' ? 'Direct Stream' : 'Transcoding'} · HLS · fra ${formatTime(target)}`);
+      setSourceReady(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Den valgte position kunne ikke forberedes.');
+      setStatus('');
+    }
+  }, [authorization, duration, saveProgress]);
+
+  const seekTo = useCallback((targetSeconds: number) => {
     const remote = castRemotePlayerRef.current;
     const controller = castRemoteControllerRef.current;
     if (castingRef.current && remote && controller) {
-      remote.currentTime = Math.max(0, Math.min(remote.duration || Number.MAX_SAFE_INTEGER, remote.currentTime + seconds));
+      remote.currentTime = Math.max(0, Math.min(remote.duration || Number.MAX_SAFE_INTEGER, targetSeconds));
       controller.seek();
       return;
     }
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = Math.max(0, Math.min(video.duration || Number.MAX_SAFE_INTEGER, video.currentTime + seconds));
-  }, []);
+    const fullDuration = mediaRef.current?.file?.durationMs
+      ? mediaRef.current.file.durationMs / 1000
+      : timelineOffsetRef.current + (video.duration || Number.MAX_SAFE_INTEGER);
+    const target = Math.max(0, Math.min(fullDuration, targetSeconds));
+    const localTarget = target - timelineOffsetRef.current;
+    if (
+      authorization?.method === 'direct_play'
+      || (localTarget >= 0 && mediaTimeIsBuffered(video, localTarget))
+    ) {
+      video.currentTime = localTarget;
+      setCurrentTime(target);
+      return;
+    }
+    void restartStreamAt(target);
+  }, [authorization?.method, restartStreamAt]);
+
+  const seekBy = useCallback((seconds: number) => {
+    const remote = castRemotePlayerRef.current;
+    const position = castingRef.current && remote
+      ? remote.currentTime
+      : timelineOffsetRef.current + (videoRef.current?.currentTime ?? 0);
+    seekTo(position + seconds);
+  }, [seekTo]);
 
   useEffect(() => {
     const onRequest = (event: Event) => {
@@ -386,6 +476,7 @@ export function WebPlayer() {
               profileId: context.profileId,
               mediaId: request.media.id,
               deviceId: context.deviceId,
+              startPositionMs: request.resumePositionMs,
               capabilities: browserCapabilities(),
             }),
           });
@@ -394,22 +485,17 @@ export function WebPlayer() {
             return;
           }
           sessionRef.current = next.sessionId;
-          const subtitleCandidates = next.playbackPreferences.subtitleMode === 'forced'
-            ? next.subtitleTracks.filter((track) => /forced|tvungen/i.test(track.label))
-            : next.subtitleTracks;
-          const defaultSubtitle = next.playbackPreferences.subtitleMode === 'off'
-            ? null
-            : next.playbackPreferences.preferredSubtitleLanguages
-                .map((language) =>
-                  subtitleCandidates.find(
-                    (track) => track.delivery === 'webvtt'
-                      && subtitleLanguageCode(track.language) === subtitleLanguageCode(language),
-                  )
-                  ?? subtitleCandidates.find(
-                    (track) => subtitleLanguageCode(track.language) === subtitleLanguageCode(language),
-                  ),
-                )
-                .find(Boolean)?.id ?? null;
+          if (next.method !== 'direct_play' && request.resumePositionMs > 0) {
+            timelineOffsetRef.current = request.resumePositionMs / 1_000;
+            resumeRef.current = 0;
+          } else {
+            timelineOffsetRef.current = 0;
+          }
+          const defaultSubtitle = chooseDefaultWebVttSubtitle(
+            next.subtitleTracks,
+            next.playbackPreferences.preferredSubtitleLanguages,
+            next.playbackPreferences.subtitleMode,
+          );
           activeSubtitleRef.current = defaultSubtitle;
           setActiveSubtitle(defaultSubtitle);
           setAuthorization(next);
@@ -466,7 +552,9 @@ export function WebPlayer() {
         if (bufferedAheadMs(video) + 250 < requiredBufferMs) return;
       }
       started = true;
-      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+        setDuration(mediaRef.current?.file?.durationMs
+          ? mediaRef.current.file.durationMs / 1000
+          : Number.isFinite(video.duration) ? timelineOffsetRef.current + video.duration : 0);
       void video.play().catch(() => undefined);
     };
     video.addEventListener('loadedmetadata', start);
@@ -477,8 +565,8 @@ export function WebPlayer() {
     if (authorization.method !== 'direct_play' && Hls.isSupported()) {
       const hls = new Hls({
         backBufferLength: 90,
-        maxBufferLength: 60,
-        maxMaxBufferLength: 120,
+        maxBufferLength: authorization.playbackPreferences.allowUpscale ? 240 : 60,
+        maxMaxBufferLength: authorization.playbackPreferences.allowUpscale ? 300 : 120,
         enableWorker: true,
         startLevel: 0,
         startPosition: 0,
@@ -493,14 +581,27 @@ export function WebPlayer() {
       hls.loadSource(authorization.streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setQualities(hls.levels.map((level, index) => ({
+        const presentedQualities = hls.levels.map((level, index) => ({
           index,
           ...presentPlaybackQualityLevel(
             level.height,
             level.bitrate,
             authorization.adaptiveQuality.renditions[index],
           ),
-        })));
+        }));
+        setQualities(presentedQualities);
+        const lastSourceLevel = deferredUpscaleLevelCap(
+          presentedQualities.map((quality) => ({
+            height: hls.levels[quality.index]?.height ?? 0,
+            upscaled: quality.upscaled,
+          })),
+          authorization.videoProfile.source.height,
+          authorization.playbackPreferences.allowUpscale,
+        );
+        const hasDeferredUpscale = lastSourceLevel >= 0;
+        upscaleUnlockedRef.current = !hasDeferredUpscale;
+        setUpscaleUnlocked(!hasDeferredUpscale);
+        hls.autoLevelCapping = hasDeferredUpscale ? Math.max(0, lastSourceLevel) : -1;
         if (authorization.method === 'direct_stream') hls.loadLevel = 0;
         qualitySelectionRef.current = authorization.method === 'direct_stream'
           ? 0
@@ -574,8 +675,24 @@ export function WebPlayer() {
       const remote = castingRef.current ? castRemotePlayerRef.current : null;
       const hls = hlsRef.current;
       const level = hls && hls.currentLevel >= 0 ? hls.levels[hls.currentLevel] : null;
-      const position = remote?.currentTime ?? video?.currentTime ?? 0;
-      const mediaDuration = remote?.duration ?? video?.duration;
+      const position = remote
+        ? timelineOffsetRef.current + remote.currentTime
+        : video ? timelineOffsetRef.current + video.currentTime : 0;
+      const mediaDuration = remote?.duration
+        ?? (mediaRef.current?.file?.durationMs
+          ? mediaRef.current.file.durationMs / 1000
+          : video ? timelineOffsetRef.current + video.duration : undefined);
+      const bufferAhead = remote || !video ? null : bufferedAheadMs(video);
+      if (
+        hls
+        && !upscaleUnlockedRef.current
+        && bufferAhead !== null
+        && bufferAhead >= 210_000
+      ) {
+        upscaleUnlockedRef.current = true;
+        setUpscaleUnlocked(true);
+        hls.autoLevelCapping = -1;
+      }
       const remoteState = remote?.playerState?.toLowerCase();
       void api(`/playback/sessions/${authorization.sessionId}/heartbeat`, {
         method: 'PATCH',
@@ -587,7 +704,7 @@ export function WebPlayer() {
           durationMs: Number.isFinite(mediaDuration) ? Math.max(0, Math.round((mediaDuration ?? 0) * 1000)) : null,
           currentBitrate: remote ? null : Math.max(0, Math.round(level?.bitrate ?? authorization.videoProfile.source.bitrate ?? 0)),
           currentHeight: Math.round(level?.height ?? authorization.videoProfile.output.height ?? authorization.videoProfile.source.height ?? 0) || null,
-          bufferAheadMs: remote || !video ? null : bufferedAheadMs(video),
+          bufferAheadMs: bufferAhead,
         }),
       }).catch((caught: ApiFailure) => setError(caught.message ?? 'Playback-sessionen udløb.'));
     };
@@ -633,7 +750,7 @@ export function WebPlayer() {
       void fetch(`/api/v1/playback/sessions/${sessionId}/progress`, {
         method: 'PATCH',
         headers,
-        body: JSON.stringify({ positionMs: Math.max(0, Math.round(video.currentTime * 1000)) }),
+        body: JSON.stringify({ positionMs: Math.max(0, Math.round((timelineOffsetRef.current + video.currentTime) * 1000)) }),
         keepalive: true,
       });
       void fetch(`/api/v1/playback/sessions/${sessionId}`, { method: 'DELETE', headers, keepalive: true });
@@ -677,7 +794,9 @@ export function WebPlayer() {
       metadata.subtitle = media.seriesTitle ? episodeLabel(media) : status;
       mediaInfo.metadata = metadata;
       mediaInfo.streamType = mediaApi.StreamType.BUFFERED;
-      if (media.file?.durationMs) mediaInfo.duration = media.file.durationMs / 1000;
+      if (media.file?.durationMs) {
+        mediaInfo.duration = Math.max(0, media.file.durationMs / 1000 - timelineOffsetRef.current);
+      }
       const castSubtitles = castTextTracks(handoff.subtitleTracks);
       mediaInfo.tracks = castSubtitles
         .map((subtitle, index) => {
@@ -702,7 +821,9 @@ export function WebPlayer() {
       const onRemoteChange = () => {
         if (!castingRef.current) return;
         if (remotePlayer.isConnected) connectedOnce = true;
-        setCurrentTime(Number.isFinite(remotePlayer.currentTime) ? remotePlayer.currentTime : 0);
+        setCurrentTime(Number.isFinite(remotePlayer.currentTime)
+          ? timelineOffsetRef.current + remotePlayer.currentTime
+          : timelineOffsetRef.current);
         setDuration(Number.isFinite(remotePlayer.duration) ? remotePlayer.duration : 0);
         setPaused(remotePlayer.isPaused);
         setVolume(Number.isFinite(remotePlayer.volumeLevel) ? remotePlayer.volumeLevel : 1);
@@ -828,16 +949,29 @@ export function WebPlayer() {
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !authorization) return;
+    const wiredElements = new Set<HTMLTrackElement>();
+    const updateCue = () => {
+      const selected = Array.from(video.querySelectorAll<HTMLTrackElement>('track[data-track-id]'))
+        .find((element) => element.dataset.trackId === activeSubtitleRef.current);
+      setSubtitleCue(selected
+        ? cueTextAt(selected.track, timelineOffsetRef.current + video.currentTime, subtitleOffsetRef.current)
+        : '');
+    };
     const applyTrackSelection = () => {
       const trackElements = Array.from(video.querySelectorAll<HTMLTrackElement>('track[data-track-id]'));
       let selectedTrack: TextTrack | null = null;
       trackElements.forEach((element) => {
+        if (!wiredElements.has(element)) {
+          wiredElements.add(element);
+          element.addEventListener('load', applyTrackSelection);
+          element.track.addEventListener('cuechange', updateCue);
+        }
         const selected = element.dataset.trackId === activeSubtitle;
         element.track.mode = selected ? 'hidden' : 'disabled';
         if (selected) selectedTrack = element.track;
       });
       setSubtitleCue(selectedTrack
-        ? cueTextAt(selectedTrack, video.currentTime, subtitleOffsetRef.current)
+        ? cueTextAt(selectedTrack, timelineOffsetRef.current + video.currentTime, subtitleOffsetRef.current)
         : '');
     };
     video.addEventListener('loadedmetadata', applyTrackSelection);
@@ -846,6 +980,10 @@ export function WebPlayer() {
     return () => {
       video.removeEventListener('loadedmetadata', applyTrackSelection);
       video.textTracks.removeEventListener('addtrack', applyTrackSelection);
+      wiredElements.forEach((element) => {
+        element.removeEventListener('load', applyTrackSelection);
+        element.track.removeEventListener('cuechange', updateCue);
+      });
     };
   }, [activeSubtitle, authorization, sourceReady]);
 
@@ -869,7 +1007,7 @@ export function WebPlayer() {
         || (!selectedTrack && activeTrack?.delivery === 'burn_in')
       )
     ) {
-      resumeRef.current = Math.round((videoRef.current?.currentTime ?? currentTime) * 1_000);
+      resumeRef.current = Math.round((timelineOffsetRef.current + (videoRef.current?.currentTime ?? currentTime)) * 1_000);
       resumeAppliedRef.current = false;
       setSubtitleCue('');
       setSourceReady(false);
@@ -885,6 +1023,7 @@ export function WebPlayer() {
           streamToken: authorization.streamToken,
           burnIn: Boolean(selectedTrack),
           ...(selectedTrack ? { subtitleTrackId: selectedTrack.id } : {}),
+          startPositionMs: resumeRef.current,
         }),
       }).then(async (configuration) => {
         for (let attempt = 0; attempt < 180; attempt += 1) {
@@ -897,7 +1036,9 @@ export function WebPlayer() {
           await new Promise((resolve) => setTimeout(resolve, 1_000));
           if (attempt === 179) throw new Error('Transcode timed out');
         }
-        setAuthorization({
+          timelineOffsetRef.current = resumeRef.current / 1_000;
+          resumeRef.current = 0;
+          setAuthorization({
           ...authorization,
           method: 'transcode',
           streamUrl: configuration.streamUrl,
@@ -936,7 +1077,7 @@ export function WebPlayer() {
       if (selected) selectedTextTrack = element.track;
     });
     setSubtitleCue(selectedTextTrack
-      ? cueTextAt(selectedTextTrack, videoRef.current?.currentTime ?? 0, subtitleOffsetRef.current)
+      ? cueTextAt(selectedTextTrack, timelineOffsetRef.current + (videoRef.current?.currentTime ?? 0), subtitleOffsetRef.current)
       : '');
     activeSubtitleRef.current = id;
     setActiveSubtitle(id);
@@ -961,8 +1102,38 @@ export function WebPlayer() {
     const activeTrack = Array.from(
       video?.querySelectorAll<HTMLTrackElement>('track[data-track-id]') ?? [],
     ).find((track) => track.dataset.trackId === activeSubtitleRef.current);
-    setSubtitleCue(video && activeTrack ? cueTextAt(activeTrack.track, video.currentTime, offsetMs) : '');
+    setSubtitleCue(video && activeTrack ? cueTextAt(activeTrack.track, timelineOffsetRef.current + video.currentTime, offsetMs) : '');
   };
+
+  const playNextEpisode = useCallback(async () => {
+    await saveProgress(true).catch(() => undefined);
+    const current = mediaRef.current;
+    if (!authorization?.playbackPreferences.autoplayNext || current?.type !== 'episode') {
+      setStatus('Færdig');
+      return;
+    }
+    const query = new URLSearchParams({ afterMediaId: current.id });
+    if (current.seriesMetadataProviderId) query.set('seriesMetadataProviderId', current.seriesMetadataProviderId);
+    else if (current.seriesDisplayTitle) query.set('seriesDisplayTitle', current.seriesDisplayTitle);
+    else if (current.seriesTitle) query.set('seriesTitle', current.seriesTitle);
+    else {
+      setStatus('Færdig');
+      return;
+    }
+    setStatus('Starter næste episode...');
+    try {
+      const next = await api<{ media: PlayableMedia; resumePositionMs: number } | null>(
+        `/playback/history/series-next?${query.toString()}`,
+      );
+      if (!next) {
+        setStatus('Serien er færdig');
+        return;
+      }
+      requestPlayback(next.media, next.resumePositionMs);
+    } catch {
+      setStatus('Næste episode kunne ikke startes automatisk');
+    }
+  }, [authorization?.playbackPreferences.autoplayNext, saveProgress]);
 
   if (!media) return null;
   return (
@@ -992,26 +1163,30 @@ export function WebPlayer() {
           setPaused(true);
           void saveProgress(false).catch(() => undefined);
         }}
-        onDurationChange={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+        onDurationChange={(event) => setDuration(mediaRef.current?.file?.durationMs
+          ? mediaRef.current.file.durationMs / 1000
+          : Number.isFinite(event.currentTarget.duration)
+            ? timelineOffsetRef.current + event.currentTarget.duration
+            : 0)}
         onWaiting={() => { bufferingRef.current = true; }}
         onStalled={() => { bufferingRef.current = true; }}
         onPlaying={() => { bufferingRef.current = false; }}
         onCanPlay={() => { bufferingRef.current = false; }}
         onVolumeChange={(event) => setVolume(event.currentTarget.volume)}
         onTimeUpdate={(event) => {
-          setCurrentTime(event.currentTarget.currentTime);
+          setCurrentTime(timelineOffsetRef.current + event.currentTarget.currentTime);
           const activeTrack = Array.from(
             event.currentTarget.querySelectorAll<HTMLTrackElement>('track[data-track-id]'),
           ).find((track) => track.dataset.trackId === activeSubtitleRef.current);
           setSubtitleCue(activeTrack
-            ? cueTextAt(activeTrack.track, event.currentTarget.currentTime, subtitleOffsetRef.current)
+            ? cueTextAt(activeTrack.track, timelineOffsetRef.current + event.currentTarget.currentTime, subtitleOffsetRef.current)
             : '');
           const now = Date.now();
           if (now - lastProgressAt.current < 10_000) return;
           lastProgressAt.current = now;
           void saveProgress(false).catch(() => undefined);
         }}
-        onEnded={() => void saveProgress(true).then(() => setStatus('Færdig')).catch(() => undefined)}
+        onEnded={() => void playNextEpisode()}
         onError={() => {
           if (sourceReady) setError('Browseren kunne ikke afspille den leverede stream.');
         }}
@@ -1265,6 +1440,7 @@ export function WebPlayer() {
                 <button
                   className={`${styles.menuRow} ${styles.qualityRow} ${qualitySelection === quality.index ? styles.qualitySelected : ''}`}
                   aria-pressed={qualitySelection === quality.index}
+                  disabled={quality.upscaled && !upscaleUnlocked}
                   key={quality.index}
                   onClick={() => selectQuality(quality.index)}
                 >
@@ -1272,7 +1448,7 @@ export function WebPlayer() {
                     <span className={styles.resolutionBadge}>{quality.resolution}</span>
                     <span>
                       <strong>{quality.resolution}</strong>
-                      <small>{quality.bitrate ?? 'Variabel bitrate'}</small>
+                      <small>{quality.upscaled && !upscaleUnlocked ? 'Låses op efter 3½ min. buffer' : quality.bitrate ?? 'Variabel bitrate'}</small>
                     </span>
                   </span>
                   <span className={styles.qualityTags}>
@@ -1315,17 +1491,10 @@ export function WebPlayer() {
               step={0.1}
               value={Math.min(currentTime, Math.max(duration, 1))}
               onChange={(event) => {
-                const next = Number(event.target.value);
-                const remote = castRemotePlayerRef.current;
-                const controller = castRemoteControllerRef.current;
-                if (castingRef.current && remote && controller) {
-                  remote.currentTime = next;
-                  controller.seek();
-                } else if (videoRef.current) {
-                  videoRef.current.currentTime = next;
-                }
-                setCurrentTime(next);
+                setCurrentTime(Number(event.target.value));
               }}
+              onPointerUp={(event) => seekTo(Number(event.currentTarget.value))}
+              onKeyUp={(event) => seekTo(Number(event.currentTarget.value))}
               aria-label="Afspilningsposition"
             />
             <span>{formatTime(duration)}</span>
@@ -1341,7 +1510,7 @@ export function WebPlayer() {
                 {paused ? <Play fill="currentColor" /> : <Pause fill="currentColor" />}
               </button>
               <button onClick={() => seekBy(10)} title="10 sekunder frem"><RotateCw /><small>10</small></button>
-              <button disabled title="Næste titel"><SkipForward /></button>
+              <button disabled={media.type !== 'episode'} onClick={() => void playNextEpisode()} title="Næste titel"><SkipForward /></button>
             </div>
             <div className={styles.optionControls}>
               <button onClick={() => setMenu(menu === 'speed' ? null : 'speed')}><Gauge /><small>{playbackRate}x</small><span>Hastighed</span></button>
@@ -1457,45 +1626,24 @@ async function loadCastFramework(retry = false): Promise<{ available: boolean; r
     };
   }
   const castWindow = window as CastWindow;
+  const sdkAvailable = await ensureCastSdk();
+  if (!sdkAvailable) {
+    return {
+      available: false,
+      reason: 'Google Cast SDK kunne ikke indlæses. Kontrollér HTTPS, netværk og browserens Cast-understøttelse.',
+    };
+  }
   if (castWindow.cast?.framework && castWindow.chrome?.cast?.media) {
     return configureCastFramework(castWindow)
       ? { available: true, reason: 'Afspil på Chromecast' }
       : { available: false, reason: 'Google Cast Framework kunne ikke initialiseres.' };
   }
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (available: boolean, errorInfo?: unknown) => {
-      if (settled) return;
-      settled = true;
-      if (available) {
-        const framework = castWindow.cast?.framework;
-        const media = castWindow.chrome?.cast?.media;
-        if (framework && media && configureCastFramework(castWindow)) {
-          resolve({ available: true, reason: 'Afspil på Chromecast' });
-          return;
-        }
-      }
-      resolve({
-        available: false,
-        reason: castFrameworkFailureReason(errorInfo),
-      });
-    };
-    castWindow.__onGCastApiAvailable = finish;
-    const existingScript = document.getElementById(castScriptId);
-    if (retry) existingScript?.remove();
-    if (!document.getElementById(castScriptId)) {
-      const script = document.createElement('script');
-      script.id = castScriptId;
-      script.src = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
-      script.async = true;
-      script.onerror = () => finish(false);
-      script.onload = () => {
-        if (castWindow.cast?.framework && castWindow.chrome?.cast?.media) finish(true);
-      };
-      document.head.appendChild(script);
-    }
-    window.setTimeout(() => finish(Boolean(castWindow.cast?.framework)), 10_000);
-  });
+  return {
+    available: false,
+    reason: retry
+      ? 'Google Cast SDK blev genindlæst, men frameworket er fortsat utilgængeligt.'
+      : castFrameworkFailureReason(undefined),
+  };
 }
 
 function castFrameworkFailureReason(errorInfo: unknown): string {
@@ -1596,7 +1744,8 @@ function configureCastFramework(castWindow: CastWindow): boolean {
   try {
     framework.CastContext.getInstance().setOptions({
       receiverApplicationId: media.DEFAULT_MEDIA_RECEIVER_APP_ID,
-      autoJoinPolicy: framework.AutoJoinPolicy.ORIGIN_SCOPED,
+      autoJoinPolicy: castWindow.chrome?.cast?.AutoJoinPolicy?.ORIGIN_SCOPED
+        ?? framework.AutoJoinPolicy.ORIGIN_SCOPED,
     });
     return true;
   } catch {
@@ -1613,6 +1762,14 @@ function bufferedAheadMs(video: HTMLVideoElement): number {
     }
   }
   return 0;
+}
+
+function mediaTimeIsBuffered(video: HTMLVideoElement, time: number): boolean {
+  if (!Number.isFinite(time) || time < 0) return false;
+  for (let index = 0; index < video.buffered.length; index += 1) {
+    if (time >= video.buffered.start(index) - 0.25 && time <= video.buffered.end(index) - 0.25) return true;
+  }
+  return false;
 }
 
 function menuTitle(menu: Exclude<PlayerMenu, null>) {

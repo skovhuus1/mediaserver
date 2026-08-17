@@ -465,6 +465,8 @@ model MediaItem {
   @@index([accountId, category])
   @@index([accountId, seriesTitle, seasonNumber])
   @@index([accountId, seriesMetadataProviderId])
+  @@index([accountId, type, seriesMetadataProviderId, seasonNumber, episodeNumber])
+  @@index([accountId, type, seriesDisplayTitle, seasonNumber, episodeNumber])
   @@index([accountId, metadataProvider, metadataProviderId])
   @@map("media_items")
 }

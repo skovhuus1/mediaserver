@@ -6,6 +6,7 @@ export * from './adaptive-quality.js';
 export * from './cpu-transcode-profile.js';
 export * from './playback-resume.js';
 export * from './playback-quality.js';
+export * from './playback-runtime.js';
 export * from './series-identity.js';
 export * from './direct-stream-remux.js';
 

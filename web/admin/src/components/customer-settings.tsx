@@ -185,7 +185,7 @@ export function CustomerSettings() {
         <label>Maksimal opløsning<select disabled={device.preferences.qualityMode !== 'fixed'} value={device.preferences.fixedQualityHeight ?? 1080} onChange={(event) => patchDevice({ fixedQualityHeight: Number(event.target.value) })}>{[360, 480, 720, 1080, 1440, 2160].map((height) => <option key={height} value={height}>{height === 2160 ? '4K' : `${height}p`}</option>)}</select></label>
         <label>Standardhastighed<select value={device.preferences.playbackRate} onChange={(event) => patchDevice({ playbackRate: Number(event.target.value) })}>{[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => <option key={rate} value={rate}>{rate}x</option>)}</select></label>
         <label>HDR<select value={device.preferences.hdrMode} onChange={(event) => patchDevice({ hdrMode: event.target.value as DeviceState['preferences']['hdrMode'] })}><option value="auto">Auto</option><option value="prefer_hdr">Foretræk HDR</option><option value="force_sdr">Tving SDR</option></select></label>
-        <Toggle label="Tillad upscaling" checked={device.preferences.allowUpscale} change={(checked) => patchDevice({ allowUpscale: checked })} />
+        <Toggle label="Tillad upscaling efter mindst 3½ min. buffer" checked={device.preferences.allowUpscale} change={(checked) => patchDevice({ allowUpscale: checked })} />
         <Toggle label="Databesparelse, maks. 720p / ca. 3 Mbps" checked={device.preferences.dataSaver} change={(checked) => patchDevice({ dataSaver: checked })} />
       </SettingsCard>
 
