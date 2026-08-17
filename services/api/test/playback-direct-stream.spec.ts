@@ -19,7 +19,24 @@ const effective: EffectiveEntitlements = {
 };
 
 describe('PlaybackService Direct Stream authorization', () => {
-  it('queues one HLS remux on the reserved logical session and returns its status URL', async () => {
+  it.each([
+    {
+      scenario: 'playback from the beginning',
+      startPositionMs: undefined,
+      expectedMethod: 'direct_stream' as const,
+      expectedStreamMode: 'direct_stream' as const,
+    },
+    {
+      scenario: 'continue playback from saved progress',
+      startPositionMs: 62_000,
+      expectedMethod: 'transcode' as const,
+      expectedStreamMode: 'transcode' as const,
+    },
+  ])('selects a synchronized delivery method for $scenario', async ({
+    startPositionMs,
+    expectedMethod,
+    expectedStreamMode,
+  }) => {
     const prisma = {
       mediaItem: { findFirst: vi.fn().mockResolvedValue({
         id: 'media-1',
@@ -32,6 +49,7 @@ describe('PlaybackService Direct Stream authorization', () => {
         file: {
           status: 'ready',
           audioCodec: 'dts',
+          durationMs: 3_600_000,
           probe: { streams: [{ codec_type: 'video', codec_name: 'h264', pix_fmt: 'yuv420p' }] },
           storageRoot: { mountPath: '/media' },
         },
@@ -78,6 +96,7 @@ describe('PlaybackService Direct Stream authorization', () => {
       mediaId: 'media-1',
       deviceId: 'device-1',
       isCastSession: false,
+      ...(startPositionMs === undefined ? {} : { startPositionMs }),
       capabilities: {
         supportedCodecs: ['h264'],
         supportedAudioCodecs: ['aac'],
@@ -89,7 +108,7 @@ describe('PlaybackService Direct Stream authorization', () => {
     expect(result).toMatchObject({
       sessionId: 'session-1',
       logicalSessionId: 'logical-1',
-      method: 'direct_stream',
+      method: expectedMethod,
       contentType: 'application/x-mpegURL',
       streamUrl: '/api/v1/playback/sessions/session-1/hls/master.m3u8?token=stream-token',
       transcodeStatusUrl: '/api/v1/playback/sessions/session-1/transcode-status?token=stream-token',
@@ -97,8 +116,9 @@ describe('PlaybackService Direct Stream authorization', () => {
     });
     expect(reservations.reserve).toHaveBeenCalledOnce();
     expect(transcodeStream.enqueue).toHaveBeenCalledWith('session-1', 'account-1', expect.objectContaining({
-      streamMode: 'direct_stream',
-      audioMode: 'aac',
+      streamMode: expectedStreamMode,
+      ...(expectedStreamMode === 'direct_stream' ? { audioMode: 'aac' } : {}),
+      startPositionMs: startPositionMs ?? 0,
       adaptiveQuality: expect.objectContaining({ renditions: [expect.objectContaining({ height: 1080 })] }),
     }));
     expect(subtitleStream.listForPlayback).toHaveBeenCalledWith(

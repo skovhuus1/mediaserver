@@ -558,6 +558,6 @@ Denne leverance retter tre sammenhaengende fejl i webafspilleren:
 
 Validering:
 
-- `npm run test --workspace=@boltbytes/api -- playback-reconfiguration.spec.ts`: 2/2 tests bestaaet.
-- `npm run ci`: ESLint, contracts/API/worker/admin typecheck, 34 testfiler med 117/117 tests samt contracts-, NestJS-, worker- og Next.js-build bestaaet.
+- `npm run test --workspace=@boltbytes/api -- playback-direct-stream.spec.ts playback-reconfiguration.spec.ts`: 4/4 tests bestaaet, inklusive Fortsaet fra gemt episodeposition.
+- `npm run ci`: ESLint, contracts/API/worker/admin typecheck, 34 testfiler med 118/118 tests samt contracts-, NestJS-, worker- og Next.js-build bestaaet.
 - Tilbagevaerende driftskontrol: deploy den nye container og smoke-test den konkrete FBI-fil i en rigtig browser for fysisk A/V-synkronisering, korrekt rendition-bitrate og vedvarende standardundertekster.
