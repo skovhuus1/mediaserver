@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
@@ -14,6 +14,8 @@ import {
   ArchiveProfileDto,
   ChangeSubscriptionPlanDto,
   SuspendUserDto,
+  PlaybackAnalysisQueryDto,
+  UpdatePlaybackMarkersDto,
 } from './administration.dto';
 import { AdministrationService } from './administration.service';
 
@@ -136,5 +138,39 @@ export class AdministrationController {
   @Roles('admin')
   deleteOverride(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.administration.deleteOverride(actor, id);
+  }
+
+  @Get('playback-analysis')
+  @Roles('admin', 'operator')
+  playbackAnalysis(@CurrentUser() actor: AuthenticatedUser, @Query() query: PlaybackAnalysisQueryDto) {
+    return this.administration.listPlaybackAnalysis(actor, query);
+  }
+
+  @Get('playback-analysis/:mediaId')
+  @Roles('admin', 'operator')
+  playbackAnalysisDetail(@CurrentUser() actor: AuthenticatedUser, @Param('mediaId') mediaId: string) {
+    return this.administration.playbackAnalysisDetail(actor, mediaId);
+  }
+
+  @Post('playback-analysis/:mediaId/rebuild')
+  @Roles('admin')
+  rebuildPlaybackAnalysis(@CurrentUser() actor: AuthenticatedUser, @Param('mediaId') mediaId: string) {
+    return this.administration.queuePlaybackAnalysis(actor, mediaId);
+  }
+
+  @Put('playback-analysis/:mediaId/markers')
+  @Roles('admin')
+  updatePlaybackMarkers(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('mediaId') mediaId: string,
+    @Body() dto: UpdatePlaybackMarkersDto,
+  ) {
+    return this.administration.updatePlaybackMarkers(actor, mediaId, dto);
+  }
+
+  @Delete('playback-analysis/:mediaId/markers')
+  @Roles('admin')
+  resetPlaybackMarkers(@CurrentUser() actor: AuthenticatedUser, @Param('mediaId') mediaId: string) {
+    return this.administration.resetPlaybackMarkers(actor, mediaId);
   }
 }

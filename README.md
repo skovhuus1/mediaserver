@@ -1,5 +1,15 @@
 # BoltBytes Media Server
 
+## Seneste leverance: Playback-analyse, serieoplevelse og lokal discovery
+
+- Adminpanelet har nu en funktionel `Playback-analyse` med søgning, statusfiltre, worker-fejl, trickplay-målinger, første sprite-preview og automatisk polling under behandling.
+- Administratorer kan gemme validerede intro-, recap- og rulletekstmarkører, nulstille til automatisk analyse og tvinge en sikker genopbygning. Operators har fortsat read-only adgang, og alle ændringer auditlogges.
+- Kundeportalen samler episodefiler til én serieoplevelse med sæsonfaner, watched/progress-status, fortsæt-valg, næste episode, episodekø og synlige intro/recap/credits-egenskaber.
+- Titelsider linker til lokale person- og samlingssider. Personer, serier, genrer og provider-lignende titler filtreres altid mod filer, som faktisk findes på den aktive konto.
+- Nye API-kontrakter: `GET /api/v1/playback-analysis`, `GET/POST/PUT/DELETE /api/v1/playback-analysis/:mediaId/*` samt `GET /api/v1/experience/titles|people|collections/*`.
+- Fasen kræver ingen ny database-migration. Den genbruger `MediaPlaybackAsset`, `MediaTimelineMarker`, katalogmetadata og profilscopet playback-historik.
+- Verificering for denne leverance dokumenteres i PR'en og CI. Fysisk real-media/cast-certificering på produktionsserveren er fortsat en separat driftsgate.
+
 ## Playback Certification og live QoE (2026-08-17)
 
 Implementeret i denne leverance:

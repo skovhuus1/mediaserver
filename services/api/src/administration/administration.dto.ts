@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEmail,
@@ -221,4 +223,49 @@ export class CreateEntitlementOverrideDto {
   @IsOptional()
   @IsDateString()
   expiresAt?: string;
+}
+
+export class PlaybackAnalysisQueryDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 160)
+  q?: string;
+
+  @IsOptional()
+  @IsIn(['all', 'missing', 'queued', 'generating', 'ready', 'failed'])
+  status: 'all' | 'missing' | 'queued' | 'generating' | 'ready' | 'failed' = 'all';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(10)
+  @Max(100)
+  take = 40;
+}
+
+export class PlaybackMarkerDto {
+  @IsIn(['intro', 'recap', 'credits'])
+  kind!: 'intro' | 'recap' | 'credits';
+
+  @IsInt()
+  @Min(0)
+  startMs!: number;
+
+  @IsInt()
+  @Min(1)
+  endMs!: number;
+}
+
+export class UpdatePlaybackMarkersDto {
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => PlaybackMarkerDto)
+  markers!: PlaybackMarkerDto[];
 }
