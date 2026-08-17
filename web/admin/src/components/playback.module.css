@@ -247,17 +247,19 @@
 
 .subtitleCue span {
   max-width: min(920px, 88vw);
-  padding: .22em .48em;
-  border-radius: 5px;
+  padding: 0;
   color: #fff;
-  background: rgba(0, 0, 0, .78);
-  box-decoration-break: clone;
-  font-size: clamp(18px, 2.2vw, 34px);
-  font-weight: 650;
-  line-height: 1.28;
-  text-shadow: 0 2px 5px #000;
+  background: transparent;
+  font-size: clamp(20px, 2.25vw, 36px);
+  font-weight: 700;
+  letter-spacing: .01em;
+  line-height: 1.24;
+  paint-order: stroke fill;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, .98),
+    0 5px 16px rgba(0, 0, 0, .95);
   white-space: pre-line;
-  -webkit-box-decoration-break: clone;
+  -webkit-text-stroke: .055em rgba(0, 0, 0, .92);
 }
 
 @keyframes streamLoadingPulse {
