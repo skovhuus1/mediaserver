@@ -131,7 +131,7 @@ type SubtitleTrack = {
 type SubtitlePosition = 'top' | 'middle' | 'bottom';
 type SubtitleColor = 'white' | 'yellow' | 'cyan' | 'green';
 type SubtitleAppearance = { position: SubtitlePosition; color: SubtitleColor };
-type TimelineMarker = { id: string; kind: 'intro' | 'credits'; startMs: number; endMs: number; source: string; confidence: number | null };
+type TimelineMarker = { id: string; kind: 'intro' | 'recap' | 'credits'; startMs: number; endMs: number; source: string; confidence: number | null };
 type TrickplayCue = { startMs: number; endMs: number; sheet: number; column: number; row: number };
 type PlaybackAssets = {
   status: 'queued' | 'generating' | 'ready' | 'failed';
@@ -1543,7 +1543,11 @@ export function WebPlayer() {
       {sourceReady && activeTimelineMarker && (
         <div className={styles.markerActions}>
           <button onClick={() => seekTo(activeTimelineMarker.endMs / 1_000)}>
-            {activeTimelineMarker.kind === 'intro' ? 'Spring intro over' : 'Spring rulletekster over'}
+            {activeTimelineMarker.kind === 'intro'
+              ? 'Spring intro over'
+              : activeTimelineMarker.kind === 'recap'
+                ? 'Spring recap over'
+                : 'Spring rulletekster over'}
           </button>
           {activeTimelineMarker.kind === 'credits' && media.type === 'episode' && nextEpisodeCountdown !== null && (
             <div>
