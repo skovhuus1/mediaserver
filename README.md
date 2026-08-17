@@ -561,3 +561,29 @@ Validering:
 - `npm run test --workspace=@boltbytes/api -- playback-direct-stream.spec.ts playback-reconfiguration.spec.ts`: 4/4 tests bestaaet, inklusive Fortsaet fra gemt episodeposition.
 - `npm run ci`: ESLint, contracts/API/worker/admin typecheck, 34 testfiler med 118/118 tests samt contracts-, NestJS-, worker- og Next.js-build bestaaet.
 - Tilbagevaerende driftskontrol: deploy den nye container og smoke-test den konkrete FBI-fil i en rigtig browser for fysisk A/V-synkronisering, korrekt rendition-bitrate og vedvarende standardundertekster.
+
+## Parallel biblioteksscanning og metadata (2026-08-17)
+
+Jobs-workeren afvikler nu uafhængige jobtyper i separate, kontrollerede kapacitetsspor:
+
+- Op til to forskellige biblioteker scannes samtidigt som standard.
+- Op til to biblioteksspecifikke metadatajobs kører samtidigt som standard. Når et lille bibliotek er færdigscannet, kan det derfor hente metadata, mens et større bibliotek fortsat scanner.
+- Lease-cleanup har sit eget enkelt slot og bliver ikke blokeret af lange katalogjobs.
+- Playback-transcoding kører fortsat i den separate `transcoder`-service og følger `BB_MEDIA_TRANSCODE_MAX_CONCURRENT`.
+- PostgreSQL `FOR UPDATE SKIP LOCKED`, job-leases og den eksisterende advisory lock pr. bibliotek bevares, så samme job eller bibliotek ikke behandles dobbelt.
+- Ved kontrolleret nedlukning stopper workeren med at claime nye jobs og venter på allerede aktive jobs.
+
+Kapaciteten konfigureres i `.env`:
+
+```env
+BB_MEDIA_SCAN_MAX_CONCURRENT=2
+BB_MEDIA_METADATA_MAX_CONCURRENT=2
+```
+
+Scan- og metadata-grænser accepterer `1-8`. Start med `2`, også på en kraftig server, og hæv først til `3` eller `4`, når disk-I/O, PostgreSQL og TMDB/TVDB-rate limits er observeret under en fuld scanning. En høj CPU-kapacitet fjerner ikke disk- eller providerbegrænsninger.
+
+Validering:
+
+- Worker-unit-tests: 1 testfil og 3/3 tests bestået for defaults, grænse-clamping, uafhængige slots og transcode-isolation.
+- `npm run ci`: lint, alle typechecks, 35 testfiler med samlet 121/121 tests samt alle production-builds bestået.
+- Lokal `docker compose config --quiet` kunne ikke køres, fordi Docker CLI ikke er installeret på udviklingsmaskinen. GitHub `validate` skal derfor bestå Compose-validering, image-build og container-startup før merge.
