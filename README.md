@@ -298,7 +298,7 @@ Manuel metadata-matchning åbnes fra en titel i admin-katalogets detaljepanel. `
 - Kortlivet separat receiver-token i stedet for det nuværende sessionbundne stream-token.
 - Sonarr, Radarr og qBittorrent integration.
 - Billing-provider og webhook-signaturverifikation.
-- Android, Android TV og øvrige native klienter.
+- iOS og øvrige native klienter samt signerede Android-release artifacts. Android/Android TV-fundamentet findes nu i `clients/mobile-tv`.
 - Backup/restore-automatisering og release artifacts.
 
 Scannerens titel er i denne fase afledt af filnavnet. Scanning startes manuelt fra API/admin; automatisk filesystem watching og planlagte scanninger er endnu ikke implementeret. De øvrige punkter må ikke betragtes som implementeret, selv om fundamentet er forberedt.
@@ -367,7 +367,7 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 
 - HDR10/Dolby Vision tone mapping ved transcoding er ikke implementeret; HDR er i denne fase passthrough via Direct Play/Direct Stream.
 - TVDB episode-level metadata og sæson-/episode-artwork er ikke implementeret endnu; den nuværende worker beriger serieepisoder med det matchede series-record.
-- TVDB-attribution skal også føjes til kommende TV- og mobilklienter, når de begynder at vise TVDB-data.
+- Android/TV-klienten viser TheTVDB-attribution på seriesider og åbner TheTVDB.com eksternt. Eventuelle kommende klienter skal bevare samme attribution.
 ## 4K- og HDR-badges på posters (2026-07-29)
 
 - Startsidens mediekort, katalogets posters og “Fortsæt med at se” viser nu et `4K`-badge, når den analyserede fil er mindst 3840 pixels bred eller 2160 pixels høj.
@@ -439,7 +439,7 @@ Denne leverance tilføjer komplet administrativ onboarding uden SMTP:
 
 Produktionsdomænet er `https://media.boltbytes.com`, mens Docker fortsat bruger host-port `6555` som intern upstream. DNS, certifikat, Nginx Proxy Manager, firewall, Range-streaming, fejlsøgning og rollback er dokumenteret i [`docs/domain-nginx-proxy-manager.md`](docs/domain-nginx-proxy-manager.md).
 
-Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, native file-watcher, hardwareaccelereret decode/tone mapping, egen Chromecast receiver samt Android- og TV-klienter.
+Fortsat ikke inkluderet i denne fase: SMTP/e-mailinvitationer, betaling, native file-watcher, hardwareaccelereret decode/tone mapping, fysisk Cast-certificering samt signerede Play Store/Android TV-release artifacts.
 
 CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, så health-, Direct Play-, subtitle-, HLS- og transcode-kontroller rammer den publicerede testport.
 
@@ -668,3 +668,42 @@ Nye API-kontrakter:
 - `GET /api/v1/media/:id/trickplay/:sheet`
 
 Valgfri workerkapacitet: `BB_MEDIA_PLAYBACK_ASSET_MAX_CONCURRENT` (standard `2`, maksimum `8`). Ved opdatering anvendes migrationen automatisk af den normale container-start. Genererede sprites kan slettes og gendannes; databasen og de manuelle markører er den varige autoritet.
+
+## Flutter Android- og Android TV-klient (2026-08-18)
+
+Den første native klientleverance ligger i `clients/mobile-tv` og bruger serverens eksisterende `/api/v1`-kontrakter direkte. Det er ikke en statisk prototype.
+
+Implementeret:
+
+- Android mobil/tablet og Android TV fra samme Flutter-kodebase med separat `BB_MEDIA_DEVICE_TYPE`, Leanback-launcher og retningsbestemt fjernbetjeningsfokus.
+- Login med konfigurerbar serveradresse, krypteret access/refresh-tokenlagring, automatisk tokenrotation, engangs-passwordskifte og profilvalg med valgfri PIN.
+- Personlig forside fra recommendations, katalog og profilscopet `Fortsæt med at se`; Hjem, Film, Serier, Fortsæt, søgning, profilskifte og logout udfører alle rigtig navigation.
+- Samlet serieside med sæsonvalg, episoder, set-status, progression, resumeepisode og TheTVDB-attribution.
+- Native Android-video via den officielle Flutter `video_player`/ExoPlayer-backend. Klienten autoriserer server-side, understøtter Direct Play og adaptiv HLS, venter på Direct Stream/transcode readiness og genbruger logical session ved HLS-seek/reconfiguration.
+- Heartbeat og progression bruger absolut medietid og gemmes hvert 10. sekund. Afslutning frigiver sessionen, mens serverens lease fortsat er crash-sikker fallback.
+- Serverens foretrukne tekstundertekst vælges automatisk, WebVTT rendres uafhængigt af control-overlayet, og billedbaserede spor anmoder om burn-in gennem sessionens configuration-endpoint.
+- Kvalitetsmenuen har Auto, Original og de serverautoriserede renditions. Ændringer gemmes på den registrerede enhed og genautoriserer fra den aktuelle position.
+
+Lokal udvikling:
+
+```powershell
+cd clients/mobile-tv
+C:\dev\flutter\bin\flutter.bat pub get
+C:\dev\flutter\bin\flutter.bat run --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 --dart-define=BB_MEDIA_DEVICE_TYPE=mobile
+```
+
+Android TV køres eller bygges med `--dart-define=BB_MEDIA_DEVICE_TYPE=tv`:
+
+```powershell
+C:\dev\flutter\bin\flutter.bat build apk --debug --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 --dart-define=BB_MEDIA_DEVICE_TYPE=tv
+```
+
+Den nye `flutter-client` GitHub-workflow kræver format, analyze, unit/widget tests samt både mobil- og TV-debug-APK. Debug-artifacts gemmes i syv dage og er kun til staging. Signering, package identity/final branding, Play Store/AAB, fysisk telefon/TV-certificering, Chromecast sender-SDK og offline downloads er næste native release-gates og må ikke betegnes som færdige i denne fase.
+
+Lokal validering 18. august 2026:
+
+- `flutter analyze`: ingen issues.
+- `flutter test`: 4 testfiler og `9/9` tests bestået for tokenrotation, kontraktparsing, serie/resume, adaptive renditions, WebVTT og branding.
+- Mobil-debug-APK bygget med `BB_MEDIA_DEVICE_TYPE=mobile`; TV-debug-APK bygget med `BB_MEDIA_DEVICE_TYPE=tv` og samme produktions-API-base.
+- `npm run ci`: ESLint, alle TypeScript-typechecks, `43/43` API-testfiler med `144/144` tests, `3/3` worker-tests samt contracts-, API-, worker- og Next.js-produktionsbuild bestået.
+- Fysisk Android-enhed, Android TV, rigtig mediefil og Chromecast er ikke tilsluttet udviklingsmaskinen og forbliver derfor eksplicit staging-acceptance, ikke lokal testbevis.

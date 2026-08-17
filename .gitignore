@@ -13,3 +13,8 @@
 .vscode/
 data/
 transcode/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/build/
+**/android/local.properties

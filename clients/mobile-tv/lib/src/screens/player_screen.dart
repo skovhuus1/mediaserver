@@ -1,0 +1,927 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:video_player/video_player.dart';
+
+import '../core/api_client.dart';
+import '../core/models.dart';
+import '../core/webvtt.dart';
+import '../widgets/brand.dart';
+
+class PlayerScreen extends StatefulWidget {
+  const PlayerScreen({
+    required this.api,
+    required this.media,
+    required this.resumePositionMs,
+    super.key,
+  });
+
+  final ApiClient api;
+  final MediaItem media;
+  final int resumePositionMs;
+
+  @override
+  State<PlayerScreen> createState() => _PlayerScreenState();
+}
+
+class _PlayerScreenState extends State<PlayerScreen>
+    with WidgetsBindingObserver {
+  VideoPlayerController? _video;
+  PlaybackAuthorization? _authorization;
+  SubtitleTrack? _subtitle;
+  List<WebVttCue> _cues = const [];
+  String _cueText = '';
+  String _status = 'Autoriserer afspilning...';
+  String? _error;
+  int _timelineOffsetMs = 0;
+  bool _controls = true;
+  bool _buffering = true;
+  bool _released = false;
+  bool _completed = false;
+  Timer? _heartbeatTimer;
+  Timer? _progressTimer;
+  Timer? _uiTimer;
+  Timer? _hideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_start(widget.resumePositionMs));
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      unawaited(_saveProgress());
+      unawaited(_video?.pause());
+    }
+  }
+
+  Future<void> _start(int startPositionMs) async {
+    final mediaQuery = MediaQuery.of(context);
+    setState(() {
+      _status = 'Autoriserer afspilning...';
+      _error = null;
+      _buffering = true;
+      _released = false;
+    });
+    try {
+      final contextJson = jsonMap(
+        await widget.api.getJson('/playback/context'),
+      );
+      final profileId = stringValue(contextJson['profileId']);
+      final deviceId = stringValue(contextJson['deviceId']);
+      if (profileId == null || deviceId == null) {
+        throw const ApiException(
+          'Den aktive profil eller enhed mangler. Log ind igen.',
+        );
+      }
+      final authorization = PlaybackAuthorization.fromJson(
+        await widget.api.postJson('/playback/authorize', {
+          'profileId': profileId,
+          'mediaId': widget.media.id,
+          'deviceId': deviceId,
+          'startPositionMs': math.max(0, startPositionMs),
+          'capabilities': {
+            'screenHeight':
+                (mediaQuery.size.height * mediaQuery.devicePixelRatio)
+                    .round()
+                    .clamp(240, 4320),
+            'devicePixelRatio': mediaQuery.devicePixelRatio.clamp(0.5, 4),
+            'supportedCodecs': const ['h264', 'hevc'],
+            'supportedAudioCodecs': const ['aac'],
+            'supportedContainers': const ['mov', 'mp4', 'matroska', 'mpegts'],
+            'supportsHdr': false,
+          },
+        }),
+      );
+      if (authorization.sessionId.isEmpty || authorization.streamUrl.isEmpty) {
+        throw const ApiException(
+          'Serveren returnerede ingen afspillelig stream.',
+        );
+      }
+      _authorization = authorization;
+      _timelineOffsetMs = authorization.isDirectPlay ? 0 : startPositionMs;
+      await _prepareController(
+        authorization,
+        directPlaySeekMs: startPositionMs,
+      );
+      await _selectDefaultSubtitle();
+      _startTimers();
+      _scheduleHide();
+    } on ApiException catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _error = failure.message;
+        _buffering = false;
+      });
+    } catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Afspilningen kunne ikke startes: $failure';
+        _buffering = false;
+      });
+    }
+  }
+
+  Future<void> _prepareController(
+    PlaybackAuthorization authorization, {
+    int directPlaySeekMs = 0,
+  }) async {
+    if (authorization.transcodeStatusUrl != null) {
+      await _waitUntilReady(authorization.transcodeStatusUrl!);
+    }
+    if (!mounted) return;
+    setState(
+      () => _status = authorization.isDirectPlay
+          ? 'Åbner originalfilen...'
+          : 'Forbereder adaptiv stream...',
+    );
+    final previous = _video;
+    final controller = VideoPlayerController.networkUrl(
+      widget.api.endpoint(authorization.streamUrl),
+      formatHint: authorization.isHls ? VideoFormat.hls : null,
+      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+    );
+    _video = controller;
+    await previous?.dispose();
+    await controller.initialize();
+    if (authorization.isDirectPlay && directPlaySeekMs > 0) {
+      await controller.seekTo(Duration(milliseconds: directPlaySeekMs));
+    }
+    await controller.setPlaybackSpeed(authorization.preferences.playbackRate);
+    await controller.play();
+    if (!mounted) return;
+    setState(() {
+      _buffering = false;
+      _status = authorization.isDirectPlay
+          ? 'Direct Play'
+          : authorization.method == 'direct_stream'
+          ? 'Direct Stream'
+          : 'Transcoding';
+    });
+  }
+
+  Future<void> _waitUntilReady(String statusUrl) async {
+    for (var attempt = 0; attempt < 180; attempt++) {
+      final status = jsonMap(await widget.api.getJson(statusUrl));
+      final state = stringValue(status['state']) ?? 'queued';
+      if (state == 'ready') return;
+      if (state == 'failed') {
+        throw ApiException(
+          stringValue(status['message']) ??
+              'FFmpeg kunne ikke forberede streamen.',
+        );
+      }
+      if (mounted) {
+        setState(
+          () => _status =
+              stringValue(status['message']) ?? 'FFmpeg forbereder streamen...',
+        );
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    throw const ApiException('Streamen blev ikke klar inden for tre minutter.');
+  }
+
+  void _startTimers() {
+    _heartbeatTimer?.cancel();
+    _progressTimer?.cancel();
+    _uiTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => unawaited(_heartbeat()),
+    );
+    _progressTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => unawaited(_saveProgress()),
+    );
+    _uiTimer = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) => _tick(),
+    );
+  }
+
+  void _tick() {
+    final video = _video;
+    if (!mounted || video == null || !video.value.isInitialized) return;
+    final value = video.value;
+    final nextCue = _cues
+        .where(
+          (cue) => cue.contains(Duration(milliseconds: _absolutePositionMs)),
+        )
+        .map((cue) => cue.text)
+        .join('\n');
+    final changed = nextCue != _cueText || value.isBuffering != _buffering;
+    if (changed) {
+      setState(() {
+        _cueText = nextCue;
+        _buffering = value.isBuffering;
+      });
+    } else if (_controls) {
+      setState(() {});
+    }
+    if (value.isCompleted && !_completed) {
+      _completed = true;
+      unawaited(_saveProgress());
+    }
+  }
+
+  int get _absolutePositionMs {
+    final local = _video?.value.position.inMilliseconds ?? 0;
+    return math.max(0, _timelineOffsetMs + local);
+  }
+
+  int get _durationMs {
+    final known = widget.media.durationMs ?? widget.media.progress?.durationMs;
+    if (known != null && known > 0) return known;
+    return _timelineOffsetMs + (_video?.value.duration.inMilliseconds ?? 0);
+  }
+
+  int get _bufferAheadMs {
+    final video = _video;
+    if (video == null || video.value.buffered.isEmpty) return 0;
+    final position = video.value.position;
+    for (final range in video.value.buffered) {
+      if (position >= range.start && position <= range.end) {
+        return math.max(0, (range.end - position).inMilliseconds);
+      }
+    }
+    return 0;
+  }
+
+  Future<void> _heartbeat() async {
+    final auth = _authorization;
+    final video = _video;
+    if (auth == null || video == null || _released) return;
+    final rendition = auth.renditions
+        .where((item) => (item.height - video.value.size.height).abs() < 32)
+        .firstOrNull;
+    try {
+      await widget.api
+          .patchJson('/playback/sessions/${auth.sessionId}/heartbeat', {
+            'runtimeState': video.value.isBuffering
+                ? 'buffering'
+                : video.value.isPlaying
+                ? 'playing'
+                : 'paused',
+            'positionMs': _absolutePositionMs,
+            'durationMs': _durationMs > 0 ? _durationMs : null,
+            'currentBitrate': rendition?.bitrate ?? auth.sourceBitrate,
+            'currentHeight': rendition?.height ?? auth.sourceHeight,
+            'bufferAheadMs': _bufferAheadMs,
+            'playbackRate': video.value.playbackSpeed,
+            'subtitleTrack': _subtitle?.label,
+          });
+    } catch (_) {
+      // The next heartbeat or token refresh recovers transient network loss.
+    }
+  }
+
+  Future<void> _saveProgress() async {
+    final auth = _authorization;
+    if (auth == null || _released) return;
+    try {
+      await widget.api
+          .patchJson('/playback/sessions/${auth.sessionId}/progress', {
+            'positionMs': _absolutePositionMs,
+            if (_durationMs > 0) 'durationMs': _durationMs,
+          });
+    } catch (_) {
+      // Progress is retried on the next interval and again during cleanup.
+    }
+  }
+
+  Future<void> _selectDefaultSubtitle() async {
+    final auth = _authorization;
+    if (auth == null || auth.preferences.subtitleMode == 'off') return;
+    SubtitleTrack? selected;
+    for (final language in auth.preferences.preferredSubtitleLanguages) {
+      selected = auth.subtitleTracks
+          .where(
+            (track) =>
+                _language(track.language) == _language(language) &&
+                track.isText,
+          )
+          .firstOrNull;
+      if (selected != null) break;
+    }
+    selected ??= auth.subtitleTracks.where((track) => track.isText).firstOrNull;
+    if (selected != null) await _setSubtitle(selected);
+  }
+
+  String _language(String value) =>
+      value.toLowerCase().split(RegExp('[-_]')).first;
+
+  Future<void> _setSubtitle(SubtitleTrack? track) async {
+    if (track == null) {
+      setState(() {
+        _subtitle = null;
+        _cues = const [];
+        _cueText = '';
+      });
+      return;
+    }
+    if (!track.isText) {
+      await _reconfigure(_absolutePositionMs, burnInTrack: track);
+      return;
+    }
+    setState(() {
+      _subtitle = track;
+      _cueText = '';
+    });
+    try {
+      final text = await widget.api.getText(track.src!);
+      if (!mounted || _subtitle?.id != track.id) return;
+      setState(() => _cues = parseWebVtt(text));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _cues = const [];
+        _error = 'Undertekstsporet kunne ikke indlæses.';
+      });
+    }
+  }
+
+  Future<void> _reconfigure(
+    int positionMs, {
+    SubtitleTrack? burnInTrack,
+  }) async {
+    final auth = _authorization;
+    if (auth == null) return;
+    _revealControls();
+    setState(() {
+      _buffering = true;
+      _status = burnInTrack == null
+          ? 'Søger i streamen...'
+          : 'Forbereder billed-undertekster...';
+    });
+    try {
+      await _saveProgress();
+      final result = jsonMap(
+        await widget.api
+            .patchJson('/playback/sessions/${auth.sessionId}/configuration', {
+              'streamToken': auth.streamToken,
+              'burnIn': burnInTrack != null,
+              if (burnInTrack != null) 'subtitleTrackId': burnInTrack.id,
+              'forceTranscode': true,
+              'startPositionMs': math.max(0, positionMs),
+            }),
+      );
+      final next = auth.copyWith(
+        method: stringValue(result['method']) ?? 'transcode',
+        streamUrl: stringValue(result['streamUrl']) ?? auth.streamUrl,
+        contentType:
+            stringValue(result['contentType']) ?? 'application/x-mpegURL',
+        transcodeStatusUrl: stringValue(result['transcodeStatusUrl']),
+      );
+      _authorization = next;
+      _timelineOffsetMs = positionMs;
+      if (burnInTrack != null) {
+        _subtitle = burnInTrack;
+        _cues = const [];
+        _cueText = '';
+      }
+      await _prepareController(next);
+    } on ApiException catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _buffering = false;
+        _error = failure.message;
+      });
+    }
+  }
+
+  Future<void> _seekTo(int targetMs) async {
+    final video = _video;
+    final auth = _authorization;
+    if (video == null || auth == null) return;
+    final target = targetMs.clamp(0, math.max(_durationMs, 0)).toInt();
+    if (auth.isDirectPlay) {
+      await video.seekTo(Duration(milliseconds: target));
+      return;
+    }
+    final local = target - _timelineOffsetMs;
+    final buffered = video.value.buffered.any(
+      (range) =>
+          Duration(milliseconds: local) >= range.start &&
+          Duration(milliseconds: local) <= range.end,
+    );
+    if (local >= 0 && buffered) {
+      await video.seekTo(Duration(milliseconds: local));
+    } else {
+      await _reconfigure(
+        target,
+        burnInTrack: _subtitle?.isText == false ? _subtitle : null,
+      );
+    }
+  }
+
+  Future<void> _changeQuality(String value) async {
+    final position = _absolutePositionMs;
+    final body = <String, dynamic>{};
+    if (value == 'auto' || value == 'original') {
+      body['qualityMode'] = value;
+    } else {
+      body['qualityMode'] = 'fixed';
+      body['fixedQualityHeight'] = int.parse(value);
+    }
+    try {
+      await widget.api.patchJson('/devices/me/preferences', body);
+      await _saveProgress();
+      await _release();
+      await _video?.dispose();
+      _video = null;
+      _authorization = null;
+      await _start(position);
+    } on ApiException catch (failure) {
+      if (mounted) setState(() => _error = failure.message);
+    }
+  }
+
+  void _togglePlayback() {
+    final video = _video;
+    if (video == null) return;
+    video.value.isPlaying ? unawaited(video.pause()) : unawaited(video.play());
+    _revealControls();
+  }
+
+  void _revealControls() {
+    if (mounted) setState(() => _controls = true);
+    _scheduleHide();
+  }
+
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && (_video?.value.isPlaying ?? false) && !_buffering) {
+        setState(() => _controls = false);
+      }
+    });
+  }
+
+  Future<void> _release() async {
+    final auth = _authorization;
+    if (auth == null || _released) return;
+    _released = true;
+    try {
+      await widget.api.deleteJson('/playback/sessions/${auth.sessionId}');
+    } catch (_) {
+      // The lease expires server-side if the final release cannot be delivered.
+    }
+  }
+
+  Future<void> _close() async {
+    await _saveProgress();
+    await _release();
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _heartbeatTimer?.cancel();
+    _progressTimer?.cancel();
+    _uiTimer?.cancel();
+    _hideTimer?.cancel();
+    unawaited(_saveProgress());
+    unawaited(_release());
+    unawaited(_video?.dispose());
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final video = _video;
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          unawaited(_saveProgress());
+          unawaited(_release());
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Focus(
+          autofocus: true,
+          onKeyEvent: (_, event) {
+            if (event is! KeyDownEvent) return KeyEventResult.ignored;
+            if (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space) {
+              _togglePlayback();
+              return KeyEventResult.handled;
+            }
+            if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+              unawaited(_seekTo(_absolutePositionMs - 10000));
+              return KeyEventResult.handled;
+            }
+            if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+              unawaited(_seekTo(_absolutePositionMs + 10000));
+              return KeyEventResult.handled;
+            }
+            _revealControls();
+            return KeyEventResult.ignored;
+          },
+          child: MouseRegion(
+            onHover: (_) => _revealControls(),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _revealControls,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (video != null && video.value.isInitialized)
+                    Center(
+                      child: AspectRatio(
+                        aspectRatio: video.value.aspectRatio == 0
+                            ? 16 / 9
+                            : video.value.aspectRatio,
+                        child: VideoPlayer(video),
+                      ),
+                    )
+                  else
+                    const ColoredBox(color: Colors.black),
+                  if (_cueText.isNotEmpty)
+                    Align(
+                      alignment: const Alignment(0, 0.72),
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 980),
+                        margin: const EdgeInsets.symmetric(horizontal: 24),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.78),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _cueText,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            height: 1.25,
+                            shadows: [
+                              Shadow(color: Colors.black, blurRadius: 4),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  AnimatedOpacity(
+                    opacity: _controls || _error != null || _buffering ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: IgnorePointer(
+                      ignoring: !_controls && _error == null && !_buffering,
+                      child: _controlsOverlay(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _controlsOverlay() {
+    final video = _video;
+    final playing = video?.value.isPlaying ?? false;
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xB8000000), Colors.transparent, Color(0xE6000000)],
+          stops: [0, 0.48, 1],
+        ),
+      ),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: _close,
+                    icon: const Icon(Icons.arrow_back),
+                    tooltip: 'Tilbage',
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.media.displayTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 20,
+                          ),
+                        ),
+                        if (widget.media.isEpisode)
+                          Text(
+                            widget.media.episodeLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white60),
+                          ),
+                      ],
+                    ),
+                  ),
+                  _PlaybackBadge(
+                    status: _status,
+                    authorization: _authorization,
+                  ),
+                ],
+              ),
+            ),
+            const Spacer(),
+            if (_error != null)
+              Container(
+                constraints: const BoxConstraints(maxWidth: 580),
+                margin: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: const Color(0xEE1A1013),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_error!, textAlign: TextAlign.center),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: () => _start(_absolutePositionMs),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Prøv igen'),
+                    ),
+                  ],
+                ),
+              )
+            else if (_buffering)
+              Column(
+                children: [
+                  const BrandMark(size: 72),
+                  const SizedBox(height: 18),
+                  const SizedBox(width: 220, child: LinearProgressIndicator()),
+                  const SizedBox(height: 12),
+                  Text(_status),
+                ],
+              )
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    iconSize: 34,
+                    onPressed: () => _seekTo(_absolutePositionMs - 10000),
+                    icon: const Icon(Icons.replay_10),
+                    tooltip: '10 sekunder tilbage',
+                  ),
+                  const SizedBox(width: 20),
+                  FilledButton.tonalIcon(
+                    onPressed: _togglePlayback,
+                    icon: Icon(
+                      playing ? Icons.pause : Icons.play_arrow,
+                      size: 38,
+                    ),
+                    label: Text(playing ? 'Pause' : 'Afspil'),
+                  ),
+                  const SizedBox(width: 20),
+                  IconButton(
+                    iconSize: 34,
+                    onPressed: () => _seekTo(_absolutePositionMs + 10000),
+                    icon: const Icon(Icons.forward_10),
+                    tooltip: '10 sekunder frem',
+                  ),
+                ],
+              ),
+            const Spacer(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Text(_time(_absolutePositionMs)),
+                      Expanded(
+                        child: Slider(
+                          min: 0,
+                          max: math.max(1, _durationMs).toDouble(),
+                          value: _absolutePositionMs
+                              .clamp(0, math.max(1, _durationMs))
+                              .toDouble(),
+                          onChangeStart: (_) => _hideTimer?.cancel(),
+                          onChanged: (_) {},
+                          onChangeEnd: (value) => _seekTo(value.round()),
+                        ),
+                      ),
+                      Text(_time(_durationMs)),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextButton.icon(
+                        onPressed: _showSubtitles,
+                        icon: const Icon(Icons.subtitles_outlined),
+                        label: Text(_subtitle?.label ?? 'Undertekster'),
+                      ),
+                      const SizedBox(width: 10),
+                      TextButton.icon(
+                        onPressed: _showQuality,
+                        icon: const Icon(Icons.tune),
+                        label: const Text('Kvalitet'),
+                      ),
+                      const SizedBox(width: 10),
+                      TextButton.icon(
+                        onPressed: () {
+                          final current = video?.value.playbackSpeed ?? 1;
+                          final next = current >= 2 ? 0.5 : current + 0.25;
+                          unawaited(video?.setPlaybackSpeed(next));
+                        },
+                        icon: const Icon(Icons.speed),
+                        label: Text(
+                          '${video?.value.playbackSpeed.toStringAsFixed(2) ?? '1.00'}x',
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSubtitles() {
+    final tracks = _authorization?.subtitleTracks ?? const <SubtitleTrack>[];
+    _hideTimer?.cancel();
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: RadioGroup<String?>(
+          groupValue: _subtitle?.id,
+          onChanged: (value) {
+            Navigator.pop(context);
+            final selected = tracks
+                .where((track) => track.id == value)
+                .firstOrNull;
+            unawaited(_setSubtitle(selected));
+          },
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                title: Text(
+                  'Undertekster',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              const RadioListTile<String?>(value: null, title: Text('Fra')),
+              for (final track in tracks)
+                RadioListTile<String?>(
+                  value: track.id,
+                  title: Text(track.label),
+                  subtitle: Text(
+                    '${track.language.toUpperCase()} · ${track.isText ? 'WebVTT' : 'Indbrændt'}',
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    ).whenComplete(_scheduleHide);
+  }
+
+  void _showQuality() {
+    final auth = _authorization;
+    if (auth == null) return;
+    _hideTimer?.cancel();
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text(
+                'Kvalitet',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(
+                'Auto bruger Androids native adaptive HLS-afspiller.',
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome),
+              title: const Text('Automatisk'),
+              subtitle: const Text(
+                'Tilpasser kvalitet efter buffer og netværk',
+              ),
+              trailing: auth.preferences.qualityMode == 'auto'
+                  ? const Icon(Icons.check)
+                  : null,
+              onTap: () {
+                Navigator.pop(context);
+                unawaited(_changeQuality('auto'));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.high_quality),
+              title: const Text('Original'),
+              subtitle: const Text('Direct Play når filen er kompatibel'),
+              trailing: auth.preferences.qualityMode == 'original'
+                  ? const Icon(Icons.check)
+                  : null,
+              onTap: () {
+                Navigator.pop(context);
+                unawaited(_changeQuality('original'));
+              },
+            ),
+            for (final rendition in auth.renditions.reversed)
+              ListTile(
+                leading: const Icon(Icons.hd_outlined),
+                title: Text(
+                  '${rendition.height}p${rendition.upscaled ? ' · Opskaleret' : ''}',
+                ),
+                subtitle: Text(
+                  '${(rendition.bitrate / 1000000).toStringAsFixed(1)} Mbps · ${rendition.hdr ? 'HDR' : 'SDR'}',
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  unawaited(_changeQuality('${rendition.height}'));
+                },
+              ),
+          ],
+        ),
+      ),
+    ).whenComplete(_scheduleHide);
+  }
+
+  String _time(int milliseconds) {
+    final total = math.max(0, milliseconds ~/ 1000);
+    final hours = total ~/ 3600;
+    final minutes = (total % 3600) ~/ 60;
+    final seconds = total % 60;
+    if (hours > 0) {
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+}
+
+class _PlaybackBadge extends StatelessWidget {
+  const _PlaybackBadge({required this.status, required this.authorization});
+
+  final String status;
+  final PlaybackAuthorization? authorization;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.black54,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.white24),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          status,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.secondary,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        if (authorization != null)
+          Text(
+            '${authorization!.sourceHeight ?? 0}p · ${authorization!.sourceBitrate == null ? '?' : (authorization!.sourceBitrate! / 1000000).toStringAsFixed(1)} Mbps',
+            style: const TextStyle(fontSize: 11, color: Colors.white60),
+          ),
+      ],
+    ),
+  );
+}
