@@ -219,8 +219,17 @@ export class PlaybackService {
         session.id,
         session.streamToken,
         media.file,
-        decision.method !== 'direct_play',
+        true,
       );
+      const embeddedSubtitles = subtitleTracks.some((track) => track.id.startsWith('embedded-'));
+      if (decision.method === 'direct_play' && embeddedSubtitles) {
+        try {
+          await this.transcodeStream.enqueueSubtitles(session.id, actor.accountId);
+        } catch (error) {
+          await this.reservations.release(actor, session.id, 'subtitle_queue_failed');
+          throw error;
+        }
+      }
       return {
         sessionId: session.id,
         logicalSessionId: session.logicalSessionId,
@@ -229,6 +238,9 @@ export class PlaybackService {
         streamUrl,
         contentType: decision.method === 'direct_play' ? this.directContentType(media.container) : 'application/x-mpegURL',
         subtitleTracks,
+        ...(decision.method === 'direct_play' && embeddedSubtitles
+          ? { subtitlePreparationStatusUrl: `/api/v1/playback/sessions/${session.id}/subtitle-status?token=${token}` }
+          : {}),
         playbackPreferences: {
           qualityMode: device.qualityMode,
           fixedQualityHeight: device.fixedQualityHeight,
@@ -498,7 +510,7 @@ export class PlaybackService {
       session.id,
       signed.token,
       session.media.file,
-      session.method !== 'direct_play',
+      true,
     );
     await this.prisma.playbackSession.update({
       where: { id: session.id },
@@ -522,6 +534,10 @@ export class PlaybackService {
       logicalSessionId: session.logicalSessionId,
       method: session.method,
       streamUrl: new URL(streamPath, publicBaseUrl).toString(),
+      heartbeatUrl: new URL(
+        `/api/v1/playback/sessions/${session.id}/cast-heartbeat?token=${encodedToken}`,
+        publicBaseUrl,
+      ).toString(),
       contentType: session.method === 'direct_play'
         ? this.directContentType(session.media.container)
         : 'application/x-mpegURL',

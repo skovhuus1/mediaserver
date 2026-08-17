@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { AuthenticatedUser, PlaybackMethod } from '@boltbytes/contracts';
@@ -6,6 +6,8 @@ import { isPrivileged } from '../common/auth';
 import { readEnvironment } from '../config/environment';
 import { PrismaService } from '../prisma/prisma.service';
 import type { PlaybackHeartbeatDto } from './playback.dto';
+import { resolveStreamToken } from './cast-stream-token';
+import { streamTokenMatches } from './direct-stream-policy';
 
 type ReservationInput = {
   actor: AuthenticatedUser;
@@ -99,6 +101,27 @@ export class StreamReservationService {
 
   async heartbeat(actor: AuthenticatedUser, sessionId: string, input: PlaybackHeartbeatDto = {}) {
     const session = await this.ownedSession(actor, sessionId);
+    return this.writeHeartbeat(session, input);
+  }
+
+  async heartbeatWithToken(sessionId: string, token: string | undefined, input: PlaybackHeartbeatDto = {}) {
+    if (!token) throw new UnauthorizedException({ code: 'stream_token_required', message: 'Stream token is required' });
+    const session = await this.prisma.playbackSession.findUnique({ where: { id: sessionId } });
+    if (!session) throw new NotFoundException({ code: 'session_not_found', message: 'Playback session was not found' });
+    const streamToken = resolveStreamToken(sessionId, token, process.env.JWT_SECRET ?? '');
+    if (!streamToken || !streamTokenMatches(streamToken, session.streamTokenHash)) {
+      throw new UnauthorizedException({ code: 'stream_token_invalid', message: 'Stream token is invalid' });
+    }
+    if (!session.isCastSession) {
+      throw new ForbiddenException({ code: 'cast_session_required', message: 'The playback session is not assigned to Chromecast' });
+    }
+    return this.writeHeartbeat(session, input);
+  }
+
+  private async writeHeartbeat(
+    session: { id: string; status: string },
+    input: PlaybackHeartbeatDto,
+  ) {
     if (!['reserving', 'active', 'paused'].includes(session.status)) {
       throw new BadRequestException({ code: 'session_finished', message: 'The playback session is already finished' });
     }

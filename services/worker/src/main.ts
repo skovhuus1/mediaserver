@@ -1,5 +1,5 @@
 import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
-import { buildDirectStreamHlsArguments, classifyMediaPath, detectVideoSignalProfile, resolveCpuTranscodeProfile } from '@boltbytes/contracts';
+import { buildDirectStreamHlsArguments, classifyMediaPath, detectVideoSignalProfile, resolveAccurateTranscodeSeek, resolveCpuTranscodeProfile } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
@@ -343,7 +343,11 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
 
 async function transcodePlayback(job: ClaimedJob): Promise<void> {
   const payload = asJsonObject(job.payload);
-  const streamMode = payload.streamMode === 'direct_stream' ? 'direct_stream' : 'transcode';
+  const streamMode = payload.streamMode === 'direct_stream'
+    ? 'direct_stream'
+    : payload.streamMode === 'subtitle_only'
+      ? 'subtitle_only'
+      : 'transcode';
   const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : null;
   if (!sessionId) throw new Error('playback.transcode payload requires sessionId');
   const session = await prisma.playbackSession.findFirst({
@@ -356,7 +360,9 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       },
     },
   });
-  if (!session || session.method !== streamMode) throw new Error('HLS playback session was not found or changed method');
+  if (!session || (streamMode !== 'subtitle_only' && session.method !== streamMode)) {
+    throw new Error('HLS playback session was not found or changed method');
+  }
   if (!['reserving', 'active', 'paused'].includes(session.status) || session.leaseExpiresAt <= new Date()) return;
   const file = session.media.file;
   if (!file || file.status !== 'ready') throw new Error('HLS source file is unavailable');
@@ -414,8 +420,12 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
   const subtitleTrackId =
     typeof payload.subtitleTrackId === 'string' ? payload.subtitleTrackId : null;
   const startPositionMs = Math.max(0, finiteInteger(payload.startPositionMs) ?? 0);
-  const inputSeekArguments = startPositionMs > 0
-    ? ['-ss', (startPositionMs / 1_000).toFixed(3)]
+  const seek = resolveAccurateTranscodeSeek(startPositionMs);
+  const inputSeekArguments = seek.inputSeekSeconds > 0
+    ? ['-ss', seek.inputSeekSeconds.toFixed(3)]
+    : [];
+  const outputSeekArguments = seek.outputSeekSeconds > 0
+    ? ['-ss', seek.outputSeekSeconds.toFixed(3)]
     : [];
   const burnInStreamIndex = subtitleTrackId
     ? finiteInteger(subtitleTrackId.match(/\d+/)?.[0])
@@ -460,6 +470,8 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       }));
     }
   }
+
+  if (streamMode === 'subtitle_only') return;
 
   if (streamMode === 'direct_stream') {
     const audioMode = payload.audioMode === 'aac' ? 'aac' : 'copy';
@@ -518,8 +530,8 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
   const hardwareEncoder = preserveHdrRequested ? 'hevc_nvenc' : 'h264_nvenc';
   const softwareEncoder = preserveHdrRequested ? 'libx265' : 'libx264';
   const subtitleInput = burnInStreamIndex === null
-    ? '[0:v:0]null[subtitlePrepared]'
-    : `[0:v:0][0:${burnInStreamIndex}]overlay=eof_action=pass:shortest=0[subtitlePrepared]`;
+    ? '[0:v:0]setpts=PTS-STARTPTS[subtitlePrepared]'
+    : `[0:v:0]setpts=PTS-STARTPTS[videoBase];[0:${burnInStreamIndex}]setpts=PTS-STARTPTS[subtitleBase];[videoBase][subtitleBase]overlay=eof_action=pass:shortest=0[subtitlePrepared]`;
   const inputLabel = sourceVideo.hdr && !preserveHdrRequested
     ? '[subtitlePrepared]zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p[prepared]'
     : '[subtitlePrepared]null[prepared]';
@@ -527,15 +539,19 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
   const scaleOutputs = renditions.map((rendition, index) =>
     `[split${index}]scale=w=${rendition.width}:h=${rendition.height}:force_original_aspect_ratio=decrease,pad=${rendition.width}:${rendition.height}:(ow-iw)/2:(oh-ih)/2[v${index}]`,
   );
+  const audioOutputs = renditions.map((_, index) => `[a${index}]`).join('');
   const filterComplex = [
     subtitleInput,
     inputLabel,
     `[prepared]split=${renditions.length}${splitOutputs}`,
     ...scaleOutputs,
+    ...(file.audioCodec
+      ? [`[0:a:0]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS,asplit=${renditions.length}${audioOutputs}`]
+      : []),
   ].join(';');
   const streamMaps = renditions.flatMap((_, index) => [
     '-map', `[v${index}]`,
-    '-map', '0:a:0?',
+    ...(file.audioCodec ? ['-map', `[a${index}]`] : []),
   ]);
   const cpuProfile = resolveCpuTranscodeProfile({
     availableThreads: availableParallelism(),
@@ -559,12 +575,16 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       `-bufsize:v:${index}`, `${bitrateKbps * 2}k`,
       `-pix_fmt:v:${index}`, preserveHdrRequested ? 'p010le' : 'yuv420p',
       `-force_key_frames:v:${index}`, 'expr:gte(t,n_forced*4)',
-      `-c:a:${index}`, 'aac',
-      `-b:a:${index}`, '160k',
-      `-ac:a:${index}`, '2',
+      ...(file.audioCodec ? [
+        `-c:a:${index}`, 'aac',
+        `-b:a:${index}`, '160k',
+        `-ac:a:${index}`, '2',
+      ] : []),
     ];
   });
-  const variantMap = renditions.map((_, index) => `v:${index},a:${index},name:${index}`).join(' ');
+  const variantMap = renditions.map((_, index) =>
+    file.audioCodec ? `v:${index},a:${index},name:${index}` : `v:${index},name:${index}`,
+  ).join(' ');
   const transcodeArguments = (videoEncoder: string) => [
     '-hide_banner',
     '-loglevel', 'warning',
@@ -572,6 +592,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-y',
     ...inputSeekArguments,
     '-i', inputPath,
+    ...outputSeekArguments,
     '-filter_complex_threads', String(cpuProfile.filterThreads),
     '-filter_complex', filterComplex,
     ...streamMaps,
@@ -581,6 +602,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-hls_list_size', '0',
     '-hls_playlist_type', 'event',
     '-hls_flags', 'independent_segments+temp_file',
+    '-avoid_negative_ts', 'make_zero',
     '-var_stream_map', variantMap,
     '-master_pl_name', 'master.m3u8',
     '-hls_segment_filename', resolve(outputPath, 'segment_%v_%05d.ts'),

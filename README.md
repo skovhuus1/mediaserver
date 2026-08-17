@@ -587,3 +587,23 @@ Validering:
 - Worker-unit-tests: 1 testfil og 3/3 tests bestået for defaults, grænse-clamping, uafhængige slots og transcode-isolation.
 - `npm run ci`: lint, alle typechecks, 35 testfiler med samlet 121/121 tests samt alle production-builds bestået.
 - Lokal `docker compose config --quiet` kunne ikke køres, fordi Docker CLI ikke er installeret på udviklingsmaskinen. GitHub `validate` skal derfor bestå Compose-validering, image-build og container-startup før merge.
+# Playback- og seriepålidelighed
+
+Den aktuelle fase gør playback og serievisning deterministisk på tværs af API, worker og webklient:
+
+- Resume-transcoding bruger et hurtigt groft input-seek efterfulgt af et præcist output-seek. Video- og lydtidsstempler nulstilles, og lydsporet bruger asynkron resampling, så lyd og billede starter på samme tidslinje.
+- HLS Auto starter i ægte adaptiv tilstand. Et manuelt niveau låser `currentLevel`, `nextLevel` og `loadLevel`, så Hls.js ikke fortsætter med at skifte bag brugerens valg. Upscaling låses fortsat op efter mindst 210 sekunders buffer.
+- Direct Play kan nu bruge indbyggede tekstundertekster. API'et sætter et separat subtitle-job i kø, klienten venter på WebVTT-filen, og standardsporet bindes igen ved `loadedmetadata`, `loadeddata`, `canplay`, `addtrack` og track-load.
+- Seriecontinuity beregnes ét sted på serveren. Senest brugte uafsluttede episode genoptages, næste episode findes i stabil sæson-/episoderækkefølge, og afslutningen af en episode kan ikke overskrives af player-cleanup.
+- Seriekataloget aggregeres i PostgreSQL i stedet for at sende samtlige episoder gennem Node-processen. Titeldetaljen indlæser kun den valgte sæson og viser set-status og progression pr. episode.
+- Kundevisninger, Fortsæt med at se og næste-episode-resultater udelukker mediefiler, som ikke længere har status `ready`.
+
+## BoltBytes Cast receiver
+
+Projektet serverer en CAF receiver på `https://media.boltbytes.com/cast/receiver`. Receiveren sender et underskrevet heartbeat hvert femte sekund, så Cast-afspilningen beholder den eksisterende logical session og streamreservation.
+
+1. Registrér URL'en som en Custom Web Receiver i Google Cast SDK Developer Console.
+2. Sæt det tildelte application ID som `BB_MEDIA_CAST_RECEIVER_APP_ID` i `.env`.
+3. Genbyg `admin`-containeren, fordi `NEXT_PUBLIC_CAST_RECEIVER_APP_ID` indlejres ved Next.js-build.
+
+Hvis variablen er tom, bruges Googles Default Media Receiver som kompatibilitetsfallback. Den kan afspille streamen, men bruger ikke BoltBytes-receiverens server-heartbeat. En fysisk Cast-enhed på samme netværk er fortsat nødvendig for endelig device-acceptance; CI validerer token, receiver-kontrakt, builds og container-ruter, men kan ikke simulere Googles discovery-protokol.

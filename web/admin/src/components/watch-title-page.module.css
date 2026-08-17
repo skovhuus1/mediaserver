@@ -23,5 +23,9 @@
 .episode b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .episode small { display: -webkit-box; margin-top: 7px; overflow: hidden; color: #929da1; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .episode > svg { color: #68e1be; }
+.progress { position: relative; display: block; width: min(320px,100%); margin-top: 10px; padding-top: 7px; overflow: hidden; color: #8fe7ce; font-size: 11px; font-style: normal; }
+.progress::before,.progress i { position: absolute; top: 0; left: 0; height: 3px; border-radius: 99px; content: ''; }
+.progress::before { width: 100%; background: rgba(255,255,255,.12); }
+.progress i { background: #68e1be; }
 .error { padding: 60px; color: #ff9f9f; }
 @media (max-width:700px) { .hero { min-height: 470px; padding: 34px 20px; } .hero a { margin-bottom: 42px; } .episode { grid-template-columns: 110px minmax(0,1fr); } .episode > svg { display:none; } }
