@@ -1,7 +1,7 @@
 CREATE TABLE "media_playback_assets" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "account_id" UUID NOT NULL,
-  "media_id" UUID NOT NULL,
+  "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+  "account_id" TEXT NOT NULL,
+  "media_id" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'queued',
   "sprite_directory" TEXT,
   "manifest" JSONB,
@@ -23,9 +23,9 @@ CREATE TABLE "media_playback_assets" (
 );
 
 CREATE TABLE "media_timeline_markers" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "account_id" UUID NOT NULL,
-  "media_id" UUID NOT NULL,
+  "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+  "account_id" TEXT NOT NULL,
+  "media_id" TEXT NOT NULL,
   "kind" TEXT NOT NULL,
   "start_ms" INTEGER NOT NULL,
   "end_ms" INTEGER NOT NULL,
