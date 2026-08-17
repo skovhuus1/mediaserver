@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   hlsPlaylistSegments,
+  hlsPlaylistInitializationAssets,
   isAllowedHlsAsset,
   isHlsStartupBufferReady,
   resolveHlsStartupSegments,
@@ -14,7 +15,10 @@ describe('transcode stream policy', () => {
     expect(isAllowedHlsAsset('stream_0.m3u8')).toBe(true);
     expect(isAllowedHlsAsset('segment00000.ts')).toBe(true);
     expect(isAllowedHlsAsset('segment_0_00000.ts')).toBe(true);
+    expect(isAllowedHlsAsset('segment_0_00000.m4s')).toBe(true);
+    expect(isAllowedHlsAsset('init_0.mp4')).toBe(true);
     expect(isAllowedHlsAsset('../stream.m3u8')).toBe(false);
+    expect(isAllowedHlsAsset('../init_0.mp4')).toBe(false);
   });
 
   it('adds the stream token to both variant and segment references', () => {
@@ -22,6 +26,16 @@ describe('transcode stream policy', () => {
       .toBe('#EXTM3U\nstream.m3u8?token=a%2Bb\n');
     expect(rewriteHlsPlaylist('#EXTM3U\nsegment00000.ts\n', 'token'))
       .toBe('#EXTM3U\nsegment00000.ts?token=token\n');
+    expect(rewriteHlsPlaylist('#EXTM3U\n#EXT-X-MAP:URI="init_0.mp4"\nsegment_0_00000.m4s\n', 'a+b'))
+      .toBe('#EXTM3U\n#EXT-X-MAP:URI="init_0.mp4?token=a%2Bb"\nsegment_0_00000.m4s?token=a%2Bb\n');
+    expect(() => rewriteHlsPlaylist('#EXTM3U\n#EXT-X-MAP:URI="../init.mp4"\n', 'token'))
+      .toThrow('Unexpected HLS initialization asset');
+  });
+
+  it('counts fMP4 media segments and discovers only safe initialization assets', () => {
+    const playlist = '#EXTM3U\n#EXT-X-MAP:URI="init_0.mp4"\nsegment_0_00000.m4s\nsegment_0_00001.m4s\n';
+    expect(hlsPlaylistInitializationAssets(playlist)).toEqual(['init_0.mp4']);
+    expect(hlsPlaylistSegments(playlist)).toEqual(['segment_0_00000.m4s', 'segment_0_00001.m4s']);
   });
 
   it('waits for a stable startup buffer while allowing completed short media', () => {

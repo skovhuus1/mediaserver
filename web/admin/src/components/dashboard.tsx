@@ -302,7 +302,7 @@ function StatusRail({
               <strong>{sanitizeMediaTitle(session.media.title) || session.media.title}</strong>
               <small>{session.user.displayName} · {session.device.name}{session.isCastSession ? ' · Cast' : ''}</small>
               <small>{session.method.replaceAll('_', ' ')} · {session.currentHeight ? `${session.currentHeight}p` : 'original'} · {formatBitrate(session.currentBitrate)}</small>
-              {session.transcodeBackend ? <small>{session.transcodeBackend === 'nvenc' ? 'NVENC' : 'Software'}{session.transcodeEncoder ? ` · ${session.transcodeEncoder}` : ''}</small> : null}
+              {session.transcodeBackend ? <small>{session.method === 'direct_stream' ? 'Remux' : session.transcodeBackend === 'nvenc' ? 'NVENC' : 'Software'}{session.transcodeEncoder ? ` · ${session.transcodeEncoder}` : ''}</small> : null}
               <small>{session.runtimeState === 'buffering' ? 'Buffering' : session.runtimeState === 'paused' ? 'Pauset' : 'Afspiller'} · buffer {formatBuffer(session.bufferAheadMs)}</small>
               {session.durationMs ? <span className="session-progress"><i style={{ width: `${Math.min(100, (session.positionMs / session.durationMs) * 100)}%` }} /></span> : null}
             </span>

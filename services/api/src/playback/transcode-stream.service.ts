@@ -16,6 +16,7 @@ import { isPathWithin, streamTokenMatches } from './direct-stream-policy';
 import { applyMediaCors } from './media-cors';
 import {
   hlsPlaylistSegments,
+  hlsPlaylistInitializationAssets,
   isAllowedHlsAsset,
   isHlsStartupBufferReady,
   resolveHlsStartupSegments,
@@ -23,6 +24,8 @@ import {
 } from './transcode-stream-policy';
 
 type TranscodeLimits = {
+  streamMode: 'transcode' | 'direct_stream';
+  audioMode?: 'copy' | 'aac';
   maxVideoResolution: number;
   maxVideoBitrate: number;
   preserveHdr: boolean;
@@ -46,6 +49,8 @@ export class TranscodeStreamService {
         status: 'queued',
         payload: {
           sessionId,
+          streamMode: limits.streamMode,
+          ...(limits.streamMode === 'direct_stream' ? { audioMode: limits.audioMode ?? 'copy' } : {}),
           maxVideoResolution: limits.maxVideoResolution,
           maxVideoBitrate: limits.maxVideoBitrate,
           preserveHdr: limits.preserveHdr,
@@ -80,10 +85,16 @@ export class TranscodeStreamService {
           throw new Error('HLS variant does not have a stable startup buffer');
         }
         await Promise.all(
-          segments.slice(0, this.requiredStartupSegments).map((segment) => access(this.assetPath(session.id, segment))),
+          [
+            ...hlsPlaylistInitializationAssets(playlist),
+            ...segments.slice(0, this.requiredStartupSegments),
+          ].map((asset) => access(this.assetPath(session.id, asset))),
         );
       }
-      return { state: 'ready', message: 'HLS stream is ready' };
+      return {
+        state: 'ready',
+        message: session.method === 'direct_stream' ? 'Direct Stream HLS is ready' : 'Transcoded HLS is ready',
+      };
     } catch {
       // The event playlists grow atomically while FFmpeg prepares a stable startup buffer.
     }
@@ -97,7 +108,7 @@ export class TranscodeStreamService {
       include: { attempts: { orderBy: { number: 'desc' }, take: 1 } },
       orderBy: { createdAt: 'desc' },
     });
-    if (!job) return { state: 'failed', message: 'The transcode job was not found' };
+    if (!job) return { state: 'failed', message: 'The HLS preparation job was not found' };
     if (job.status === 'failed') {
       return {
         state: 'failed',
@@ -109,7 +120,9 @@ export class TranscodeStreamService {
     }
     return {
       state: job.status === 'running' ? 'running' : 'queued',
-      message: job.status === 'running' ? 'FFmpeg is preparing the stream' : 'Waiting for a transcoder',
+      message: job.status === 'running'
+        ? session.method === 'direct_stream' ? 'FFmpeg is remuxing the stream' : 'FFmpeg is transcoding the stream'
+        : 'Waiting for an HLS worker',
     };
   }
 
@@ -146,7 +159,7 @@ export class TranscodeStreamService {
 
     const fileStat = await stat(mediaPath);
     response.status(200);
-    response.setHeader('Content-Type', 'video/mp2t');
+    response.setHeader('Content-Type', asset.endsWith('.ts') ? 'video/mp2t' : 'video/mp4');
     response.setHeader('Content-Length', String(fileStat.size));
     response.setHeader('Cache-Control', 'private, max-age=3600');
     await new Promise<void>((resolveStream, reject) => {
@@ -180,8 +193,8 @@ export class TranscodeStreamService {
     if (!['reserving', 'active', 'paused'].includes(session.status) || session.leaseExpiresAt <= new Date()) {
       throw new GoneException({ code: 'stream_session_expired', message: 'Playback session has expired' });
     }
-    if (session.method !== 'transcode') {
-      throw new HttpException({ code: 'stream_method_invalid', message: 'This session does not use HLS transcoding' }, 409);
+    if (!['transcode', 'direct_stream'].includes(session.method)) {
+      throw new HttpException({ code: 'stream_method_invalid', message: 'This session does not use HLS delivery' }, 409);
     }
     return session;
   }

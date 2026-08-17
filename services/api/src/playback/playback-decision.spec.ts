@@ -42,6 +42,19 @@ describe('playback decision quality and HDR gates', () => {
       entitlements: { ...entitlements, maxVideoResolution: 1080 },
     }).method).toBe('transcode');
   });
+
+  it('remuxes compatible video and transcodes only unsupported audio', () => {
+    expect(choosePlaybackMethod({
+      ...base,
+      container: 'matroska',
+      audioCodec: 'dts',
+      supportedAudioCodecs: ['aac'],
+    })).toMatchObject({
+      allowed: true,
+      method: 'direct_stream',
+      directPlayBlockers: ['audio_codec_unsupported', 'container_unsupported'],
+    });
+  });
 });
 
 describe('compatible source Direct Play policy', () => {

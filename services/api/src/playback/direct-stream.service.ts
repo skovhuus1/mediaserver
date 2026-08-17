@@ -40,7 +40,7 @@ export class DirectStreamService {
     if (!['reserving', 'active', 'paused'].includes(session.status) || session.leaseExpiresAt <= new Date()) {
       throw new GoneException({ code: 'stream_session_expired', message: 'Playback session has expired' });
     }
-    if (!['direct_play', 'direct_stream'].includes(session.method)) {
+    if (session.method !== 'direct_play') {
       throw new HttpException({ code: 'stream_method_invalid', message: 'This session does not use direct file delivery' }, 409);
     }
     const file = session.media.file;

@@ -59,7 +59,7 @@ describe('playback decision', () => {
     })).toMatchObject({ allowed: true, method: 'transcode' });
   });
 
-  it('does not claim direct-stream support before a remux pipeline exists', () => {
+  it('selects Direct Stream for a compatible video in an unsupported container', () => {
     expect(choosePlaybackMethod({
       ...sdr1080Profile,
       codec: 'h264',
@@ -67,7 +67,11 @@ describe('playback decision', () => {
       supportedCodecs: ['h264'],
       supportedContainers: ['mp4'],
       entitlements,
-    })).toMatchObject({ allowed: false, code: 'transcode_required_but_forbidden' });
+    })).toMatchObject({
+      allowed: true,
+      method: 'direct_stream',
+      directPlayBlockers: ['container_unsupported'],
+    });
   });
 
   it('normalizes FFprobe codec and container aliases before selecting Direct Play', () => {
@@ -83,7 +87,7 @@ describe('playback decision', () => {
     })).toMatchObject({ allowed: true, method: 'direct_play', directPlayBlockers: [] });
   });
 
-  it('reports an unsupported audio codec instead of falsely promising Direct Play', () => {
+  it('copies compatible video while transcoding an unsupported audio codec', () => {
     expect(choosePlaybackMethod({
       ...sdr1080Profile,
       codec: 'h264',
@@ -94,10 +98,38 @@ describe('playback decision', () => {
       supportedContainers: ['mp4'],
       entitlements,
     })).toMatchObject({
-      allowed: false,
-      code: 'transcode_required_but_forbidden',
+      allowed: true,
+      method: 'direct_stream',
       directPlayBlockers: ['audio_codec_unsupported'],
     });
+  });
+
+  it('rejects Direct Stream when its required audio transcode is not entitled', () => {
+    expect(choosePlaybackMethod({
+      ...sdr1080Profile,
+      codec: 'h264',
+      audioCodec: 'dts',
+      container: 'matroska',
+      supportedCodecs: ['h264'],
+      supportedAudioCodecs: ['aac'],
+      supportedContainers: ['mp4'],
+      entitlements: { ...entitlements, allowAudioTranscode: false },
+    })).toMatchObject({
+      allowed: false,
+      code: 'transcode_required_but_forbidden',
+      directPlayBlockers: ['audio_codec_unsupported', 'container_unsupported'],
+    });
+  });
+
+  it('falls back to full transcode when Direct Stream is disabled but video transcode is entitled', () => {
+    expect(choosePlaybackMethod({
+      ...sdr1080Profile,
+      codec: 'h264',
+      container: 'matroska',
+      supportedCodecs: ['h264'],
+      supportedContainers: ['mp4'],
+      entitlements: { ...entitlements, allowDirectStream: false, allowVideoTranscode: true },
+    })).toMatchObject({ allowed: true, method: 'transcode' });
   });
 
   it('does not force Auto transcoding from a browser bandwidth estimate unless enabled', () => {

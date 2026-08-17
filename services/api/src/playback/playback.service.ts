@@ -128,7 +128,7 @@ export class PlaybackService {
     });
     const decision =
       normalDecision.allowed
-      && normalDecision.method === 'direct_play'
+      && normalDecision.method !== 'transcode'
       && compatibleSourcePolicy.required
       && entitlement.effective.allowVideoTranscode
         ? {
@@ -154,9 +154,20 @@ export class PlaybackService {
         isCastSession: dto.isCastSession,
         maxConcurrentStreams: entitlement.effective.maxConcurrentStreams,
       });
-      if (decision.method === 'transcode') {
+      const deliveryQuality = decision.method === 'direct_stream'
+        ? this.directStreamQuality(adaptiveQuality, media, Boolean(sourceVideo.hdr))
+        : adaptiveQuality;
+      if (decision.method !== 'direct_play') {
         try {
           await this.transcodeStream.enqueue(session.id, actor.accountId, {
+            streamMode: decision.method,
+            ...(decision.method === 'direct_stream'
+              ? {
+                  audioMode: decision.directPlayBlockers.includes('audio_codec_unsupported')
+                    ? 'aac' as const
+                    : 'copy' as const,
+                }
+              : {}),
             maxVideoResolution: entitlement.effective.maxVideoResolution,
             maxVideoBitrate: entitlement.effective.maxVideoBitrate,
             preserveHdr: Boolean(
@@ -164,11 +175,11 @@ export class PlaybackService {
               && dto.capabilities.supportsHdr
               && dto.capabilities.supportedCodecs.some((codec) => isHevcCodec(codec)),
             ),
-            adaptiveQuality,
+            adaptiveQuality: deliveryQuality,
             hdrMode: device.hdrMode,
           });
         } catch (error) {
-          await this.reservations.release(actor, session.id, 'transcode_queue_failed');
+          await this.reservations.release(actor, session.id, 'hls_queue_failed');
           throw error;
         }
       }
@@ -180,14 +191,14 @@ export class PlaybackService {
         directPlayBlockers: decision.directPlayBlockers,
       });
       const token = encodeURIComponent(session.streamToken);
-      const streamUrl = decision.method === 'transcode'
-        ? `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${token}`
-        : `/api/v1/playback/sessions/${session.id}/stream?token=${token}`;
+      const streamUrl = decision.method === 'direct_play'
+        ? `/api/v1/playback/sessions/${session.id}/stream?token=${token}`
+        : `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${token}`;
       const subtitleTracks = await this.subtitleStream.listForPlayback(
         session.id,
         session.streamToken,
         media.file,
-        decision.method === 'transcode',
+        decision.method !== 'direct_play',
       );
       return {
         sessionId: session.id,
@@ -195,7 +206,7 @@ export class PlaybackService {
         method: decision.method,
         streamToken: session.streamToken,
         streamUrl,
-        contentType: decision.method === 'transcode' ? 'application/x-mpegURL' : this.directContentType(media.container),
+        contentType: decision.method === 'direct_play' ? this.directContentType(media.container) : 'application/x-mpegURL',
         subtitleTracks,
         playbackPreferences: {
           qualityMode: device.qualityMode,
@@ -209,7 +220,7 @@ export class PlaybackService {
           subtitleMode: profilePreferences?.subtitleMode ?? 'auto',
           autoplayNext: profilePreferences?.autoplayNext ?? true,
         },
-        adaptiveQuality,
+        adaptiveQuality: deliveryQuality,
         videoProfile: {
           source: {
             width: media.width,
@@ -220,17 +231,17 @@ export class PlaybackService {
             bitDepth: sourceVideo.bitDepth,
           },
           output: {
-            height: decision.method === 'direct_play'
+            height: decision.method !== 'transcode'
               ? media.height
               : Math.min(media.height ?? entitlement.effective.maxVideoResolution, entitlement.effective.maxVideoResolution),
-            hdr: decision.method === 'direct_play'
+            hdr: decision.method !== 'transcode'
               ? sourceVideo.hdr
               : sourceVideo.hdr && dto.capabilities.supportsHdr && isHevcCodec(sourceVideo.codec)
                 ? sourceVideo.hdr
                 : null,
           },
         },
-        ...(decision.method === 'transcode'
+        ...(decision.method !== 'direct_play'
           ? { transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?token=${token}` }
           : {}),
         leaseExpiresAt: session.leaseExpiresAt,
@@ -347,6 +358,7 @@ export class PlaybackService {
       }),
     ]);
     await this.transcodeStream.enqueue(session.id, actor.accountId, {
+      streamMode: 'transcode',
       maxVideoResolution: entitlement.effective.maxVideoResolution,
       maxVideoBitrate: entitlement.effective.maxVideoBitrate,
       preserveHdr: Boolean(
@@ -442,14 +454,14 @@ export class PlaybackService {
       this.environment.castTokenTtlSeconds,
     );
     const encodedToken = encodeURIComponent(signed.token);
-    const streamPath = session.method === 'transcode'
-      ? `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${encodedToken}`
-      : `/api/v1/playback/sessions/${session.id}/stream?token=${encodedToken}`;
+    const streamPath = session.method === 'direct_play'
+      ? `/api/v1/playback/sessions/${session.id}/stream?token=${encodedToken}`
+      : `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${encodedToken}`;
     const subtitleTracks = await this.subtitleStream.listForPlayback(
       session.id,
       signed.token,
       session.media.file,
-      session.method === 'transcode',
+      session.method !== 'direct_play',
     );
     await this.prisma.playbackSession.update({
       where: { id: session.id },
@@ -473,9 +485,9 @@ export class PlaybackService {
       logicalSessionId: session.logicalSessionId,
       method: session.method,
       streamUrl: new URL(streamPath, publicBaseUrl).toString(),
-      contentType: session.method === 'transcode'
-        ? 'application/x-mpegURL'
-        : this.directContentType(session.media.container),
+      contentType: session.method === 'direct_play'
+        ? this.directContentType(session.media.container)
+        : 'application/x-mpegURL',
       subtitleTracks: subtitleTracks.map((track) => ({
         ...track,
         src: track.src ? new URL(track.src, publicBaseUrl).toString() : null,
@@ -521,6 +533,31 @@ export class PlaybackService {
       code: 'cast_public_url_required',
       message: 'Chromecast requires a receiver-accessible server URL. Set BB_MEDIA_PUBLIC_URL or the server external URL.',
     });
+  }
+
+  private directStreamQuality(
+    adaptiveQuality: ReturnType<typeof buildAdaptiveQualityPlan>,
+    media: { width: number | null; height: number | null; bitrate: number | null },
+    hdr: boolean,
+  ): ReturnType<typeof buildAdaptiveQualityPlan> {
+    const height = media.height ?? adaptiveQuality.effectiveMaxHeight;
+    const width = media.width ?? Math.round(height * 16 / 9);
+    const bitrate = media.bitrate ?? adaptiveQuality.effectiveMaxBitrate;
+    return {
+      mode: 'original',
+      effectiveMaxHeight: height,
+      effectiveMaxBitrate: bitrate,
+      estimatedBandwidth: adaptiveQuality.estimatedBandwidth,
+      renditions: [{
+        name: height >= 2160 ? '4K' : `${height}p`,
+        width,
+        height,
+        bitrate,
+        bandwidth: Math.round(bitrate * 1.08),
+        upscaled: false,
+        hdr,
+      }],
+    };
   }
 
   async list(actor: AuthenticatedUser) {

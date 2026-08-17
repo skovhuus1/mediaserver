@@ -7,6 +7,7 @@ export * from './cpu-transcode-profile.js';
 export * from './playback-resume.js';
 export * from './playback-quality.js';
 export * from './series-identity.js';
+export * from './direct-stream-remux.js';
 
 export const entitlementActionSchema = z.enum(['playback', 'cast', 'offline_download']);
 export type EntitlementAction = z.infer<typeof entitlementActionSchema>;

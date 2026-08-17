@@ -98,7 +98,7 @@ export class SubtitleStreamService {
         throw new NotFoundException({ code: 'subtitle_invalid', message: 'Subtitle track is not a supported text file' });
       }
       body = subtitleToWebVtt(await readFile(track.path, 'utf8'), track.format);
-    } else if (embeddedMatch && session.method === 'transcode') {
+    } else if (embeddedMatch && ['transcode', 'direct_stream'].includes(session.method)) {
       const embeddedPath = resolve(this.transcodeRoot, session.id, asset);
       if (!isPathWithin(resolve(this.transcodeRoot, session.id), embeddedPath)) {
         throw new UnauthorizedException({ code: 'subtitle_path_invalid', message: 'Subtitle path escapes its session' });
