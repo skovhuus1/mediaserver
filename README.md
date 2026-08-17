@@ -481,6 +481,12 @@ BB_MEDIA_CPU_TRANSCODE_THREADS=
 Tomme thread- og rendition-felter betyder automatisk detektion. Et eksplicit tal kan bruges ved container-CPU-limits, men trådbudgettet begrænses altid til de logiske CPU'er, Node faktisk kan se. Automatisk rendition-antal er højst fire og kræver cirka to CPU-tråde pr. niveau; en typisk 8-trådet CPU får derfor tre niveauer, mens en mindre host får færre. `BB_MEDIA_MAX_TRANSCODE_HEIGHT=2160` er muligt, men softwarebaseret 4K/HDR-transcoding kan være langsommere end realtid; 4K Direct Play påvirkes ikke af 1080p-transcode-loftet. Adminpanelet viser preset, samlet trådbudget, højdeloft og antal renditions sammen med live CPU/RAM/sessionstatus.
 - Egen Chromecast receiver er fortsat en senere fase; Default Media Receiver-flowet er bevaret.
 
+## Brandet stream-loader (2026-08-17)
+
+- Webplayeren viser BoltBytes-logoet, en rolig loader-animation og teksten `Loader...`, mens en Direct Play- eller transcode-stream bliver gjort klar.
+- Tekniske FFmpeg-forberedelsesbeskeder eksponeres ikke længere i den almindelige kundevisning.
+- Hvis forberedelsen fejler, skifter samme panel til en tydelig fejltilstand og bevarer den konkrete tekniske fejlbesked til fejlfinding.
+
 
 ## Burn-in og session-rekonfiguration (2026-07-29)
 
