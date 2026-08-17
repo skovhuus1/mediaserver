@@ -1179,6 +1179,7 @@
 .timelineTrack { position: relative; min-width: 0; }
 .timelineTrack > input { display: block; width: 100%; }
 .timelineMarker { position: absolute; top: 50%; z-index: 2; width: 3px; height: 13px; border-radius: 2px; background: #63e2bd; box-shadow: 0 0 8px rgba(99,226,189,.7); pointer-events: none; transform: translate(-50%,-50%); }
+.timelineMarker[data-kind='recap'] { background: #a56cf2; box-shadow: 0 0 8px rgba(165,108,242,.7); }
 .timelineMarker[data-kind='credits'] { background: #f4bc62; box-shadow: 0 0 8px rgba(244,188,98,.65); }
 .trickplayPreview { position: absolute; bottom: 24px; z-index: 8; overflow: hidden; width: 240px; border: 1px solid rgba(255,255,255,.22); border-radius: 10px; background: #07090b; box-shadow: 0 16px 45px rgba(0,0,0,.65); pointer-events: none; transform: translateX(-50%); }
 .trickplayPreview > i { display: block; width: 240px; height: 135px; background-repeat: no-repeat; }
