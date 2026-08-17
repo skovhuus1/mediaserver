@@ -100,7 +100,7 @@ describe('playback decision', () => {
     });
   });
 
-  it('keeps a compatible Auto source on Direct Play unless bandwidth is insufficient', () => {
+  it('does not force Auto transcoding from a browser bandwidth estimate unless enabled', () => {
     const policy = {
       qualityMode: 'auto' as const,
       sourceHeight: 1080,
@@ -110,7 +110,12 @@ describe('playback decision', () => {
       preferDirectPlay: true,
     };
     expect(shouldTranscodeCompatibleSource({ ...policy, estimatedDownlinkMbps: 50 }).required).toBe(false);
-    expect(shouldTranscodeCompatibleSource({ ...policy, estimatedDownlinkMbps: 8 })).toMatchObject({
+    expect(shouldTranscodeCompatibleSource({ ...policy, estimatedDownlinkMbps: 8 }).required).toBe(false);
+    expect(shouldTranscodeCompatibleSource({
+      ...policy,
+      estimatedDownlinkMbps: 8,
+      autoTranscodeOnBandwidth: true,
+    })).toMatchObject({
       required: true,
       code: 'bandwidth_limited',
     });
