@@ -112,7 +112,7 @@ describe('playback session reconfiguration', () => {
     );
   });
 
-  it('preserves Direct Stream and clamps an on-demand seek to the source duration', async () => {
+  it('uses synchronized transcoding and clamps an on-demand Direct Stream seek', async () => {
     const streamToken = 'b'.repeat(48);
     const session = {
       id: 'session-2',
@@ -157,7 +157,11 @@ describe('playback session reconfiguration', () => {
           allowed: true,
           code: 'allowed',
           reasons: [],
-          effective: { maxVideoResolution: 2160, maxVideoBitrate: 20_000 },
+          effective: {
+            allowVideoTranscode: true,
+            maxVideoResolution: 2160,
+            maxVideoBitrate: 20_000,
+          },
         }),
       },
       transcodeStream,
@@ -171,17 +175,16 @@ describe('playback session reconfiguration', () => {
       startPositionMs: 4_000_000,
     });
 
-    expect(result.method).toBe('direct_stream');
+    expect(result.method).toBe('transcode');
     expect(prisma.playbackSession.update).toHaveBeenCalledWith({
       where: { id: 'session-2' },
-      data: expect.objectContaining({ method: 'direct_stream' }),
+      data: expect.objectContaining({ method: 'transcode' }),
     });
     expect(transcodeStream.enqueue).toHaveBeenCalledWith(
       'session-2',
       'account-1',
       expect.objectContaining({
-        streamMode: 'direct_stream',
-        audioMode: 'aac',
+        streamMode: 'transcode',
         startPositionMs: 3_599_000,
       }),
     );

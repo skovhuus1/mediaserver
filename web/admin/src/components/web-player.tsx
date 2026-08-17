@@ -581,14 +581,20 @@ export function WebPlayer() {
       hls.loadSource(authorization.streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        const presentedQualities = hls.levels.map((level, index) => ({
-          index,
-          ...presentPlaybackQualityLevel(
-            level.height,
-            level.bitrate,
-            authorization.adaptiveQuality.renditions[index],
-          ),
-        }));
+        const presentedQualities = hls.levels.map((level, index) => {
+          const rendition = authorization.adaptiveQuality.renditions.find(
+            (candidate) => candidate.height === level.height,
+          ) ?? authorization.adaptiveQuality.renditions[index];
+
+          return {
+            index,
+            ...presentPlaybackQualityLevel(
+              level.height || rendition?.height || 0,
+              rendition?.bitrate ?? level.bitrate,
+              rendition,
+            ),
+          };
+        });
         setQualities(presentedQualities);
         const lastSourceLevel = deferredUpscaleLevelCap(
           presentedQualities.map((quality) => ({
@@ -949,6 +955,7 @@ export function WebPlayer() {
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !authorization) return;
+    activeSubtitleRef.current = activeSubtitle;
     const wiredElements = new Set<HTMLTrackElement>();
     const updateCue = () => {
       const selected = Array.from(video.querySelectorAll<HTMLTrackElement>('track[data-track-id]'))
@@ -967,7 +974,7 @@ export function WebPlayer() {
           element.track.addEventListener('cuechange', updateCue);
         }
         const selected = element.dataset.trackId === activeSubtitle;
-        element.track.mode = selected ? 'hidden' : 'disabled';
+        element.track.mode = selected ? 'showing' : 'disabled';
         if (selected) selectedTrack = element.track;
       });
       setSubtitleCue(selectedTrack
@@ -1073,7 +1080,7 @@ export function WebPlayer() {
     let selectedTextTrack: TextTrack | null = null;
     trackElements.forEach((element) => {
       const selected = element.dataset.trackId === id;
-      element.track.mode = selected ? 'hidden' : 'disabled';
+      element.track.mode = selected ? 'showing' : 'disabled';
       if (selected) selectedTextTrack = element.track;
     });
     setSubtitleCue(selectedTextTrack
@@ -1199,7 +1206,6 @@ export function WebPlayer() {
             src={track.src ?? undefined}
             srcLang={track.language}
             label={track.label}
-            default={track.id === activeSubtitle}
           />
         ))}
       </video>
