@@ -118,6 +118,20 @@ export async function api<T>(path: string, init: RequestInit = {}, authenticated
   return parseResponse<T>(response);
 }
 
+export async function apiBlob(path: string): Promise<Blob> {
+  let response = await request(path, { headers: { accept: 'image/jpeg' } }, accessToken());
+  if (response.status === 401) {
+    const outcome = await refreshSession();
+    if (outcome.status === 'refreshed') response = await request(path, { headers: { accept: 'image/jpeg' } }, accessToken());
+    else throw outcome.failure;
+  }
+  if (!response.ok) {
+    const failure = await response.json().catch(() => ({ code: 'invalid_response', message: `HTTP ${response.status}` })) as ApiFailure;
+    throw failure;
+  }
+  return response.blob();
+}
+
 function request(path: string, init: RequestInit, token: string | null): Promise<Response> {
   return fetch(`/api/v1${path}`, {
     ...init,

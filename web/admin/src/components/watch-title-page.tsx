@@ -54,6 +54,19 @@ export function WatchTitlePage() {
     () => detail?.seasons.find((entry) => entry.number === seasonNumber) ?? null,
     [detail, seasonNumber],
   );
+  useEffect(() => {
+    const candidates = detail?.kind === 'series' ? season?.episodes ?? [] : detail ? [detail.item] : [];
+    if (!candidates.length) return undefined;
+    let cancelled = false;
+    void (async () => {
+      for (let offset = 0; offset < candidates.length && !cancelled; offset += 4) {
+        await Promise.allSettled(candidates.slice(offset, offset + 4).map((candidate) => (
+          api(`/media/${encodeURIComponent(candidate.id)}/playback-assets`)
+        )));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [detail, season]);
   async function selectSeason(number: number) {
     setSeasonNumber(number);
     if (detail?.seasons.find((entry) => entry.number === number)?.episodes.length) return;
@@ -102,11 +115,15 @@ export function WatchTitlePage() {
         </header>
         {detail.kind === 'series' && (
           <section className={styles.episodes}>
+            <header className={styles.seasonSummary}>
+              <div><span>Næste i serien</span><h2>{season?.title ?? 'Episoder'}</h2></div>
+              <strong>{season ? `${season.completedCount} af ${season.episodeCount} set` : ''}</strong>
+            </header>
             <nav>{detail.seasons.map((entry) => <button className={entry.number === seasonNumber ? styles.active : ''} onClick={() => void selectSeason(entry.number)} key={entry.number}>{entry.title} <small>{entry.completedCount}/{entry.episodeCount} set</small></button>)}</nav>
             <div aria-busy={seasonLoading}>{seasonLoading ? <p>Henter sæson...</p> : season?.episodes.map((episode) => (
               <button className={styles.episode} onClick={() => requestPlayback(episode, episode.progress?.completed ? 0 : episode.progress?.positionMs ?? 0)} key={episode.id}>
                 <i style={imageStyle(episode.episodeStillPath ?? season.posterPath)} />
-                <span><b>S{String(episode.seasonNumber ?? 0).padStart(2, '0')}E{String(episode.episodeNumber ?? 0).padStart(2, '0')} · {episode.title}</b><small>{episode.overview ?? 'Episodebeskrivelse afventer metadata.'}</small>{episode.progress && <em className={styles.progress}><i style={{ width: `${episode.progress.completed ? 100 : episode.progress.percent}%` }} />{episode.progress.completed ? 'Set' : `${episode.progress.percent}% set`}</em>}</span>
+                <span><b>S{String(episode.seasonNumber ?? 0).padStart(2, '0')}E{String(episode.episodeNumber ?? 0).padStart(2, '0')} · {episode.title}</b><small className={styles.episodeMeta}>{episode.file?.durationMs ? `${Math.round(episode.file.durationMs / 60_000)} min.` : 'Længde afventer'}{episode.releaseYear ? ` · ${episode.releaseYear}` : ''}</small><small>{episode.overview ?? 'Episodebeskrivelse afventer metadata.'}</small>{episode.progress && <em className={styles.progress}><i style={{ width: `${episode.progress.completed ? 100 : episode.progress.percent}%` }} />{episode.progress.completed ? 'Set' : `${episode.progress.percent}% set`}</em>}</span>
                 <Play />
               </button>
             ))}</div>

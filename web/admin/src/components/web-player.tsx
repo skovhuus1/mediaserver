@@ -34,7 +34,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { accessToken, api, type ApiFailure } from '@/lib/api';
+import { accessToken, api, apiBlob, type ApiFailure } from '@/lib/api';
 import { Brand } from './brand';
 import { ensureCastSdk } from './cast-sdk-loader';
 import styles from './playback.module.css';
@@ -131,6 +131,25 @@ type SubtitleTrack = {
 type SubtitlePosition = 'top' | 'middle' | 'bottom';
 type SubtitleColor = 'white' | 'yellow' | 'cyan' | 'green';
 type SubtitleAppearance = { position: SubtitlePosition; color: SubtitleColor };
+type TimelineMarker = { id: string; kind: 'intro' | 'credits'; startMs: number; endMs: number; source: string; confidence: number | null };
+type TrickplayCue = { startMs: number; endMs: number; sheet: number; column: number; row: number };
+type PlaybackAssets = {
+  status: 'queued' | 'generating' | 'ready' | 'failed';
+  error: string | null;
+  generatedAt: string | null;
+  markers: TimelineMarker[];
+  trickplay: null | {
+    intervalSeconds: number;
+    tileWidth: number;
+    tileHeight: number;
+    columns: number;
+    rows: number;
+    frameCount: number;
+    sheetCount: number;
+    durationMs: number;
+    cues: TrickplayCue[];
+  };
+};
 type CastHandoff = {
   accepted: true;
   sessionId: string;
@@ -308,6 +327,62 @@ export function WebPlayer() {
   const [castNotice, setCastNotice] = useState('');
   const [casting, setCasting] = useState(false);
   const [scrubPosition, setScrubPosition] = useState<number | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<number | null>(null);
+  const [playbackAssets, setPlaybackAssets] = useState<PlaybackAssets | null>(null);
+  const [trickplaySheets, setTrickplaySheets] = useState<Record<number, string>>({});
+  const trickplaySheetsRef = useRef<Record<number, string>>({});
+  const trickplayLoadsRef = useRef(new Set<number>());
+  const [nextEpisodeCountdown, setNextEpisodeCountdown] = useState<number | null>(null);
+  const creditsAutoplaySuppressedRef = useRef(false);
+
+  useEffect(() => {
+    const mediaId = media?.id;
+    Object.values(trickplaySheetsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    trickplaySheetsRef.current = {};
+    trickplayLoadsRef.current.clear();
+    setTrickplaySheets({});
+    setPlaybackAssets(null);
+    setHoverPosition(null);
+    setNextEpisodeCountdown(null);
+    creditsAutoplaySuppressedRef.current = false;
+    if (!mediaId) return undefined;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const load = async () => {
+      try {
+        const assets = await api<PlaybackAssets>(`/media/${encodeURIComponent(mediaId)}/playback-assets`);
+        if (cancelled) return;
+        setPlaybackAssets(assets);
+        if (assets.status === 'queued' || assets.status === 'generating') timer = setTimeout(() => void load(), 3_000);
+      } catch {
+        if (!cancelled) timer = setTimeout(() => void load(), 10_000);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      Object.values(trickplaySheetsRef.current).forEach((url) => URL.revokeObjectURL(url));
+      trickplaySheetsRef.current = {};
+    };
+  }, [media?.id]);
+
+  const ensureTrickplaySheet = useCallback(async (sheet: number) => {
+    const mediaId = mediaRef.current?.id;
+    if (!mediaId || trickplaySheetsRef.current[sheet] || trickplayLoadsRef.current.has(sheet)) return;
+    trickplayLoadsRef.current.add(sheet);
+    try {
+      const blob = await apiBlob(`/media/${encodeURIComponent(mediaId)}/trickplay/${sheet}`);
+      if (mediaRef.current?.id !== mediaId) return;
+      const url = URL.createObjectURL(blob);
+      trickplaySheetsRef.current = { ...trickplaySheetsRef.current, [sheet]: url };
+      setTrickplaySheets(trickplaySheetsRef.current);
+    } catch {
+      // A missing preview must never interrupt playback.
+    } finally {
+      trickplayLoadsRef.current.delete(sheet);
+    }
+  }, []);
 
   const saveProgress = useCallback(async (completed = false) => {
     const sessionId = sessionRef.current;
@@ -379,6 +454,13 @@ export function WebPlayer() {
     setCurrentQuality(-1);
     setQualitySwitching(null);
     setScrubPosition(null);
+    setHoverPosition(null);
+    setPlaybackAssets(null);
+    Object.values(trickplaySheetsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    trickplaySheetsRef.current = {};
+    setTrickplaySheets({});
+    setNextEpisodeCountdown(null);
+    creditsAutoplaySuppressedRef.current = false;
     timelineOffsetRef.current = 0;
     upscaleUnlockedRef.current = false;
     setUpscaleUnlocked(false);
@@ -1292,6 +1374,39 @@ export function WebPlayer() {
     }
   }, [authorization?.playbackPreferences.autoplayNext, saveProgress]);
 
+  const activeTimelineMarker = playbackAssets?.markers.find((marker) => (
+    currentTime * 1_000 >= marker.startMs - 750 && currentTime * 1_000 < marker.endMs
+  )) ?? null;
+  const creditsMarker = playbackAssets?.markers.find((marker) => marker.kind === 'credits') ?? null;
+  useEffect(() => {
+    const inCredits = Boolean(
+      creditsMarker
+      && media?.type === 'episode'
+      && authorization?.playbackPreferences.autoplayNext
+      && currentTime * 1_000 >= creditsMarker.startMs
+      && currentTime * 1_000 < creditsMarker.endMs,
+    );
+    if (inCredits && !creditsAutoplaySuppressedRef.current && nextEpisodeCountdown === null) setNextEpisodeCountdown(10);
+    if (!inCredits && nextEpisodeCountdown !== null) setNextEpisodeCountdown(null);
+  }, [authorization?.playbackPreferences.autoplayNext, creditsMarker, currentTime, media?.type, nextEpisodeCountdown]);
+
+  useEffect(() => {
+    if (nextEpisodeCountdown === null) return undefined;
+    if (nextEpisodeCountdown <= 0) {
+      creditsAutoplaySuppressedRef.current = true;
+      setNextEpisodeCountdown(null);
+      void playNextEpisode(true);
+      return undefined;
+    }
+    const timer = setTimeout(() => setNextEpisodeCountdown((value) => value === null ? null : value - 1), 1_000);
+    return () => clearTimeout(timer);
+  }, [nextEpisodeCountdown, playNextEpisode]);
+
+  const previewPosition = hoverPosition ?? scrubPosition;
+  const previewCue = previewPosition === null ? null : playbackAssets?.trickplay?.cues.find(
+    (cue) => previewPosition * 1_000 >= cue.startMs && previewPosition * 1_000 < cue.endMs,
+  ) ?? null;
+
   if (!media) return null;
   return (
     <section
@@ -1423,6 +1538,23 @@ export function WebPlayer() {
           <small>{authorization?.method === 'transcode' ? 'H.264 · AAC · HLS' : authorization?.contentType}</small>
           {authorization && <small className={styles.playbackReason}>{playbackReason(authorization)}</small>}
         </aside>
+      )}
+
+      {sourceReady && activeTimelineMarker && (
+        <div className={styles.markerActions}>
+          <button onClick={() => seekTo(activeTimelineMarker.endMs / 1_000)}>
+            {activeTimelineMarker.kind === 'intro' ? 'Spring intro over' : 'Spring rulletekster over'}
+          </button>
+          {activeTimelineMarker.kind === 'credits' && media.type === 'episode' && nextEpisodeCountdown !== null && (
+            <div>
+              <button onClick={() => void playNextEpisode(false)}>Næste episode om {nextEpisodeCountdown} sek.</button>
+              <button className={styles.markerCancel} onClick={() => {
+                creditsAutoplaySuppressedRef.current = true;
+                setNextEpisodeCountdown(null);
+              }}>Bliv her</button>
+            </div>
+          )}
+        </div>
       )}
 
       {menu && sourceReady && (
@@ -1635,7 +1767,37 @@ export function WebPlayer() {
         <div className={`${styles.controls} ${controlsVisible ? '' : styles.controlsHidden}`}>
           <div className={styles.timeline}>
             <span>{formatTime(currentTime)}</span>
-            <input
+            <div
+              className={styles.timelineTrack}
+              onPointerMove={(event) => {
+                const bounds = event.currentTarget.getBoundingClientRect();
+                const target = Math.max(0, Math.min(duration, (event.clientX - bounds.left) / Math.max(1, bounds.width) * duration));
+                setHoverPosition(target);
+                const cue = playbackAssets?.trickplay?.cues.find((entry) => target * 1_000 >= entry.startMs && target * 1_000 < entry.endMs);
+                if (cue) void ensureTrickplaySheet(cue.sheet);
+              }}
+              onPointerLeave={() => setHoverPosition(null)}
+            >
+              {playbackAssets?.markers.map((marker) => <i
+                className={styles.timelineMarker}
+                data-kind={marker.kind}
+                key={marker.id}
+                style={{ left: `${Math.min(100, marker.startMs / Math.max(1, duration * 1_000) * 100)}%` }}
+              />)}
+              {previewCue && trickplaySheets[previewCue.sheet] && playbackAssets?.trickplay && (
+                <div
+                  className={styles.trickplayPreview}
+                  style={{ left: `${Math.max(8, Math.min(92, (previewPosition ?? 0) / Math.max(1, duration) * 100))}%` }}
+                >
+                  <i style={{
+                    backgroundImage: `url("${trickplaySheets[previewCue.sheet]}")`,
+                    backgroundPosition: `-${previewCue.column * 240}px -${previewCue.row * 135}px`,
+                    backgroundSize: `${playbackAssets.trickplay.columns * 240}px ${playbackAssets.trickplay.rows * 135}px`,
+                  }} />
+                  <b>{formatTime(previewPosition ?? 0)}</b>
+                </div>
+              )}
+              <input
               type="range"
               min={0}
               max={Math.max(duration, 1)}
@@ -1666,7 +1828,8 @@ export function WebPlayer() {
                 seekTo(target);
               }}
               aria-label="Afspilningsposition"
-            />
+              />
+            </div>
             <span>{formatTime(duration)}</span>
           </div>
           <div className={styles.controlRow}>

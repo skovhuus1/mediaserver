@@ -13,6 +13,7 @@ import {
   type WorkerJobType,
   type WorkerMode,
 } from './job-concurrency.js';
+import { generatePlaybackAssets } from './playback-assets.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -24,6 +25,7 @@ const transcodeRoot = resolve(process.env.TRANSCODE_PATH?.trim() || '/transcode'
 const workerConcurrency = resolveWorkerConcurrency({
   scanMaxConcurrent: process.env.BB_MEDIA_SCAN_MAX_CONCURRENT,
   metadataMaxConcurrent: process.env.BB_MEDIA_METADATA_MAX_CONCURRENT,
+  playbackAssetMaxConcurrent: process.env.BB_MEDIA_PLAYBACK_ASSET_MAX_CONCURRENT,
   transcodeMaxConcurrent: process.env.BB_MEDIA_TRANSCODE_MAX_CONCURRENT,
 });
 const transcodeMaxConcurrent = workerConcurrency.transcodes;
@@ -166,6 +168,9 @@ async function processJob(job: ClaimedJob): Promise<void> {
       return;
     case 'media.metadata':
       await enrichMetadata(job);
+      return;
+    case 'media.playback-assets':
+      await generatePlaybackAssets(prisma, job);
       return;
     case 'playback.transcode':
       await transcodePlayback(job);

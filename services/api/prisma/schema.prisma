@@ -104,6 +104,8 @@ model Account {
   libraryScans         LibraryScan[]
   playbackSessions     PlaybackSession[]
   playbackHistory      PlaybackHistory[]
+  mediaPlaybackAssets  MediaPlaybackAsset[]
+  mediaTimelineMarkers MediaTimelineMarker[]
   auditLogs            AuditLog[]
   settings             SystemSetting[]
   jobs                 SystemJob[]
@@ -460,6 +462,8 @@ model MediaItem {
   file                 MediaFile?
   playbackSessions     PlaybackSession[]
   playbackHistory      PlaybackHistory[]
+  playbackAsset        MediaPlaybackAsset?
+  timelineMarkers      MediaTimelineMarker[]
 
   @@index([accountId, type])
   @@index([accountId, category])
@@ -469,6 +473,53 @@ model MediaItem {
   @@index([accountId, type, seriesDisplayTitle, seasonNumber, episodeNumber])
   @@index([accountId, metadataProvider, metadataProviderId])
   @@map("media_items")
+}
+
+model MediaPlaybackAsset {
+  id                String    @id @default(uuid())
+  accountId         String    @map("account_id")
+  mediaId           String    @unique @map("media_id")
+  status            String    @default("queued")
+  spriteDirectory   String?   @map("sprite_directory")
+  manifest          Json?
+  fingerprint       Json?
+  intervalSeconds   Int       @default(10) @map("interval_seconds")
+  tileWidth         Int       @default(320) @map("tile_width")
+  tileHeight        Int       @default(180) @map("tile_height")
+  columns           Int       @default(5)
+  rows              Int       @default(5)
+  frameCount        Int       @default(0) @map("frame_count")
+  sheetCount        Int       @default(0) @map("sheet_count")
+  durationMs        Int?      @map("duration_ms")
+  sourceModifiedAt  DateTime? @map("source_modified_at")
+  generatedAt       DateTime? @map("generated_at")
+  error             String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  account           Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  media             MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status])
+  @@map("media_playback_assets")
+}
+
+model MediaTimelineMarker {
+  id          String    @id @default(uuid())
+  accountId   String    @map("account_id")
+  mediaId     String    @map("media_id")
+  kind        String
+  startMs     Int       @map("start_ms")
+  endMs       Int       @map("end_ms")
+  source      String
+  confidence  Float?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  media       MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaId, kind])
+  @@index([accountId, mediaId])
+  @@map("media_timeline_markers")
 }
 
 model MetadataBinding {

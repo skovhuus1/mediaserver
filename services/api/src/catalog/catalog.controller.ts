@@ -1,9 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, ParseIntPipe, Patch, Post, Put, Query, StreamableFile } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MediaDetailsQueryDto, MetadataMatchQueryDto, QueueMetadataDto, SetMetadataLockDto, UpdateLibraryDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MediaDetailsQueryDto, MetadataMatchQueryDto, QueueMetadataDto, SetMetadataLockDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -77,6 +77,37 @@ export class CatalogController {
     @Query() query: MediaDetailsQueryDto,
   ) {
     return this.catalog.getMediaDetails(actor, id, query.season);
+  }
+
+  @Get('media/:id/playback-assets')
+  playbackAssets(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.catalog.getPlaybackAssets(actor, id);
+  }
+
+  @Post('media/:id/playback-assets/jobs')
+  @Roles('admin')
+  rebuildPlaybackAssets(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.catalog.queuePlaybackAssets(actor, id, true);
+  }
+
+  @Put('media/:id/timeline-markers')
+  @Roles('admin')
+  updateTimelineMarkers(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateTimelineMarkersDto,
+  ) {
+    return this.catalog.updateTimelineMarkers(actor, id, dto);
+  }
+
+  @Get('media/:id/trickplay/:sheet')
+  @Header('Content-Type', 'image/jpeg')
+  async trickplaySheet(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('sheet', ParseIntPipe) sheet: number,
+  ) {
+    return new StreamableFile(await this.catalog.readTrickplaySheet(actor, id, sheet));
   }
 
   @Post('media/metadata/jobs')
