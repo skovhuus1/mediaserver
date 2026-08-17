@@ -1,5 +1,7 @@
 # BoltBytes Media Server
 
+> Webplayeren parser og renderer nu WebVTT deterministisk mod mediets absolutte tidslinje. Det valgte undertekstspor bevares derfor ved genoptaget afspilning, HLS-opstart og seek, mens Chromecast fortsat modtager de originale WebVTT-spor.
+
 > Playback-resume er nu hærdet mod tre konkrete fejl. Standardundertekster
 > prioriterer et komplet normalt spor over korte forced/SDH-spor på samme
 > sprog, og workeren skriver et atomisk manifest over de indlejrede tekstspor,

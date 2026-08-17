@@ -5,10 +5,13 @@ import {
   normalizePlaybackQualitySelection,
   chooseDefaultWebVttSubtitle,
   deferredUpscaleLevelCap,
+  parseWebVttCues,
   playbackResumeTargetSeconds,
   presentPlaybackQualityLevel,
   resolveInitialPlaybackQualitySelection,
   sanitizeMediaTitle,
+  webVttCueTextAt,
+  type ParsedWebVttCue,
 } from '@boltbytes/contracts';
 import {
   ArrowLeft,
@@ -252,6 +255,7 @@ export function WebPlayer() {
   const castRemoteControllerRef = useRef<CastRemotePlayerController | null>(null);
   const clearCastListenerRef = useRef<(() => void) | null>(null);
   const activeSubtitleRef = useRef<string | null>(null);
+  const subtitleCuesRef = useRef<ParsedWebVttCue[]>([]);
   const subtitleOffsetRef = useRef(0);
   const lastProgressAt = useRef(0);
   const requestNumber = useRef(0);
@@ -283,6 +287,7 @@ export function WebPlayer() {
   const [upscaleUnlocked, setUpscaleUnlocked] = useState(false);
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
   const [subtitleCue, setSubtitleCue] = useState('');
+  const [subtitleError, setSubtitleError] = useState('');
   const [subtitlePosition, setSubtitlePosition] = useState<SubtitlePosition>('bottom');
   const [subtitleColor, setSubtitleColor] = useState<SubtitleColor>('white');
   const [subtitleOffsetMs, setSubtitleOffsetMs] = useState(0);
@@ -356,8 +361,10 @@ export function WebPlayer() {
     setCastNotice('');
     setCasting(false);
     activeSubtitleRef.current = null;
+    subtitleCuesRef.current = [];
     setActiveSubtitle(null);
     setSubtitleCue('');
+    setSubtitleError('');
     setQualities([]);
     setQualitySelection(-1);
     setCurrentQuality(-1);
@@ -1074,48 +1081,42 @@ export function WebPlayer() {
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !authorization) return;
     activeSubtitleRef.current = activeSubtitle;
-    const wiredElements = new Set<HTMLTrackElement>();
-    const updateCue = () => {
-      const selected = Array.from(video.querySelectorAll<HTMLTrackElement>('track[data-track-id]'))
-        .find((element) => element.dataset.trackId === activeSubtitleRef.current);
-      setSubtitleCue(selected
-        ? cueTextAt(selected.track, timelineOffsetRef.current + video.currentTime, subtitleOffsetRef.current)
-        : '');
-    };
-    const applyTrackSelection = () => {
-      const trackElements = Array.from(video.querySelectorAll<HTMLTrackElement>('track[data-track-id]'));
-      let selectedTrack: TextTrack | null = null;
-      trackElements.forEach((element) => {
-        if (!wiredElements.has(element)) {
-          wiredElements.add(element);
-          element.addEventListener('load', applyTrackSelection);
-          element.track.addEventListener('cuechange', updateCue);
-        }
-        const selected = element.dataset.trackId === activeSubtitle;
-        element.track.mode = selected ? 'hidden' : 'disabled';
-        if (selected) selectedTrack = element.track;
+    subtitleCuesRef.current = [];
+    setSubtitleCue('');
+    setSubtitleError('');
+    if (!video || !authorization || !sourceReady || !activeSubtitle) return;
+
+    const selectedTrack = authorization.subtitleTracks.find(
+      (track) => track.id === activeSubtitle && track.delivery === 'webvtt' && Boolean(track.src),
+    );
+    if (!selectedTrack?.src) return;
+
+    const controller = new AbortController();
+    void fetch(selectedTrack.src, { cache: 'no-store', signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.text();
+      })
+      .then((body) => {
+        if (controller.signal.aborted || activeSubtitleRef.current !== selectedTrack.id) return;
+        const cues = parseWebVttCues(body);
+        if (!cues.length) throw new Error('Undertekstfilen indeholder ingen gyldige WebVTT-cues.');
+        subtitleCuesRef.current = cues;
+        setSubtitleCue(webVttCueTextAt(
+          cues,
+          timelineOffsetRef.current + video.currentTime,
+          subtitleOffsetRef.current,
+        ));
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        subtitleCuesRef.current = [];
+        setSubtitleCue('');
+        setSubtitleError(`Underteksten kunne ikke indlæses: ${errorMessage(reason)}`);
       });
-      setSubtitleCue(selectedTrack
-        ? cueTextAt(selectedTrack, timelineOffsetRef.current + video.currentTime, subtitleOffsetRef.current)
-        : '');
-    };
-    video.addEventListener('loadedmetadata', applyTrackSelection);
-    video.addEventListener('loadeddata', applyTrackSelection);
-    video.addEventListener('canplay', applyTrackSelection);
-    video.textTracks.addEventListener('addtrack', applyTrackSelection);
-    applyTrackSelection();
-    return () => {
-      video.removeEventListener('loadedmetadata', applyTrackSelection);
-      video.removeEventListener('loadeddata', applyTrackSelection);
-      video.removeEventListener('canplay', applyTrackSelection);
-      video.textTracks.removeEventListener('addtrack', applyTrackSelection);
-      wiredElements.forEach((element) => {
-        element.removeEventListener('load', applyTrackSelection);
-        element.track.removeEventListener('cuechange', updateCue);
-      });
-    };
+
+    return () => controller.abort();
   }, [activeSubtitle, authorization, sourceReady]);
 
   const toggleFullscreen = async () => {
@@ -1198,18 +1199,9 @@ export function WebPlayer() {
           .catch(() => setCastNotice('Chromecast kunne ikke skifte undertekstspor.'));
       }
     }
-    const trackElements = Array.from(
-      videoRef.current?.querySelectorAll<HTMLTrackElement>('track[data-track-id]') ?? [],
-    );
-    let selectedTextTrack: TextTrack | null = null;
-    trackElements.forEach((element) => {
-      const selected = element.dataset.trackId === id;
-      element.track.mode = selected ? 'hidden' : 'disabled';
-      if (selected) selectedTextTrack = element.track;
-    });
-    setSubtitleCue(selectedTextTrack
-      ? cueTextAt(selectedTextTrack, timelineOffsetRef.current + (videoRef.current?.currentTime ?? 0), subtitleOffsetRef.current)
-      : '');
+    subtitleCuesRef.current = [];
+    setSubtitleCue('');
+    setSubtitleError('');
     activeSubtitleRef.current = id;
     setActiveSubtitle(id);
     setMenu(null);
@@ -1230,10 +1222,9 @@ export function WebPlayer() {
     subtitleOffsetRef.current = offsetMs;
     setSubtitleOffsetMs(offsetMs);
     const video = videoRef.current;
-    const activeTrack = Array.from(
-      video?.querySelectorAll<HTMLTrackElement>('track[data-track-id]') ?? [],
-    ).find((track) => track.dataset.trackId === activeSubtitleRef.current);
-    setSubtitleCue(video && activeTrack ? cueTextAt(activeTrack.track, timelineOffsetRef.current + video.currentTime, offsetMs) : '');
+    setSubtitleCue(video
+      ? webVttCueTextAt(subtitleCuesRef.current, timelineOffsetRef.current + video.currentTime, offsetMs)
+      : '');
   };
 
   const playNextEpisode = useCallback(async (automatic = true) => {
@@ -1307,12 +1298,11 @@ export function WebPlayer() {
         onVolumeChange={(event) => setVolume(event.currentTarget.volume)}
         onTimeUpdate={(event) => {
           setCurrentTime(timelineOffsetRef.current + event.currentTarget.currentTime);
-          const activeTrack = Array.from(
-            event.currentTarget.querySelectorAll<HTMLTrackElement>('track[data-track-id]'),
-          ).find((track) => track.dataset.trackId === activeSubtitleRef.current);
-          setSubtitleCue(activeTrack
-            ? cueTextAt(activeTrack.track, timelineOffsetRef.current + event.currentTarget.currentTime, subtitleOffsetRef.current)
-            : '');
+          setSubtitleCue(webVttCueTextAt(
+            subtitleCuesRef.current,
+            timelineOffsetRef.current + event.currentTarget.currentTime,
+            subtitleOffsetRef.current,
+          ));
           const now = Date.now();
           if (now - lastProgressAt.current < 10_000) return;
           lastProgressAt.current = now;
@@ -1328,18 +1318,7 @@ export function WebPlayer() {
           }
           setError(reason);
         }}
-      >
-        {authorization?.subtitleTracks.filter((track) => track.delivery === 'webvtt' && track.src).map((track) => (
-          <track
-            key={track.id}
-            data-track-id={track.id}
-            kind="subtitles"
-            src={track.src ?? undefined}
-            srcLang={track.language}
-            label={track.label}
-          />
-        ))}
-      </video>
+      />
 
       <div className={styles.topBar}>
         <button className={styles.iconButton} onClick={() => void stop()} aria-label="Tilbage"><ArrowLeft /></button>
@@ -1480,6 +1459,7 @@ export function WebPlayer() {
               {!subtitleTracks.length && (
                 <div className={styles.emptyMenu}>Der blev ikke fundet undertekstspor til denne fil.</div>
               )}
+              {subtitleError && <div className={styles.emptyMenu}>{subtitleError}</div>}
               <section className={styles.subtitlePreferences} aria-label="Undertekstvisning">
                 <div className={styles.subtitlePreferenceGroup}>
                   <span className={styles.subtitlePreferenceHeading}>Placering</span>
@@ -1823,10 +1803,6 @@ function castTextTrackId(tracks: SubtitleTrack[], selectedId: string | null): nu
   return index >= 0 ? index + 1 : null;
 }
 
-function activeCueText(track: TextTrack): string {
-  return cueListText(Array.from(track.activeCues ?? []));
-}
-
 async function waitForSubtitlePreparation(
   statusUrl: string,
   isCurrent: () => boolean,
@@ -1895,21 +1871,6 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'object' && error !== null && 'message' in error) return String(error.message);
   return 'Ukendt afspilningsfejl.';
-}
-
-function cueTextAt(track: TextTrack, currentTime: number, offsetMs: number): string {
-  const cues = Array.from(track.cues ?? []);
-  if (!cues.length) return activeCueText(track);
-  const subtitleTime = currentTime - offsetMs / 1000;
-  return cueListText(cues.filter((cue) => cue.startTime <= subtitleTime && cue.endTime > subtitleTime));
-}
-
-function cueListText(cues: TextTrackCue[]): string {
-  return cues
-    .map((cue) => 'text' in cue ? String((cue as VTTCue).text) : '')
-    .map((text) => text.replace(/<[^>]*>/g, '').trim())
-    .filter(Boolean)
-    .join('\n');
 }
 
 function formatSubtitleOffset(offsetMs: number): string {
