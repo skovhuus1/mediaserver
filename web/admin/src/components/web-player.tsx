@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { accessToken, api, type ApiFailure } from '@/lib/api';
+import { Brand } from './brand';
 import styles from './playback.module.css';
 
 export type PlayableMedia = {
@@ -919,10 +920,22 @@ export function WebPlayer() {
       </div>
 
       {!sourceReady && (
-        <div className={styles.notice}>
-          <Play size={34} />
-          <h2>{error ? 'Afspilningen kunne ikke startes' : 'Forbereder stream'}</h2>
-          <p>{error || status}</p>
+        <div
+          className={`${styles.notice} ${error ? styles.noticeError : styles.noticeLoading}`}
+          role={error ? 'alert' : 'status'}
+          aria-busy={!error}
+          aria-live={error ? 'assertive' : 'polite'}
+        >
+          {error ? (
+            <Play size={34} />
+          ) : (
+            <>
+              <div className={styles.loadingBrand} aria-hidden="true"><Brand /></div>
+              <span className={styles.loadingDots} aria-hidden="true"><i /><i /><i /></span>
+            </>
+          )}
+          <h2>{error ? 'Afspilningen kunne ikke startes' : 'Loader...'}</h2>
+          <p>{error || 'Vi gør din afspilning klar.'}</p>
         </div>
       )}
 
