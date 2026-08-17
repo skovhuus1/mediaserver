@@ -5,6 +5,97 @@ export type PlaybackSubtitleCandidate = {
   delivery: 'webvtt' | 'burn_in';
 };
 
+export type ParsedWebVttCue = {
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  text: string;
+};
+
+export function parseWebVttCues(input: string): ParsedWebVttCue[] {
+  const normalized = input.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  const cues: ParsedWebVttCue[] = [];
+
+  for (const block of normalized.split(/\n{2,}/)) {
+    const lines = block.split('\n').map((line) => line.trimEnd());
+    const firstLine = lines.find((line) => line.trim())?.trim() ?? '';
+    if (/^(?:NOTE|STYLE|REGION)(?:\s|$)/i.test(firstLine)) continue;
+
+    const timingLineIndex = lines.findIndex((line) => line.includes('-->'));
+    if (timingLineIndex < 0) continue;
+    const timing = lines[timingLineIndex]?.match(
+      /^\s*((?:\d{2,}:)?\d{2}:\d{2}[.,]\d{3})\s*-->\s*((?:\d{2,}:)?\d{2}:\d{2}[.,]\d{3})(?:\s+.*)?\s*$/,
+    );
+    if (!timing) continue;
+
+    const startTimestamp = timing[1];
+    const endTimestamp = timing[2];
+    if (!startTimestamp || !endTimestamp) continue;
+
+    const startTimeSeconds = parseWebVttTimestamp(startTimestamp);
+    const endTimeSeconds = parseWebVttTimestamp(endTimestamp);
+    const text = decodeWebVttText(lines.slice(timingLineIndex + 1).join('\n'));
+    if (startTimeSeconds === null || endTimeSeconds === null || endTimeSeconds <= startTimeSeconds || !text) continue;
+    cues.push({ startTimeSeconds, endTimeSeconds, text });
+  }
+
+  return cues.sort((left, right) => left.startTimeSeconds - right.startTimeSeconds);
+}
+
+export function webVttCueTextAt(
+  cues: readonly ParsedWebVttCue[],
+  mediaTimeSeconds: number,
+  offsetMs = 0,
+): string {
+  const subtitleTimeSeconds = mediaTimeSeconds - offsetMs / 1_000;
+  return cues
+    .filter((cue) => cue.startTimeSeconds <= subtitleTimeSeconds && cue.endTimeSeconds > subtitleTimeSeconds)
+    .map((cue) => cue.text)
+    .join('\n');
+}
+
+function parseWebVttTimestamp(value: string): number | null {
+  const parts = value.replace(',', '.').split(':');
+  if (parts.length !== 2 && parts.length !== 3) return null;
+  const seconds = Number(parts[parts.length - 1]);
+  const minutes = Number(parts[parts.length - 2]);
+  const hours = parts.length === 3 ? Number(parts[0]) : 0;
+  if (![seconds, minutes, hours].every(Number.isFinite) || seconds >= 60 || minutes >= 60) return null;
+  return hours * 3_600 + minutes * 60 + seconds;
+}
+
+function decodeWebVttText(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(?:amp|lt|gt|nbsp|lrm|rlm);|&#(?:\d+|x[\da-f]+);/gi, (entity) => decodeWebVttEntity(entity))
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function decodeWebVttEntity(entity: string): string {
+  const named: Record<string, string> = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&nbsp;': '\u00A0',
+    '&lrm;': '\u200E',
+    '&rlm;': '\u200F',
+  };
+  const lower = entity.toLowerCase();
+  if (lower in named) return named[lower] ?? entity;
+  const hexadecimal = /^&#x([\da-f]+);$/i.exec(entity);
+  const decimal = /^&#(\d+);$/.exec(entity);
+  const codePoint = hexadecimal
+    ? Number.parseInt(hexadecimal[1] ?? '', 16)
+    : decimal ? Number.parseInt(decimal[1] ?? '', 10) : NaN;
+  try {
+    return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity;
+  } catch {
+    return entity;
+  }
+}
+
 const languageAliases: Record<string, string> = {
   dan: 'da',
   eng: 'en',
