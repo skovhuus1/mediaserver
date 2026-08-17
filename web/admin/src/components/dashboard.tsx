@@ -2,7 +2,7 @@
 
 import { Activity, Database, Film, HardDrive, Radio, Server, Tv } from 'lucide-react';
 import { Cpu, MemoryStick } from 'lucide-react';
-import { sanitizeMediaTitle } from '@boltbytes/contracts';
+import { classifyPlaybackHealth, playbackFrameDropPercent, sanitizeMediaTitle } from '@boltbytes/contracts';
 import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
 import { type ReactNode, useEffect, useState } from 'react';
@@ -34,6 +34,14 @@ type Session = {
   currentBitrate: number | null;
   currentHeight: number | null;
   bufferAheadMs: number | null;
+  bandwidthEstimate: number | null;
+  droppedFrames: number;
+  totalFrames: number;
+  stallCount: number;
+  playbackRate: number;
+  audioTrack: string | null;
+  subtitleTrack: string | null;
+  lastStateChangedAt: string;
   transcodeBackend: 'nvenc' | 'software' | null;
   transcodeEncoder: string | null;
   lastHeartbeatAt: string;
@@ -295,8 +303,17 @@ function StatusRail({
       </section>
       <section className="rail-card sessions-card">
         <div className="rail-title"><h3>{t.activities}</h3><Activity size={17} /></div>
-        {!sessions.length ? <div className="rail-empty"><Radio size={20} /><span>{t.noSessions}</span></div> : sessions.map((session) => (
-          <div className="session-row" key={session.id}>
+        {!sessions.length ? <div className="rail-empty"><Radio size={20} /><span>{t.noSessions}</span></div> : sessions.map((session) => {
+          const playbackHealth = classifyPlaybackHealth({
+            runtimeState: session.runtimeState,
+            bufferAheadMs: session.bufferAheadMs,
+            droppedFrames: session.droppedFrames,
+            totalFrames: session.totalFrames,
+            lastHeartbeatAtMs: Date.parse(session.lastHeartbeatAt),
+            nowMs: Date.now(),
+          });
+          const dropPercent = playbackFrameDropPercent(session.droppedFrames, session.totalFrames);
+          return <div className={`session-row session-${playbackHealth}`} key={session.id}>
             <span className="session-poster"><Film size={16} /></span>
             <span>
               <strong>{sanitizeMediaTitle(session.media.title) || session.media.title}</strong>
@@ -304,11 +321,18 @@ function StatusRail({
               <small>{session.method.replaceAll('_', ' ')} · {session.currentHeight ? `${session.currentHeight}p` : 'original'} · {formatBitrate(session.currentBitrate)}</small>
               {session.transcodeBackend ? <small>{session.method === 'direct_stream' ? 'Remux' : session.transcodeBackend === 'nvenc' ? 'NVENC' : 'Software'}{session.transcodeEncoder ? ` · ${session.transcodeEncoder}` : ''}</small> : null}
               <small>{session.runtimeState === 'buffering' ? 'Buffering' : session.runtimeState === 'paused' ? 'Pauset' : 'Afspiller'} · buffer {formatBuffer(session.bufferAheadMs)}</small>
+              <span className="session-qoe">
+                <b>{playbackHealthLabel(playbackHealth)}</b>
+                <i>{session.bandwidthEstimate ? `${formatBitrate(session.bandwidthEstimate)} net` : 'net ukendt'}</i>
+                <i>{dropPercent === null ? 'frames afventer' : `${dropPercent.toFixed(1)}% tabt`}</i>
+                <i>{session.stallCount} stop · {session.playbackRate.toFixed(2)}x</i>
+              </span>
+              {session.subtitleTrack || session.audioTrack ? <small>{session.audioTrack ?? 'Standard lyd'} · {session.subtitleTrack ?? 'Ingen undertekst'}</small> : null}
               {session.durationMs ? <span className="session-progress"><i style={{ width: `${Math.min(100, (session.positionMs / session.durationMs) * 100)}%` }} /></span> : null}
             </span>
-            <i className={session.runtimeState === 'buffering' ? 'buffering' : session.runtimeState === 'paused' ? 'paused' : ''} />
+            <i className={playbackHealth === 'buffering' || playbackHealth === 'degraded' ? 'buffering' : playbackHealth === 'paused' || playbackHealth === 'stale' ? 'paused' : ''} />
           </div>
-        ))}
+        })}
       </section>
       <section className="rail-card storage-card">
         <div className="rail-title"><h3>Biblioteksscanner</h3><HardDrive size={17} /></div>
@@ -338,6 +362,17 @@ function formatBitrate(value: number | null): string {
 
 function formatBuffer(value: number | null): string {
   return value === null ? 'ukendt' : `${(value / 1000).toFixed(1)} sek.`;
+}
+
+function playbackHealthLabel(value: ReturnType<typeof classifyPlaybackHealth>): string {
+  return ({
+    healthy: 'Stabil',
+    starting: 'Starter',
+    paused: 'Pauset',
+    buffering: 'Buffering',
+    degraded: 'Ustabil',
+    stale: 'Ingen heartbeat',
+  } as const)[value];
 }
 
 function LoadingGrid() {

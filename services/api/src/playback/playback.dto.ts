@@ -132,4 +132,44 @@ export class PlaybackHeartbeatDto {
   @Min(0)
   @Max(600_000)
   bufferAheadMs?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000_000)
+  bandwidthEstimate?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2_147_483_647)
+  droppedFrames?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2_147_483_647)
+  totalFrames?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  stallCount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.25)
+  @Max(4)
+  playbackRate?: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  audioTrack?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  subtitleTrack?: string | null;
 }

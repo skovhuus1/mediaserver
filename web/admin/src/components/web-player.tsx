@@ -148,7 +148,14 @@ type CastMediaInfo = {
   tracks?: CastTrack[];
   streamType?: string;
   duration?: number;
-  customData?: { heartbeatUrl: string };
+  customData?: {
+    heartbeatUrl: string;
+    timelineOffsetMs: number;
+    fullDurationMs: number | null;
+    currentBitrate: number | null;
+    currentHeight: number | null;
+    subtitleTrack: string | null;
+  };
 };
 type CastTrack = {
   trackContentId?: string;
@@ -251,6 +258,8 @@ export function WebPlayer() {
   const resumeAppliedRef = useRef(false);
   const castingRef = useRef(false);
   const bufferingRef = useRef(false);
+  const stallCountRef = useRef(0);
+  const activeAudioTrackRef = useRef<string | null>(null);
   const castRemotePlayerRef = useRef<CastRemotePlayer | null>(null);
   const castRemoteControllerRef = useRef<CastRemotePlayerController | null>(null);
   const clearCastListenerRef = useRef<(() => void) | null>(null);
@@ -520,12 +529,19 @@ export function WebPlayer() {
     seekTo(position + seconds);
   }, [seekTo]);
 
+  const markBuffering = useCallback((buffering: boolean) => {
+    if (buffering && !bufferingRef.current) stallCountRef.current += 1;
+    bufferingRef.current = buffering;
+  }, []);
+
   useEffect(() => {
     const onRequest = (event: Event) => {
       const request = (event as CustomEvent<PlaybackRequest>).detail;
       void (async () => {
         if (sessionRef.current) await stop(completedTransitionRef.current);
         completedTransitionRef.current = false;
+        stallCountRef.current = 0;
+        activeAudioTrackRef.current = null;
         const currentRequest = ++requestNumber.current;
         setMedia(request.media);
         mediaRef.current = request.media;
@@ -749,6 +765,7 @@ export function WebPlayer() {
         if (preferredAudioTrack !== undefined) {
           hls.audioTrack = preferredAudioTrack;
           setActiveAudioTrack(preferredAudioTrack);
+          activeAudioTrackRef.current = hls.audioTracks[preferredAudioTrack]?.name || `Lydspor ${preferredAudioTrack + 1}`;
         }
         start();
       });
@@ -813,6 +830,8 @@ export function WebPlayer() {
           ? mediaRef.current.file.durationMs / 1000
           : video ? timelineOffsetRef.current + video.duration : undefined);
       const bufferAhead = remote || !video ? null : bufferedAheadMs(video);
+      const frameTelemetry = remote || !video ? { droppedFrames: 0, totalFrames: 0 } : readVideoFrameTelemetry(video);
+      const bandwidthEstimate = remote ? null : estimatedPlaybackBandwidth(hls);
       if (
         hls
         && !upscaleUnlockedRef.current
@@ -835,6 +854,13 @@ export function WebPlayer() {
           currentBitrate: remote ? null : Math.max(0, Math.round(level?.bitrate ?? authorization.videoProfile.source.bitrate ?? 0)),
           currentHeight: Math.round(level?.height ?? authorization.videoProfile.output.height ?? authorization.videoProfile.source.height ?? 0) || null,
           bufferAheadMs: bufferAhead,
+          bandwidthEstimate,
+          droppedFrames: frameTelemetry.droppedFrames,
+          totalFrames: frameTelemetry.totalFrames,
+          stallCount: stallCountRef.current,
+          playbackRate: remote ? 1 : video?.playbackRate ?? 1,
+          audioTrack: remote ? null : activeAudioTrackRef.current,
+          subtitleTrack: authorization.subtitleTracks.find((track) => track.id === activeSubtitleRef.current)?.label ?? null,
         }),
       }).catch((caught: ApiFailure) => setError(caught.message ?? 'Playback-sessionen udløb.'));
     };
@@ -924,7 +950,14 @@ export function WebPlayer() {
       metadata.subtitle = media.seriesTitle ? episodeLabel(media) : status;
       mediaInfo.metadata = metadata;
       mediaInfo.streamType = mediaApi.StreamType.BUFFERED;
-      mediaInfo.customData = { heartbeatUrl: handoff.heartbeatUrl };
+      mediaInfo.customData = {
+        heartbeatUrl: handoff.heartbeatUrl,
+        timelineOffsetMs: Math.max(0, Math.round(timelineOffsetRef.current * 1000)),
+        fullDurationMs: media.file?.durationMs ?? null,
+        currentBitrate: authorization.videoProfile.source.bitrate,
+        currentHeight: authorization.videoProfile.output.height ?? authorization.videoProfile.source.height,
+        subtitleTrack: authorization.subtitleTracks.find((track) => track.id === activeSubtitleRef.current)?.label ?? null,
+      };
       if (media.file?.durationMs) {
         mediaInfo.duration = Math.max(0, media.file.durationMs / 1000 - timelineOffsetRef.current);
       }
@@ -1019,6 +1052,7 @@ export function WebPlayer() {
 
   const selectAudioTrack = (index: number) => {
     if (hlsRef.current) hlsRef.current.audioTrack = index;
+    activeAudioTrackRef.current = audioTracks.find((track) => track.index === index)?.name ?? `Lydspor ${index + 1}`;
     setActiveAudioTrack(index);
     setMenu(null);
   };
@@ -1276,7 +1310,7 @@ export function WebPlayer() {
         ref={videoRef}
         playsInline
         onPlay={() => {
-          bufferingRef.current = false;
+          markBuffering(false);
           setPaused(false);
           revealControls();
         }}
@@ -1291,10 +1325,10 @@ export function WebPlayer() {
           : Number.isFinite(event.currentTarget.duration)
             ? timelineOffsetRef.current + event.currentTarget.duration
             : 0)}
-        onWaiting={() => { bufferingRef.current = true; }}
-        onStalled={() => { bufferingRef.current = true; }}
-        onPlaying={() => { bufferingRef.current = false; }}
-        onCanPlay={() => { bufferingRef.current = false; }}
+        onWaiting={() => markBuffering(true)}
+        onStalled={() => markBuffering(true)}
+        onPlaying={() => markBuffering(false)}
+        onCanPlay={() => markBuffering(false)}
         onVolumeChange={(event) => setVolume(event.currentTarget.volume)}
         onTimeUpdate={(event) => {
           setCurrentTime(timelineOffsetRef.current + event.currentTarget.currentTime);
@@ -1770,9 +1804,7 @@ async function loadCastFramework(retry = false): Promise<{ available: boolean; r
     };
   }
   if (castWindow.cast?.framework && castWindow.chrome?.cast?.media) {
-    return configureCastFramework(castWindow)
-      ? { available: true, reason: 'Afspil på Chromecast' }
-      : { available: false, reason: 'Google Cast Framework kunne ikke initialiseres.' };
+    return configureCastFramework(castWindow);
   }
   return {
     available: false,
@@ -1924,21 +1956,24 @@ function playbackReason(authorization: Authorization): string {
     ?? 'HLS bruges, fordi originalfilen ikke kan afspilles direkte med de aktuelle krav.';
 }
 
-function configureCastFramework(castWindow: CastWindow): boolean {
+function configureCastFramework(castWindow: CastWindow): { available: boolean; reason: string } {
   const framework = castWindow.cast?.framework;
   const media = castWindow.chrome?.cast?.media;
-  if (!framework || !media) return false;
+  if (!framework || !media) return { available: false, reason: 'Google Cast Framework mangler efter indlæsning af SDK.' };
   try {
+    const configuredReceiver = process.env.NEXT_PUBLIC_CAST_RECEIVER_APP_ID?.trim();
     framework.CastContext.getInstance().setOptions({
-      receiverApplicationId: process.env.NEXT_PUBLIC_CAST_RECEIVER_APP_ID?.trim()
-        || media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+      receiverApplicationId: configuredReceiver || media.DEFAULT_MEDIA_RECEIVER_APP_ID,
       autoJoinPolicy: castWindow.chrome?.cast?.AutoJoinPolicy?.ORIGIN_SCOPED
         ?? framework.AutoJoinPolicy?.ORIGIN_SCOPED
         ?? 'origin_scoped',
     });
-    return true;
-  } catch {
-    return false;
+    return {
+      available: true,
+      reason: configuredReceiver ? 'Afspil på BoltBytes Chromecast receiver' : 'Afspil på Google Cast Default Media Receiver',
+    };
+  } catch (error) {
+    return { available: false, reason: `Google Cast Framework kunne ikke initialiseres: ${errorMessage(error)}` };
   }
 }
 
@@ -1951,6 +1986,27 @@ function bufferedAheadMs(video: HTMLVideoElement): number {
     }
   }
   return 0;
+}
+
+function readVideoFrameTelemetry(video: HTMLVideoElement): { droppedFrames: number; totalFrames: number } {
+  const legacy = video as HTMLVideoElement & {
+    webkitDroppedFrameCount?: number;
+    webkitDecodedFrameCount?: number;
+  };
+  const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
+  return {
+    droppedFrames: Math.max(0, Math.round(quality?.droppedVideoFrames ?? legacy.webkitDroppedFrameCount ?? 0)),
+    totalFrames: Math.max(0, Math.round(quality?.totalVideoFrames ?? legacy.webkitDecodedFrameCount ?? 0)),
+  };
+}
+
+function estimatedPlaybackBandwidth(hls: Hls | null): number | null {
+  const estimate = Number((hls as (Hls & { bandwidthEstimate?: number }) | null)?.bandwidthEstimate ?? 0);
+  if (Number.isFinite(estimate) && estimate > 0) return Math.round(estimate);
+  const downlink = (navigator as Navigator & { connection?: { downlink?: number } }).connection?.downlink;
+  return typeof downlink === 'number' && Number.isFinite(downlink) && downlink > 0
+    ? Math.round(downlink * 1_000_000)
+    : null;
 }
 
 function mediaTimeIsBuffered(video: HTMLVideoElement, time: number): boolean {
