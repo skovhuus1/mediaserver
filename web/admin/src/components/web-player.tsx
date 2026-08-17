@@ -108,6 +108,9 @@ type SubtitleTrack = {
   contentType: 'text/vtt' | null;
   delivery: 'webvtt' | 'burn_in';
 };
+type SubtitlePosition = 'top' | 'middle' | 'bottom';
+type SubtitleColor = 'white' | 'yellow' | 'cyan' | 'green';
+type SubtitleAppearance = { position: SubtitlePosition; color: SubtitleColor };
 type CastHandoff = {
   accepted: true;
   sessionId: string;
@@ -197,6 +200,18 @@ type CastWindow = Window & {
 const requestEvent = 'bb:request-playback';
 const historyEvent = 'bb:playback-history-changed';
 const castScriptId = 'bb-google-cast-sdk';
+const subtitleAppearanceStorageKey = 'bb-media-subtitle-appearance-v1';
+const subtitlePositions: Array<{ value: SubtitlePosition; label: string }> = [
+  { value: 'top', label: 'Øverst' },
+  { value: 'middle', label: 'Midt' },
+  { value: 'bottom', label: 'Nederst' },
+];
+const subtitleColors: Array<{ value: SubtitleColor; label: string; hex: string }> = [
+  { value: 'white', label: 'Hvid', hex: '#ffffff' },
+  { value: 'yellow', label: 'Gul', hex: '#ffe66d' },
+  { value: 'cyan', label: 'Cyan', hex: '#72e7ff' },
+  { value: 'green', label: 'Grøn', hex: '#91f2a7' },
+];
 
 export function requestPlayback(media: PlayableMedia, resumePositionMs = 0) {
   window.dispatchEvent(new CustomEvent<PlaybackRequest>(requestEvent, {
@@ -218,6 +233,7 @@ export function WebPlayer() {
   const castRemoteControllerRef = useRef<CastRemotePlayerController | null>(null);
   const clearCastListenerRef = useRef<(() => void) | null>(null);
   const activeSubtitleRef = useRef<string | null>(null);
+  const subtitleOffsetRef = useRef(0);
   const lastProgressAt = useRef(0);
   const requestNumber = useRef(0);
   const [media, setMedia] = useState<PlayableMedia | null>(null);
@@ -239,6 +255,9 @@ export function WebPlayer() {
   const [qualitySwitching, setQualitySwitching] = useState<number | null>(null);
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
   const [subtitleCue, setSubtitleCue] = useState('');
+  const [subtitlePosition, setSubtitlePosition] = useState<SubtitlePosition>('bottom');
+  const [subtitleColor, setSubtitleColor] = useState<SubtitleColor>('white');
+  const [subtitleOffsetMs, setSubtitleOffsetMs] = useState(0);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -759,6 +778,18 @@ export function WebPlayer() {
   }, []);
 
   useEffect(() => {
+    const saved = readSubtitleAppearance();
+    if (!saved) return;
+    setSubtitlePosition(saved.position);
+    setSubtitleColor(saved.color);
+  }, []);
+
+  useEffect(() => {
+    subtitleOffsetRef.current = 0;
+    setSubtitleOffsetMs(0);
+  }, [media?.id]);
+
+  useEffect(() => {
     const video = videoRef.current;
     if (!video || !authorization) return;
     const applyTrackSelection = () => {
@@ -769,7 +800,9 @@ export function WebPlayer() {
         element.track.mode = selected ? 'hidden' : 'disabled';
         if (selected) selectedTrack = element.track;
       });
-      setSubtitleCue(selectedTrack ? activeCueText(selectedTrack) : '');
+      setSubtitleCue(selectedTrack
+        ? cueTextAt(selectedTrack, video.currentTime, subtitleOffsetRef.current)
+        : '');
     };
     video.addEventListener('loadedmetadata', applyTrackSelection);
     video.textTracks.addEventListener('addtrack', applyTrackSelection);
@@ -866,10 +899,33 @@ export function WebPlayer() {
       element.track.mode = selected ? 'hidden' : 'disabled';
       if (selected) selectedTextTrack = element.track;
     });
-    setSubtitleCue(selectedTextTrack ? activeCueText(selectedTextTrack) : '');
+    setSubtitleCue(selectedTextTrack
+      ? cueTextAt(selectedTextTrack, videoRef.current?.currentTime ?? 0, subtitleOffsetRef.current)
+      : '');
     activeSubtitleRef.current = id;
     setActiveSubtitle(id);
     setMenu(null);
+  };
+
+  const selectSubtitlePosition = (position: SubtitlePosition) => {
+    setSubtitlePosition(position);
+    writeSubtitleAppearance({ position, color: subtitleColor });
+  };
+
+  const selectSubtitleColor = (color: SubtitleColor) => {
+    setSubtitleColor(color);
+    writeSubtitleAppearance({ position: subtitlePosition, color });
+  };
+
+  const selectSubtitleOffset = (requestedOffsetMs: number) => {
+    const offsetMs = Math.max(-10_000, Math.min(10_000, Math.round(requestedOffsetMs / 100) * 100));
+    subtitleOffsetRef.current = offsetMs;
+    setSubtitleOffsetMs(offsetMs);
+    const video = videoRef.current;
+    const activeTrack = Array.from(
+      video?.querySelectorAll<HTMLTrackElement>('track[data-track-id]') ?? [],
+    ).find((track) => track.dataset.trackId === activeSubtitleRef.current);
+    setSubtitleCue(video && activeTrack ? cueTextAt(activeTrack.track, video.currentTime, offsetMs) : '');
   };
 
   if (!media) return null;
@@ -911,7 +967,9 @@ export function WebPlayer() {
           const activeTrack = Array.from(
             event.currentTarget.querySelectorAll<HTMLTrackElement>('track[data-track-id]'),
           ).find((track) => track.dataset.trackId === activeSubtitleRef.current);
-          setSubtitleCue(activeTrack ? activeCueText(activeTrack.track) : '');
+          setSubtitleCue(activeTrack
+            ? cueTextAt(activeTrack.track, event.currentTarget.currentTime, subtitleOffsetRef.current)
+            : '');
           const now = Date.now();
           if (now - lastProgressAt.current < 10_000) return;
           lastProgressAt.current = now;
@@ -987,7 +1045,12 @@ export function WebPlayer() {
       )}
 
       {subtitleCue && !casting && (
-        <div className={styles.subtitleCue} aria-label="Undertekster">
+        <div
+          className={styles.subtitleCue}
+          data-color={subtitleColor}
+          data-position={subtitlePosition}
+          aria-label="Undertekster"
+        >
           <span>{subtitleCue}</span>
         </div>
       )}
@@ -1066,6 +1129,62 @@ export function WebPlayer() {
               {!subtitleTracks.length && (
                 <div className={styles.emptyMenu}>Der blev ikke fundet undertekstspor til denne fil.</div>
               )}
+              <section className={styles.subtitlePreferences} aria-label="Undertekstvisning">
+                <div className={styles.subtitlePreferenceGroup}>
+                  <span className={styles.subtitlePreferenceHeading}>Placering</span>
+                  <div className={styles.subtitleSegmented}>
+                    {subtitlePositions.map((position) => (
+                      <button
+                        type="button"
+                        aria-pressed={subtitlePosition === position.value}
+                        key={position.value}
+                        onClick={() => selectSubtitlePosition(position.value)}
+                      >
+                        {position.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className={styles.subtitlePreferenceGroup}>
+                  <span className={styles.subtitlePreferenceHeading}>Farve</span>
+                  <div className={styles.subtitleColorChoices}>
+                    {subtitleColors.map((color) => (
+                      <button
+                        type="button"
+                        aria-label={`Brug ${color.label.toLocaleLowerCase('da-DK')} undertekst`}
+                        aria-pressed={subtitleColor === color.value}
+                        key={color.value}
+                        onClick={() => selectSubtitleColor(color.value)}
+                      >
+                        <i style={{ backgroundColor: color.hex }} />
+                        <span>{color.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className={styles.subtitlePreferenceGroup}>
+                  <div className={styles.subtitleOffsetHeading}>
+                    <span className={styles.subtitlePreferenceHeading}>Synkronisering</span>
+                    <output>{formatSubtitleOffset(subtitleOffsetMs)}</output>
+                  </div>
+                  <input
+                    className={styles.subtitleOffsetSlider}
+                    type="range"
+                    min={-10_000}
+                    max={10_000}
+                    step={100}
+                    value={subtitleOffsetMs}
+                    aria-label="Undertekst-offset i millisekunder"
+                    onChange={(event) => selectSubtitleOffset(Number(event.currentTarget.value))}
+                  />
+                  <div className={styles.subtitleOffsetActions}>
+                    <button type="button" onClick={() => selectSubtitleOffset(subtitleOffsetMs - 500)}>−0,5 s</button>
+                    <button type="button" disabled={subtitleOffsetMs === 0} onClick={() => selectSubtitleOffset(0)}>Nulstil</button>
+                    <button type="button" onClick={() => selectSubtitleOffset(subtitleOffsetMs + 500)}>+0,5 s</button>
+                  </div>
+                  <small>Minus viser teksten tidligere. Plus viser den senere.</small>
+                </div>
+              </section>
             </div>
           )}
           {menu === 'audio' && (audioTracks.length ? audioTracks.map((track) => (
@@ -1362,11 +1481,52 @@ function castTextTrackId(tracks: SubtitleTrack[], selectedId: string | null): nu
 }
 
 function activeCueText(track: TextTrack): string {
-  return Array.from(track.activeCues ?? [])
+  return cueListText(Array.from(track.activeCues ?? []));
+}
+
+function cueTextAt(track: TextTrack, currentTime: number, offsetMs: number): string {
+  const cues = Array.from(track.cues ?? []);
+  if (!cues.length) return activeCueText(track);
+  const subtitleTime = currentTime - offsetMs / 1000;
+  return cueListText(cues.filter((cue) => cue.startTime <= subtitleTime && cue.endTime > subtitleTime));
+}
+
+function cueListText(cues: TextTrackCue[]): string {
+  return cues
     .map((cue) => 'text' in cue ? String((cue as VTTCue).text) : '')
     .map((text) => text.replace(/<[^>]*>/g, '').trim())
     .filter(Boolean)
     .join('\n');
+}
+
+function formatSubtitleOffset(offsetMs: number): string {
+  if (offsetMs === 0) return '0,0 s';
+  const value = (offsetMs / 1000).toLocaleString('da-DK', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+  return `${offsetMs > 0 ? '+' : ''}${value} s`;
+}
+
+function readSubtitleAppearance(): SubtitleAppearance | null {
+  try {
+    const raw = window.localStorage.getItem(subtitleAppearanceStorageKey);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<SubtitleAppearance>;
+    if (!subtitlePositions.some((position) => position.value === value.position)) return null;
+    if (!subtitleColors.some((color) => color.value === value.color)) return null;
+    return value as SubtitleAppearance;
+  } catch {
+    return null;
+  }
+}
+
+function writeSubtitleAppearance(appearance: SubtitleAppearance): void {
+  try {
+    window.localStorage.setItem(subtitleAppearanceStorageKey, JSON.stringify(appearance));
+  } catch {
+    // Private browsing or browser policy may disable local storage; playback remains functional.
+  }
 }
 
 function playbackReason(authorization: Authorization): string {
