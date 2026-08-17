@@ -82,8 +82,12 @@ export class PlaybackController {
 
   @Get('sessions/:id/transcode-status')
   @Public()
-  transcodeStatus(@Param('id') id: string, @Query('token') token: string | undefined) {
-    return this.transcodeStream.status(id, token);
+  transcodeStatus(
+    @Param('id') id: string,
+    @Query('token') token: string | undefined,
+    @Query('generation') generation: string | undefined,
+  ) {
+    return this.transcodeStream.status(id, token, generation);
   }
 
   @Get('sessions/:id/subtitle-status')
@@ -98,10 +102,11 @@ export class PlaybackController {
     @Param('id') id: string,
     @Param('asset') asset: string,
     @Query('token') token: string | undefined,
+    @Query('generation') generation: string | undefined,
     @Headers('origin') origin: string | undefined,
     @Res() response: Response,
   ) {
-    return this.transcodeStream.sendAsset(id, asset, token, origin, response);
+    return this.transcodeStream.sendAsset(id, asset, token, generation, origin, response);
   }
 
   @Get('sessions/:id/subtitles/:asset')

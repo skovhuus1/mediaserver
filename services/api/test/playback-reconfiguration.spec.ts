@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PlaybackService } from '../src/playback/playback.service';
 
 describe('playback session reconfiguration', () => {
+  const hlsGeneration = '22222222-2222-4222-8222-222222222222';
   it('provides burn-in independently of plan transcode flags and reuses the reservation', async () => {
     const streamToken = 'a'.repeat(48);
     const session = {
@@ -71,7 +72,7 @@ describe('playback session reconfiguration', () => {
       }),
     };
     const transcodeStream = {
-      enqueue: vi.fn().mockResolvedValue(undefined),
+      enqueue: vi.fn().mockResolvedValue(hlsGeneration),
     };
     const service = Object.assign(Object.create(PlaybackService.prototype), {
       prisma,
@@ -100,6 +101,8 @@ describe('playback session reconfiguration', () => {
       sessionId: 'session-1',
       logicalSessionId: 'logical-1',
       method: 'transcode',
+      streamUrl: `/api/v1/playback/sessions/session-1/hls/master.m3u8?token=${streamToken}&generation=${hlsGeneration}`,
+      transcodeStatusUrl: `/api/v1/playback/sessions/session-1/transcode-status?token=${streamToken}&generation=${hlsGeneration}`,
     });
     expect(prisma.playbackSession.update).toHaveBeenCalledWith({
       where: { id: 'session-1' },
@@ -149,7 +152,7 @@ describe('playback session reconfiguration', () => {
       auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-2' }) },
       $transaction: vi.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
     };
-    const transcodeStream = { enqueue: vi.fn().mockResolvedValue(undefined) };
+    const transcodeStream = { enqueue: vi.fn().mockResolvedValue(hlsGeneration) };
     const service = Object.assign(Object.create(PlaybackService.prototype), {
       prisma,
       entitlements: {

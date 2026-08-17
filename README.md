@@ -1,5 +1,7 @@
 # BoltBytes Media Server
 
+> Fremadrettet seek i HLS bruger nu en entydig stream-generation pr. hop. En ny position kan derfor ikke genbruge mastermanifest eller segmenter fra den oprindelige `Fortsæt med at se`-position, og superseded FFmpeg-jobs skriver ikke længere i samme outputmappe.
+
 > Webplayeren parser og renderer nu WebVTT deterministisk mod mediets absolutte tidslinje. Det valgte undertekstspor bevares derfor ved genoptaget afspilning, HLS-opstart og seek, mens Chromecast fortsat modtager de originale WebVTT-spor.
 
 > Playback-resume er nu hærdet mod tre konkrete fejl. Standardundertekster
