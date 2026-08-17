@@ -89,6 +89,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       REDIS_URL: redis://redis:6379
       BB_MEDIA_WORKER_MODE: jobs
+      BB_MEDIA_SCAN_MAX_CONCURRENT: ${BB_MEDIA_SCAN_MAX_CONCURRENT:-2}
+      BB_MEDIA_METADATA_MAX_CONCURRENT: ${BB_MEDIA_METADATA_MAX_CONCURRENT:-2}
       TRANSCODE_PATH: /transcode
     volumes:
       - ${MEDIA_PATH:-./media}:/media:ro

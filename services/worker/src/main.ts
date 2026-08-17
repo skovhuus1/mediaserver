@@ -7,18 +7,26 @@ import { availableParallelism } from 'node:os';
 import { extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { enrichLibraryMetadata, hasTmdbConfiguration } from './metadata.js';
+import {
+  claimableWorkerJobTypes,
+  resolveWorkerConcurrency,
+  type WorkerJobType,
+  type WorkerMode,
+} from './job-concurrency.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
-const workerMode = process.env.BB_MEDIA_WORKER_MODE === 'transcode' ? 'transcode' : 'jobs';
+const workerMode: WorkerMode = process.env.BB_MEDIA_WORKER_MODE === 'transcode' ? 'transcode' : 'jobs';
 const workerId = `${workerMode}-${randomUUID()}`;
 const pollIntervalMs = 2_000;
 const leaseMs = 60_000;
 const transcodeRoot = resolve(process.env.TRANSCODE_PATH?.trim() || '/transcode');
-const transcodeMaxConcurrent = Math.max(
-  1,
-  Math.min(16, Number.parseInt(process.env.BB_MEDIA_TRANSCODE_MAX_CONCURRENT?.trim() || '1', 10) || 1),
-);
+const workerConcurrency = resolveWorkerConcurrency({
+  scanMaxConcurrent: process.env.BB_MEDIA_SCAN_MAX_CONCURRENT,
+  metadataMaxConcurrent: process.env.BB_MEDIA_METADATA_MAX_CONCURRENT,
+  transcodeMaxConcurrent: process.env.BB_MEDIA_TRANSCODE_MAX_CONCURRENT,
+});
+const transcodeMaxConcurrent = workerConcurrency.transcodes;
 const transcodeStatusKey = 'runtime.transcoder.status';
 let lastTranscoderHeartbeat = 0;
 
@@ -80,7 +88,8 @@ type ProbeMetadata = {
 
 const mediaExtensions = new Set(['.avi', '.m2ts', '.m4v', '.mkv', '.mov', '.mp4', '.mpeg', '.mpg', '.ts', '.webm']);
 
-async function claimNextJob(): Promise<ClaimedJob | null> {
+async function claimNextJob(allowedTypes: readonly WorkerJobType[]): Promise<ClaimedJob | null> {
+  if (allowedTypes.length === 0) return null;
   return prisma.$transaction(async (tx) => {
     if (workerMode === 'transcode') {
       await tx.$queryRaw`
@@ -98,9 +107,7 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
       });
       if (running >= transcodeMaxConcurrent) return null;
     }
-    const typeFilter = workerMode === 'transcode'
-      ? Prisma.sql`type = 'playback.transcode'`
-      : Prisma.sql`type <> 'playback.transcode'`;
+    const typeFilter = Prisma.sql`type IN (${Prisma.join(allowedTypes)})`;
     const rows = await tx.$queryRaw<SystemJob[]>`
       SELECT
         id,
@@ -1218,12 +1225,53 @@ async function rescheduleRecurringJob(job: ClaimedJob): Promise<void> {
   });
 }
 
+async function executeClaimedJob(job: ClaimedJob): Promise<void> {
+  try {
+    await processJob(job);
+    await finishJob(job);
+    await rescheduleRecurringJob(job);
+  } catch (error) {
+    if (workerMode === 'transcode') {
+      const payload = asJsonObject(job.payload);
+      await publishTranscoderStatus({
+        accountId: job.accountId,
+        state: 'failed',
+        backend: payload.transcodeBackend === 'nvenc' ? 'nvenc' : 'software',
+        encoder: typeof payload.transcodeEncoder === 'string' ? payload.transcodeEncoder : null,
+        sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : null,
+        jobId: job.id,
+        lastError: error instanceof Error ? error.message : 'Unknown transcode failure',
+      });
+    }
+    await failJob(job, error);
+    console.error(JSON.stringify({
+      level: 'error',
+      component: 'worker',
+      workerId,
+      jobId: job.id,
+      error: error instanceof Error ? error.message : 'Unknown worker failure',
+    }));
+  }
+}
+
 async function loop(): Promise<void> {
   await prisma.$connect();
   if (workerMode === 'jobs') await ensureRecurringLeaseJob();
-  console.info(JSON.stringify({ level: 'info', component: 'worker', workerId, workerMode, message: 'Worker started' }));
+  const activeJobs = new Map<string, { type: string; promise: Promise<void> }>();
+  console.info(JSON.stringify({
+    level: 'info',
+    component: 'worker',
+    workerId,
+    workerMode,
+    concurrency: workerConcurrency,
+    message: 'Worker started',
+  }));
   while (!stopping) {
-    if (workerMode === 'transcode' && Date.now() - lastTranscoderHeartbeat >= 30_000) {
+    if (
+      workerMode === 'transcode'
+      && activeJobs.size === 0
+      && Date.now() - lastTranscoderHeartbeat >= 30_000
+    ) {
       lastTranscoderHeartbeat = Date.now();
       await publishIdleTranscoderStatus().catch((error) => console.warn(JSON.stringify({
         level: 'warn',
@@ -1245,38 +1293,23 @@ async function loop(): Promise<void> {
         }));
       }
     }
-    const job = await claimNextJob();
-    if (!job) {
-      await delay(pollIntervalMs);
+    const allowedTypes = claimableWorkerJobTypes({
+      workerMode,
+      activeJobTypes: [...activeJobs.values()].map((active) => active.type),
+      limits: workerConcurrency,
+    });
+    const job = await claimNextJob(allowedTypes);
+    if (job) {
+      const promise = executeClaimedJob(job).finally(() => activeJobs.delete(job.id));
+      activeJobs.set(job.id, { type: job.type, promise });
       continue;
     }
-    try {
-      await processJob(job);
-      await finishJob(job);
-      await rescheduleRecurringJob(job);
-    } catch (error) {
-      if (workerMode === 'transcode') {
-        const payload = asJsonObject(job.payload);
-        await publishTranscoderStatus({
-          accountId: job.accountId,
-          state: 'failed',
-          backend: payload.transcodeBackend === 'nvenc' ? 'nvenc' : 'software',
-          encoder: typeof payload.transcodeEncoder === 'string' ? payload.transcodeEncoder : null,
-          sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : null,
-          jobId: job.id,
-          lastError: error instanceof Error ? error.message : 'Unknown transcode failure',
-        });
-      }
-      await failJob(job, error);
-      console.error(JSON.stringify({
-        level: 'error',
-        component: 'worker',
-        workerId,
-        jobId: job.id,
-        error: error instanceof Error ? error.message : 'Unknown worker failure',
-      }));
-    }
+    await Promise.race([
+      delay(pollIntervalMs),
+      ...[...activeJobs.values()].map((active) => active.promise),
+    ]);
   }
+  await Promise.allSettled([...activeJobs.values()].map((active) => active.promise));
   await prisma.$disconnect();
 }
 
