@@ -8,6 +8,7 @@ export * from './playback-resume.js';
 export * from './playback-quality.js';
 export * from './playback-runtime.js';
 export * from './playback-qoe.js';
+export * from './playback-markers.js';
 export * from './series-identity.js';
 export * from './direct-stream-remux.js';
 export * from './series-continuity.js';

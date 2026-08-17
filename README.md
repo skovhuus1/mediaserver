@@ -637,3 +637,23 @@ Projektet serverer en CAF receiver på `https://media.boltbytes.com/cast/receive
 3. Genbyg `admin`-containeren, fordi `NEXT_PUBLIC_CAST_RECEIVER_APP_ID` indlejres ved Next.js-build.
 
 Hvis variablen er tom, bruges Googles Default Media Receiver som kompatibilitetsfallback. Den kan afspille streamen, men bruger ikke BoltBytes-receiverens server-heartbeat. En fysisk Cast-enhed på samme netværk er fortsat nødvendig for endelig device-acceptance; CI validerer token, receiver-kontrakt, builds og container-ruter, men kan ikke simulere Googles discovery-protokol.
+# Fase: serieoplevelse, trickplay og intro/credits
+
+Denne leverance gør serievisningen og playerens tidslinje funktionel på Plex-niveau:
+
+- Sæsoner vises samlet med episodeorden, varighed, fremdrift, næste episode og særskilt `Specials`-sæson.
+- Titel- og playerbesøg sætter holdbare `media.playback-assets`-jobs i kø. Jobbene deduplikeres og køres parallelt med scans/metadata uden at bruge transcode-workerens streampladser.
+- Workeren genererer autentificerede JPEG-sprites i det delte `/transcode`-volume og et koordinatmanifest. Ingen lokal filsti eksponeres til klienten.
+- Tidslinjen viser hover-forhåndsvisning, intro-/credits-markører og virker fortsat med Direct Play, Direct Stream og transcode-seeks.
+- Kapitelnavne er den stærkeste automatiske markørkilde. Intro kan desuden findes ved gentagne visuelle fingeraftryk på tværs af episoder; credits kan foreslås fra en sen sort overgang. Utilstrækkelig evidens giver ingen falsk knap.
+- Manuelle adminmarkører via `PUT /api/v1/media/:id/timeline-markers` har altid forrang. `null` fjerner den pågældende markør.
+- Under rulletekster viser episodespilleren en 10-sekunders næste-afsnit-countdown, som kan annulleres. Profilens eksisterende autoplay-indstilling respekteres.
+
+Nye API-kontrakter:
+
+- `GET /api/v1/media/:id/playback-assets`
+- `POST /api/v1/media/:id/playback-assets/jobs` (admin)
+- `PUT /api/v1/media/:id/timeline-markers` (admin)
+- `GET /api/v1/media/:id/trickplay/:sheet`
+
+Valgfri workerkapacitet: `BB_MEDIA_PLAYBACK_ASSET_MAX_CONCURRENT` (standard `2`, maksimum `8`). Ved opdatering anvendes migrationen automatisk af den normale container-start. Genererede sprites kan slettes og gendannes; databasen og de manuelle markører er den varige autoritet.

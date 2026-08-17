@@ -7,12 +7,12 @@ import {
   type AuthenticatedUser,
 } from '@boltbytes/contracts';
 import { Prisma } from '@prisma/client';
-import { readdir, realpath } from 'node:fs/promises';
-import { posix } from 'node:path';
+import { readFile, readdir, realpath } from 'node:fs/promises';
+import { posix, resolve, sep } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../infra/redis.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
-import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
 import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metadata-settings';
 import { searchMetadataProviders, validateMetadataSelection } from './metadata-provider';
@@ -511,6 +511,167 @@ export class CatalogService {
         episodes: number === selectedSeason ? serializedEpisodes : [],
       })),
     };
+  }
+
+  async getPlaybackAssets(actor: AuthenticatedUser, mediaId: string) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: { id: true, file: { select: { status: true, modifiedAt: true, durationMs: true } } },
+    });
+    if (!media || !media.file || media.file.status !== 'ready') {
+      throw new NotFoundException({ code: 'media_file_missing', message: 'Media has no readable scanned file' });
+    }
+    let asset = await this.prisma.mediaPlaybackAsset.findUnique({ where: { mediaId } });
+    const stale = Boolean(asset?.sourceModifiedAt && asset.sourceModifiedAt < media.file.modifiedAt);
+    const retryableFailure = asset?.status === 'failed' && Date.now() - asset.updatedAt.getTime() > 60 * 60_000;
+    if (!asset || stale || retryableFailure) {
+      asset = await this.queuePlaybackAssetsInternal(actor.accountId, mediaId, media.file.modifiedAt, stale);
+    }
+    const markers = await this.prisma.mediaTimelineMarker.findMany({
+      where: { accountId: actor.accountId, mediaId },
+      orderBy: { startMs: 'asc' },
+    });
+    const manifest = asset?.manifest && typeof asset.manifest === 'object' && !Array.isArray(asset.manifest)
+      ? asset.manifest as Prisma.JsonObject
+      : null;
+    const cues = Array.isArray(manifest?.cues) ? manifest.cues : [];
+    return {
+      status: asset?.status ?? 'queued',
+      error: asset?.error ?? null,
+      generatedAt: asset?.generatedAt ?? null,
+      markers: markers.map((marker) => ({
+        id: marker.id,
+        kind: marker.kind,
+        startMs: marker.startMs,
+        endMs: marker.endMs,
+        source: marker.source,
+        confidence: marker.confidence,
+      })),
+      trickplay: asset?.status === 'ready' ? {
+        intervalSeconds: asset.intervalSeconds,
+        tileWidth: asset.tileWidth,
+        tileHeight: asset.tileHeight,
+        columns: asset.columns,
+        rows: asset.rows,
+        frameCount: asset.frameCount,
+        sheetCount: asset.sheetCount,
+        durationMs: asset.durationMs,
+        cues,
+      } : null,
+    };
+  }
+
+  async queuePlaybackAssets(actor: AuthenticatedUser, mediaId: string, force = false) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: { id: true, file: { select: { status: true, modifiedAt: true } } },
+    });
+    if (!media || !media.file || media.file.status !== 'ready') {
+      throw new NotFoundException({ code: 'media_file_missing', message: 'Media has no readable scanned file' });
+    }
+    await this.queuePlaybackAssetsInternal(actor.accountId, mediaId, media.file.modifiedAt, force);
+    return this.getPlaybackAssets(actor, mediaId);
+  }
+
+  async updateTimelineMarkers(actor: AuthenticatedUser, mediaId: string, dto: UpdateTimelineMarkersDto) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: { id: true, file: { select: { durationMs: true } } },
+    });
+    if (!media) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+    const changes = [['intro', dto.intro], ['credits', dto.credits]] as const;
+    for (const [kind, range] of changes) {
+      if (range === undefined || range === null) continue;
+      if (range.endMs <= range.startMs) {
+        throw new BadRequestException({ code: 'invalid_timeline_marker', message: `${kind} must end after it starts` });
+      }
+      if (media.file?.durationMs && range.endMs > media.file.durationMs + 1_000) {
+        throw new BadRequestException({ code: 'invalid_timeline_marker', message: `${kind} exceeds the media duration` });
+      }
+    }
+    await this.prisma.$transaction(async (tx) => {
+      for (const [kind, range] of changes) {
+        if (range === undefined) continue;
+        await tx.mediaTimelineMarker.deleteMany({ where: { accountId: actor.accountId, mediaId, kind } });
+        if (range) {
+          await tx.mediaTimelineMarker.create({
+            data: {
+              accountId: actor.accountId,
+              mediaId,
+              kind,
+              startMs: range.startMs,
+              endMs: range.endMs,
+              source: 'manual',
+              confidence: 1,
+            },
+          });
+        }
+      }
+    });
+    return this.getPlaybackAssets(actor, mediaId);
+  }
+
+  async readTrickplaySheet(actor: AuthenticatedUser, mediaId: string, sheet: number) {
+    const asset = await this.prisma.mediaPlaybackAsset.findFirst({
+      where: { accountId: actor.accountId, mediaId, status: 'ready' },
+    });
+    if (!asset?.spriteDirectory || !Number.isInteger(sheet) || sheet < 0 || sheet >= asset.sheetCount) {
+      throw new NotFoundException({ code: 'trickplay_sheet_missing', message: 'Trickplay sheet does not exist' });
+    }
+    const root = resolve(process.env.TRANSCODE_PATH?.trim() || '/transcode');
+    const directory = resolve(root, asset.spriteDirectory);
+    if (directory !== root && !directory.startsWith(`${root}${sep}`)) {
+      throw new ForbiddenException({ code: 'trickplay_path_invalid', message: 'Trickplay path escapes its storage root' });
+    }
+    const filePath = resolve(directory, `sprite-${String(sheet + 1).padStart(3, '0')}.jpg`);
+    if (!filePath.startsWith(`${directory}${sep}`)) {
+      throw new ForbiddenException({ code: 'trickplay_path_invalid', message: 'Trickplay file path is invalid' });
+    }
+    try {
+      return await readFile(filePath);
+    } catch {
+      throw new NotFoundException({ code: 'trickplay_sheet_missing', message: 'Trickplay sheet is not available' });
+    }
+  }
+
+  private queuePlaybackAssetsInternal(accountId: string, mediaId: string, modifiedAt: Date, force: boolean) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:playback-assets'),
+          hashtext(CAST(${mediaId} AS text))
+        )::text AS lock_result
+      `;
+      const current = await tx.mediaPlaybackAsset.findUnique({ where: { mediaId } });
+      const active = await tx.systemJob.findFirst({
+        where: {
+          accountId,
+          type: 'media.playback-assets',
+          status: { in: ['queued', 'running'] },
+          payload: { path: ['mediaId'], equals: mediaId },
+        },
+      });
+      const currentIsFresh = current?.status === 'ready'
+        && Boolean(current.sourceModifiedAt && current.sourceModifiedAt >= modifiedAt);
+      if ((!force && currentIsFresh) || active) return current ?? tx.mediaPlaybackAsset.create({
+        data: { accountId, mediaId, status: 'queued', sourceModifiedAt: modifiedAt },
+      });
+      const asset = await tx.mediaPlaybackAsset.upsert({
+        where: { mediaId },
+        create: { accountId, mediaId, status: 'queued', sourceModifiedAt: modifiedAt },
+        update: { status: 'queued', error: null, sourceModifiedAt: modifiedAt },
+      });
+      await tx.systemJob.create({
+        data: {
+          accountId,
+          type: 'media.playback-assets',
+          status: 'queued',
+          payload: { mediaId, force },
+          maxAttempts: 3,
+        },
+      });
+      return asset;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async metadataStatus(actor: AuthenticatedUser) {

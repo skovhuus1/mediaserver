@@ -3,12 +3,14 @@ export type WorkerMode = 'jobs' | 'transcode';
 export type WorkerJobType =
   | 'library.scan'
   | 'media.metadata'
+  | 'media.playback-assets'
   | 'playback.expire-leases'
   | 'playback.transcode';
 
 export type WorkerConcurrencyLimits = {
   scans: number;
   metadata: number;
+  playbackAssets: number;
   maintenance: number;
   transcodes: number;
 };
@@ -21,11 +23,13 @@ function parseLimit(raw: string | undefined, fallback: number, maximum: number):
 export function resolveWorkerConcurrency(input: {
   scanMaxConcurrent?: string | undefined;
   metadataMaxConcurrent?: string | undefined;
+  playbackAssetMaxConcurrent?: string | undefined;
   transcodeMaxConcurrent?: string | undefined;
 }): WorkerConcurrencyLimits {
   return {
     scans: parseLimit(input.scanMaxConcurrent, 2, 8),
     metadata: parseLimit(input.metadataMaxConcurrent, 2, 8),
+    playbackAssets: parseLimit(input.playbackAssetMaxConcurrent, 2, 8),
     maintenance: 1,
     transcodes: parseLimit(input.transcodeMaxConcurrent, 1, 16),
   };
@@ -49,6 +53,7 @@ export function claimableWorkerJobTypes(input: {
   const claimable: WorkerJobType[] = [];
   if (activeCount('library.scan') < input.limits.scans) claimable.push('library.scan');
   if (activeCount('media.metadata') < input.limits.metadata) claimable.push('media.metadata');
+  if (activeCount('media.playback-assets') < input.limits.playbackAssets) claimable.push('media.playback-assets');
   if (activeCount('playback.expire-leases') < input.limits.maintenance) {
     claimable.push('playback.expire-leases');
   }

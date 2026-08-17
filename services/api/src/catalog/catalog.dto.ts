@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, Min, ValidateNested } from 'class-validator';
 
 export class CreateLibraryDto {
   @IsUUID()
@@ -205,4 +205,30 @@ export class ApplyMetadataMatchDto {
   @IsOptional()
   @IsBoolean()
   locked = true;
+}
+
+export class TimelineMarkerRangeDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(86_400_000)
+  startMs!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1_000)
+  @Max(86_400_000)
+  endMs!: number;
+}
+
+export class UpdateTimelineMarkersDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TimelineMarkerRangeDto)
+  intro?: TimelineMarkerRangeDto | null;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TimelineMarkerRangeDto)
+  credits?: TimelineMarkerRangeDto | null;
 }
