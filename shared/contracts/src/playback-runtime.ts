@@ -42,10 +42,24 @@ export function chooseDefaultWebVttSubtitle(
   );
   for (const language of preferredLanguages) {
     const preferred = normalizedLanguage(language);
-    const match = candidates.find((track) => normalizedLanguage(track.language) === preferred);
+    const match = candidates
+      .filter((track) => normalizedLanguage(track.language) === preferred)
+      .sort((left, right) => subtitlePreferenceRank(left, mode) - subtitlePreferenceRank(right, mode))[0];
     if (match) return match.id;
   }
-  return mode === 'always' || mode === 'forced' ? candidates[0]?.id ?? null : null;
+  return mode === 'always' || mode === 'forced'
+    ? [...candidates].sort((left, right) => subtitlePreferenceRank(left, mode) - subtitlePreferenceRank(right, mode))[0]?.id ?? null
+    : null;
+}
+
+function subtitlePreferenceRank(
+  track: PlaybackSubtitleCandidate,
+  mode: 'auto' | 'always' | 'forced' | 'off',
+): number {
+  if (mode === 'forced') return 0;
+  if (/forced|tvungen/i.test(track.label)) return 2;
+  if (/sdh|hearing|h.reh.mmede/i.test(track.label)) return 1;
+  return 0;
 }
 
 export function deferredUpscaleLevelCap(

@@ -172,6 +172,7 @@ describe('playback session reconfiguration', () => {
     }, 'session-2', {
       streamToken,
       burnIn: false,
+      forceTranscode: true,
       startPositionMs: 4_000_000,
     });
 
@@ -188,5 +189,39 @@ describe('playback session reconfiguration', () => {
         startPositionMs: 3_599_000,
       }),
     );
+  });
+
+  it('rejects a forced runtime fallback when video transcoding is not entitled', async () => {
+    const streamToken = 'c'.repeat(48);
+    const session = {
+      id: 'session-3', logicalSessionId: 'logical-3', accountId: 'account-1', userId: 'user-1',
+      profileId: 'profile-1', mediaId: 'media-1', deviceId: 'device-1', method: 'direct_stream',
+      streamTokenHash: createHash('sha256').update(streamToken).digest('hex'), status: 'active',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      media: { width: 1920, height: 1080, bitrate: 8_000_000, file: { durationMs: 3_600_000, probe: { streams: [] } } },
+      device: { qualityMode: 'auto', fixedQualityHeight: null, allowUpscale: true, dataSaver: false, hdrMode: 'auto' },
+    };
+    const transcodeStream = { enqueue: vi.fn() };
+    const service = Object.assign(Object.create(PlaybackService.prototype), {
+      prisma: { playbackSession: { findFirst: vi.fn().mockResolvedValue(session) } },
+      entitlements: { evaluate: vi.fn().mockResolvedValue({
+        allowed: true,
+        code: 'allowed',
+        reasons: [],
+        effective: { allowVideoTranscode: false, maxVideoResolution: 1080, maxVideoBitrate: 10_000 },
+      }) },
+      transcodeStream,
+    }) as PlaybackService;
+
+    await expect(service.reconfigure({
+      sub: 'user-1', accountId: 'account-1', profileId: 'profile-1', deviceId: 'device-1', roles: [],
+    }, 'session-3', {
+      streamToken,
+      burnIn: false,
+      forceTranscode: true,
+    })).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'video_transcode_not_allowed' }),
+    });
+    expect(transcodeStream.enqueue).not.toHaveBeenCalled();
   });
 });

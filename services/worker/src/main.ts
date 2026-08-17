@@ -2,7 +2,7 @@ import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
 import { buildDirectStreamHlsArguments, classifyMediaPath, detectVideoSignalProfile, resolveAccurateTranscodeSeek, resolveCpuTranscodeProfile } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { availableParallelism } from 'node:os';
 import { extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -441,7 +441,10 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       'subtitle_burn_in_track_invalid: selected track is not a supported image subtitle',
     );
   }
+  const availableSubtitleTrackIds: string[] = [];
+  const unavailableSubtitleTrackIds: string[] = [];
   for (const streamIndex of textSubtitleStreamIndexes(file.probe)) {
+    const trackId = `embedded-${streamIndex}`;
     try {
       const subtitleCancelled = await runFfmpeg(job.id, session.id, [
         '-hide_banner',
@@ -458,8 +461,10 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
         await rm(outputPath, { recursive: true, force: true });
         return;
       }
+      availableSubtitleTrackIds.push(trackId);
     } catch (error) {
       await rm(resolve(outputPath, `embedded-${streamIndex}.vtt`), { force: true });
+      unavailableSubtitleTrackIds.push(trackId);
       console.warn(JSON.stringify({
         level: 'warn',
         component: 'transcoder',
@@ -470,6 +475,13 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       }));
     }
   }
+  const subtitleManifest = resolve(outputPath, 'subtitle-status.json');
+  const subtitleManifestTemporary = resolve(outputPath, `subtitle-status-${job.id}.tmp`);
+  await writeFile(subtitleManifestTemporary, JSON.stringify({
+    availableTrackIds: availableSubtitleTrackIds,
+    unavailableTrackIds: unavailableSubtitleTrackIds,
+  }), 'utf8');
+  await rename(subtitleManifestTemporary, subtitleManifest);
 
   if (streamMode === 'subtitle_only') return;
 

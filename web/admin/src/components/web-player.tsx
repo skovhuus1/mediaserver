@@ -103,7 +103,17 @@ type Authorization = {
     };
   };
 };
-type TranscodeStatus = { state: 'queued' | 'running' | 'ready' | 'failed'; message: string };
+type TranscodeStatus = {
+  state: 'queued' | 'running' | 'ready' | 'failed';
+  message: string;
+  unavailableTrackIds?: string[];
+};
+type StreamConfiguration = {
+  method: 'direct_stream' | 'transcode';
+  streamUrl: string;
+  transcodeStatusUrl: string;
+  adaptiveQuality: Authorization['adaptiveQuality'];
+};
 type PlayerMenu = 'playlist' | 'speed' | 'subtitles' | 'audio' | 'quality' | 'info' | null;
 type AudioTrack = { index: number; name: string; language: string };
 type QualityLevel = ReturnType<typeof presentPlaybackQualityLevel> & { index: number };
@@ -251,6 +261,8 @@ export function WebPlayer() {
   const completedTransitionRef = useRef(false);
   const hlsNetworkRecoveriesRef = useRef(0);
   const hlsMediaRecoveriesRef = useRef(0);
+  const streamRestartingRef = useRef(false);
+  const fallbackAttemptedRef = useRef(false);
   const [media, setMedia] = useState<PlayableMedia | null>(null);
   const [authorization, setAuthorization] = useState<Authorization | null>(null);
   const [sourceReady, setSourceReady] = useState(false);
@@ -281,6 +293,7 @@ export function WebPlayer() {
   const [castReason, setCastReason] = useState('Google Cast Framework indlæses...');
   const [castNotice, setCastNotice] = useState('');
   const [casting, setCasting] = useState(false);
+  const [scrubPosition, setScrubPosition] = useState<number | null>(null);
 
   const saveProgress = useCallback(async (completed = false) => {
     const sessionId = sessionRef.current;
@@ -349,9 +362,12 @@ export function WebPlayer() {
     setQualitySelection(-1);
     setCurrentQuality(-1);
     setQualitySwitching(null);
+    setScrubPosition(null);
     timelineOffsetRef.current = 0;
     upscaleUnlockedRef.current = false;
     setUpscaleUnlocked(false);
+    streamRestartingRef.current = false;
+    fallbackAttemptedRef.current = false;
   }, [saveProgress]);
 
   const togglePlay = useCallback(() => {
@@ -368,7 +384,13 @@ export function WebPlayer() {
   const restartStreamAt = useCallback(async (targetSeconds: number) => {
     const currentAuthorization = authorization;
     const video = videoRef.current;
-    if (!currentAuthorization || !video || currentAuthorization.method === 'direct_play') return;
+    if (
+      !currentAuthorization
+      || !video
+      || currentAuthorization.method === 'direct_play'
+      || streamRestartingRef.current
+    ) return;
+    streamRestartingRef.current = true;
     const fullDuration = mediaRef.current?.file?.durationMs
       ? mediaRef.current.file.durationMs / 1000
       : duration;
@@ -382,12 +404,7 @@ export function WebPlayer() {
     await saveProgress(false).catch(() => undefined);
     setSourceReady(false);
     try {
-      const configuration = await api<{
-        method: 'direct_stream' | 'transcode';
-        streamUrl: string;
-        transcodeStatusUrl: string;
-        adaptiveQuality: Authorization['adaptiveQuality'];
-      }>(`/playback/sessions/${currentAuthorization.sessionId}/configuration`, {
+      const configuration = await api<StreamConfiguration>(`/playback/sessions/${currentAuthorization.sessionId}/configuration`, {
         method: 'PATCH',
         body: JSON.stringify({
           streamToken: currentAuthorization.streamToken,
@@ -417,8 +434,50 @@ export function WebPlayer() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Den valgte position kunne ikke forberedes.');
       setStatus('');
+    } finally {
+      streamRestartingRef.current = false;
     }
   }, [authorization, duration, saveProgress]);
+
+  const recoverWithTranscode = useCallback(async (
+    currentAuthorization: Authorization,
+    reason: string,
+  ) => {
+    if (currentAuthorization.method === 'transcode' || fallbackAttemptedRef.current) {
+      setError(reason);
+      return;
+    }
+    fallbackAttemptedRef.current = true;
+    const video = videoRef.current;
+    const target = Math.max(
+      0,
+      timelineOffsetRef.current + (video?.currentTime ?? 0),
+      resumeRef.current / 1_000,
+    );
+    setControlsVisible(true);
+    setError('');
+    setStatus('Original stream fejlede · skifter sikkert til transcoding...');
+    setSourceReady(false);
+    await saveProgress(false).catch(() => undefined);
+    try {
+      const recovered = await requestForcedTranscode(
+        currentAuthorization,
+        target,
+        () => sessionRef.current === currentAuthorization.sessionId,
+      );
+      if (!recovered) return;
+      timelineOffsetRef.current = target;
+      resumeRef.current = 0;
+      resumeAppliedRef.current = true;
+      setCurrentTime(target);
+      setAuthorization(recovered);
+      setStatus(`Transcoding fallback · HLS · fra ${formatTime(target)}`);
+      setSourceReady(true);
+    } catch (fallbackError) {
+      setError(`${reason} Transcoding fallback fejlede: ${errorMessage(fallbackError)}`);
+      setStatus('');
+    }
+  }, [saveProgress]);
 
   const seekTo = useCallback((targetSeconds: number) => {
     const remote = castRemotePlayerRef.current;
@@ -465,6 +524,8 @@ export function WebPlayer() {
         mediaRef.current = request.media;
         resumeRef.current = request.resumePositionMs;
         resumeAppliedRef.current = false;
+        fallbackAttemptedRef.current = false;
+        streamRestartingRef.current = false;
         setQualities([]);
         setQualitySelection(-1);
         setCurrentQuality(-1);
@@ -499,32 +560,59 @@ export function WebPlayer() {
           } else {
             timelineOffsetRef.current = 0;
           }
-          const defaultSubtitle = chooseDefaultWebVttSubtitle(
-            next.subtitleTracks,
-            next.playbackPreferences.preferredSubtitleLanguages,
-            next.playbackPreferences.subtitleMode,
-          );
-          activeSubtitleRef.current = defaultSubtitle;
-          setActiveSubtitle(defaultSubtitle);
           setPlaybackRate(next.playbackPreferences?.playbackRate ?? 1);
-          if (next.subtitlePreparationStatusUrl) {
-            setStatus('Forbereder indbyggede undertekster...');
-            const subtitlesReady = await waitForTranscode(
-              next.subtitlePreparationStatusUrl,
-              () => currentRequest === requestNumber.current,
-            );
-            if (!subtitlesReady) return;
-          }
-          setAuthorization(next);
+          let preparedAuthorization = next;
+          setAuthorization(preparedAuthorization);
           if (next.method !== 'direct_play') {
             if (!next.transcodeStatusUrl) throw new Error('HLS-status mangler i serverens svar.');
             setStatus(next.method === 'direct_stream' ? 'FFmpeg remuxer streamen...' : 'FFmpeg forbereder streamen...');
-            const ready = await waitForTranscode(next.transcodeStatusUrl, () => currentRequest === requestNumber.current);
-            if (!ready) return;
-            setStatus(`${next.method === 'direct_stream' ? 'Direct Stream' : 'Transcoding'} · HLS${formatVideoProfile(next) ? ` · ${formatVideoProfile(next)}` : ''}`);
-          } else {
-            setStatus(`${next.method === 'direct_play' ? 'Direkte afspilning' : 'Direct Stream'}${formatVideoProfile(next) ? ` · ${formatVideoProfile(next)}` : ''}`);
+            try {
+              const ready = await waitForTranscode(next.transcodeStatusUrl, () => currentRequest === requestNumber.current);
+              if (!ready) return;
+            } catch (primaryError) {
+              if (next.method !== 'direct_stream') throw primaryError;
+              fallbackAttemptedRef.current = true;
+              setStatus('Direct Stream kunne ikke klargøres · prøver transcoding...');
+              try {
+                const recovered = await requestForcedTranscode(
+                  next,
+                  request.resumePositionMs / 1_000,
+                  () => currentRequest === requestNumber.current,
+                );
+                if (!recovered) return;
+                preparedAuthorization = recovered;
+                setAuthorization(recovered);
+              } catch (fallbackError) {
+                throw new Error(
+                  `Direct Stream fejlede: ${errorMessage(primaryError)} Transcoding fallback fejlede: ${errorMessage(fallbackError)}`,
+                );
+              }
+            }
           }
+          if (preparedAuthorization.subtitlePreparationStatusUrl) {
+            setStatus('Forbereder indbyggede undertekster...');
+            const unavailableTrackIds = await waitForSubtitlePreparation(
+              preparedAuthorization.subtitlePreparationStatusUrl,
+              () => currentRequest === requestNumber.current,
+            );
+            if (unavailableTrackIds === null) return;
+            if (unavailableTrackIds.length) {
+              const unavailable = new Set(unavailableTrackIds);
+              preparedAuthorization = {
+                ...preparedAuthorization,
+                subtitleTracks: preparedAuthorization.subtitleTracks.filter((track) => !unavailable.has(track.id)),
+              };
+              setAuthorization(preparedAuthorization);
+            }
+          }
+          const defaultSubtitle = chooseDefaultWebVttSubtitle(
+            preparedAuthorization.subtitleTracks,
+            preparedAuthorization.playbackPreferences.preferredSubtitleLanguages,
+            preparedAuthorization.playbackPreferences.subtitleMode,
+          );
+          activeSubtitleRef.current = defaultSubtitle;
+          setActiveSubtitle(defaultSubtitle);
+          setStatus(`${preparedAuthorization.method === 'direct_play' ? 'Direkte afspilning' : preparedAuthorization.method === 'direct_stream' ? 'Direct Stream · HLS' : 'Transcoding · HLS'}${formatVideoProfile(preparedAuthorization) ? ` · ${formatVideoProfile(preparedAuthorization)}` : ''}`);
           setSourceReady(true);
         } catch (caught) {
           const sessionId = sessionRef.current;
@@ -679,7 +767,12 @@ export function WebPlayer() {
           hls.recoverMediaError();
           return;
         }
-        setError(`HLS-afspilningen stoppede: ${data.details}`);
+        const reason = `HLS-afspilningen stoppede: ${data.details}.`;
+        if (authorization.method !== 'transcode' && !fallbackAttemptedRef.current) {
+          void recoverWithTranscode(authorization, reason);
+          return;
+        }
+        setError(reason);
       });
     } else {
       video.src = authorization.streamUrl;
@@ -696,7 +789,7 @@ export function WebPlayer() {
       video.removeAttribute('src');
       video.load();
     };
-  }, [authorization, sourceReady]);
+  }, [authorization, recoverWithTranscode, sourceReady]);
 
   useEffect(() => {
     if (!authorization) return;
@@ -1226,8 +1319,14 @@ export function WebPlayer() {
           void saveProgress(false).catch(() => undefined);
         }}
         onEnded={() => void playNextEpisode(true)}
-        onError={() => {
-          if (sourceReady) setError('Browseren kunne ikke afspille den leverede stream.');
+        onError={(event) => {
+          if (!sourceReady || !authorization) return;
+          const reason = mediaPlaybackError(event.currentTarget.error);
+          if (authorization.method !== 'transcode' && !fallbackAttemptedRef.current) {
+            void recoverWithTranscode(authorization, reason);
+            return;
+          }
+          setError(reason);
         }}
       >
         {authorization?.subtitleTracks.filter((track) => track.delivery === 'webvtt' && track.src).map((track) => (
@@ -1238,7 +1337,6 @@ export function WebPlayer() {
             src={track.src ?? undefined}
             srcLang={track.language}
             label={track.label}
-            default={track.id === activeSubtitle}
           />
         ))}
       </video>
@@ -1528,12 +1626,31 @@ export function WebPlayer() {
               min={0}
               max={Math.max(duration, 1)}
               step={0.1}
-              value={Math.min(currentTime, Math.max(duration, 1))}
-              onChange={(event) => {
-                setCurrentTime(Number(event.target.value));
+              value={scrubPosition ?? Math.min(currentTime, Math.max(duration, 1))}
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setScrubPosition(Number(event.currentTarget.value));
               }}
-              onPointerUp={(event) => seekTo(Number(event.currentTarget.value))}
-              onKeyUp={(event) => seekTo(Number(event.currentTarget.value))}
+              onChange={(event) => {
+                setScrubPosition(Number(event.currentTarget.value));
+              }}
+              onPointerUp={(event) => {
+                const target = Number(event.currentTarget.value);
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
+                setScrubPosition(null);
+                setCurrentTime(target);
+                seekTo(target);
+              }}
+              onPointerCancel={() => setScrubPosition(null)}
+              onKeyUp={(event) => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) return;
+                const target = Number(event.currentTarget.value);
+                setScrubPosition(null);
+                setCurrentTime(target);
+                seekTo(target);
+              }}
               aria-label="Afspilningsposition"
             />
             <span>{formatTime(duration)}</span>
@@ -1708,6 +1825,76 @@ function castTextTrackId(tracks: SubtitleTrack[], selectedId: string | null): nu
 
 function activeCueText(track: TextTrack): string {
   return cueListText(Array.from(track.activeCues ?? []));
+}
+
+async function waitForSubtitlePreparation(
+  statusUrl: string,
+  isCurrent: () => boolean,
+): Promise<string[] | null> {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    if (!isCurrent()) return null;
+    const response = await fetch(statusUrl, { cache: 'no-store' });
+    const result = await response.json() as TranscodeStatus & ApiFailure;
+    if (!response.ok) throw result;
+    if (result.state === 'ready') return result.unavailableTrackIds ?? [];
+    if (result.state === 'failed') throw new Error(result.message);
+    await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+  }
+  throw new Error('Underteksterne tog længere end fem minutter om at blive klargjort.');
+}
+
+async function requestForcedTranscode(
+  authorization: Authorization,
+  targetSeconds: number,
+  isCurrent: () => boolean,
+): Promise<Authorization | null> {
+  const configuration = await api<StreamConfiguration>(
+    `/playback/sessions/${authorization.sessionId}/configuration`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        streamToken: authorization.streamToken,
+        burnIn: false,
+        forceTranscode: true,
+        startPositionMs: Math.max(0, Math.round(targetSeconds * 1_000)),
+      }),
+    },
+  );
+  const ready = await waitForTranscode(configuration.transcodeStatusUrl, isCurrent);
+  if (!ready) return null;
+  return {
+    ...authorization,
+    method: 'transcode',
+    streamUrl: configuration.streamUrl,
+    contentType: 'application/x-mpegURL',
+    transcodeStatusUrl: configuration.transcodeStatusUrl,
+    adaptiveQuality: configuration.adaptiveQuality,
+    decision: {
+      playback: {
+        method: 'transcode',
+        code: 'runtime_transcode_fallback',
+        reason: 'The original stream failed and the server authorized a transcoding fallback',
+        directPlayBlockers: authorization.decision?.playback.directPlayBlockers ?? [],
+      },
+    },
+  };
+}
+
+function mediaPlaybackError(error: MediaError | null): string {
+  if (!error) return 'Browseren kunne ikke afspille den leverede stream.';
+  const reason = ({
+    [MediaError.MEDIA_ERR_ABORTED]: 'Afspilningen blev afbrudt af browseren.',
+    [MediaError.MEDIA_ERR_NETWORK]: 'Browseren mistede forbindelsen til mediestrømmen.',
+    [MediaError.MEDIA_ERR_DECODE]: 'Browseren kunne ikke dekode originalfilens video eller lyd.',
+    [MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED]: 'Browseren understøtter ikke originalfilens medieprofil.',
+  } as Record<number, string>)[error.code] ?? 'Browseren kunne ikke afspille den leverede stream.';
+  return error.message ? `${reason} ${error.message}` : reason;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) return String(error.message);
+  return 'Ukendt afspilningsfejl.';
 }
 
 function cueTextAt(track: TextTrack, currentTime: number, offsetMs: number): string {
