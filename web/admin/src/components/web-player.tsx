@@ -908,6 +908,10 @@ export function WebPlayer() {
         onVolumeChange={(event) => setVolume(event.currentTarget.volume)}
         onTimeUpdate={(event) => {
           setCurrentTime(event.currentTarget.currentTime);
+          const activeTrack = Array.from(
+            event.currentTarget.querySelectorAll<HTMLTrackElement>('track[data-track-id]'),
+          ).find((track) => track.dataset.trackId === activeSubtitleRef.current);
+          setSubtitleCue(activeTrack ? activeCueText(activeTrack.track) : '');
           const now = Date.now();
           if (now - lastProgressAt.current < 10_000) return;
           lastProgressAt.current = now;
@@ -927,10 +931,6 @@ export function WebPlayer() {
             srcLang={track.language}
             label={track.label}
             default={track.id === activeSubtitle}
-            onCueChange={(event) => {
-              if (event.currentTarget.dataset.trackId !== activeSubtitleRef.current) return;
-              setSubtitleCue(activeCueText(event.currentTarget.track));
-            }}
           />
         ))}
       </video>
