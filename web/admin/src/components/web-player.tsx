@@ -236,6 +236,7 @@ export function WebPlayer() {
   const subtitleOffsetRef = useRef(0);
   const lastProgressAt = useRef(0);
   const requestNumber = useRef(0);
+  const qualitySelectionRef = useRef(-1);
   const [media, setMedia] = useState<PlayableMedia | null>(null);
   const [authorization, setAuthorization] = useState<Authorization | null>(null);
   const [sourceReady, setSourceReady] = useState(false);
@@ -457,19 +458,34 @@ export function WebPlayer() {
     };
     const start = () => {
       if (disposed || started || !applyResume()) return;
+      if (authorization.method === 'transcode') {
+        const remainingDurationMs = Number.isFinite(video.duration)
+          ? Math.max(0, (video.duration - video.currentTime) * 1000)
+          : 8_000;
+        const requiredBufferMs = Math.min(8_000, remainingDurationMs);
+        if (bufferedAheadMs(video) + 250 < requiredBufferMs) return;
+      }
       started = true;
       setDuration(Number.isFinite(video.duration) ? video.duration : 0);
       void video.play().catch(() => undefined);
     };
     video.addEventListener('loadedmetadata', start);
     video.addEventListener('durationchange', start);
+    video.addEventListener('canplay', start);
+    video.addEventListener('progress', start);
 
     if (authorization.method === 'transcode' && Hls.isSupported()) {
       const hls = new Hls({
         backBufferLength: 90,
-        maxBufferLength: 45,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
         enableWorker: true,
-        startLevel: -1,
+        startLevel: 0,
+        startPosition: 0,
+        abrBandWidthFactor: 0.8,
+        abrBandWidthUpFactor: 0.55,
+        maxStarvationDelay: 8,
+        maxLoadingDelay: 8,
         capLevelToPlayerSize: true,
         capLevelOnFPSDrop: true,
       });
@@ -485,7 +501,8 @@ export function WebPlayer() {
             authorization.adaptiveQuality.renditions[index],
           ),
         })));
-        setQualitySelection(hls.autoLevelEnabled ? -1 : hls.manualLevel);
+        qualitySelectionRef.current = hls.autoLevelEnabled ? -1 : hls.manualLevel;
+        setQualitySelection(qualitySelectionRef.current);
         setCurrentQuality(hls.currentLevel);
         setAudioTracks(hls.audioTracks.map((track, index) => ({
           index,
@@ -505,12 +522,25 @@ export function WebPlayer() {
         }
         start();
       });
+      hls.on(Hls.Events.BUFFER_APPENDED, start);
       hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => {
-        setQualitySwitching(data.level);
+        const selected = qualitySelectionRef.current;
+        if (selected >= 0 && data.level !== selected) {
+          hls.loadLevel = selected;
+          setQualitySwitching(selected);
+          return;
+        }
+        setQualitySwitching(selected >= 0 && data.level === selected ? null : data.level);
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         setCurrentQuality(data.level);
-        setQualitySwitching(null);
+        const selected = qualitySelectionRef.current;
+        if (selected >= 0 && data.level !== selected) {
+          hls.loadLevel = selected;
+          setQualitySwitching(selected);
+        } else {
+          setQualitySwitching(null);
+        }
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
@@ -527,6 +557,8 @@ export function WebPlayer() {
       hlsRef.current = null;
       video.removeEventListener('loadedmetadata', start);
       video.removeEventListener('durationchange', start);
+      video.removeEventListener('canplay', start);
+      video.removeEventListener('progress', start);
       video.removeAttribute('src');
       video.load();
     };
@@ -740,9 +772,10 @@ export function WebPlayer() {
     const hls = hlsRef.current;
     if (!hls) return;
     const selected = normalizePlaybackQualitySelection(index, hls.levels.length);
+    qualitySelectionRef.current = selected;
     setQualitySelection(selected);
     setQualitySwitching(selected === -1 || selected === hls.currentLevel ? null : selected);
-    hls.currentLevel = selected;
+    hls.loadLevel = selected;
     setMenu(null);
   };
 

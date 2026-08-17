@@ -39,7 +39,8 @@
 >
 > Playerens kvalitetsvælger adskiller nu valgt tilstand fra den rendition, der
 > faktisk afspilles. Auto viser det aktuelle HLS-niveau, mens et manuelt valg
-> skifter via Hls.js uden at tømme hele bufferen og bekræfter skiftet i UI'et.
+> låses med Hls.js `loadLevel`, så ABR deaktiveres uden at tømme den eksisterende
+> buffer, og skiftet bekræftes i UI'et, når næste niveau faktisk afspilles.
 >
 > Undertekster er en grundlæggende tilgængelighedsfunktion og gates ikke af
 > abonnementet. WebVTT leveres direkte, mens PGS/VobSub/DVB bruger samme
@@ -169,7 +170,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Integreret fuldskærms-webafspiller med egen tidslinje, play/pause, 10-sekunders hop, lydstyrke, hastighed, lydspor, faktiske undertekstspor, kvalitetsvalg, information, tastaturstyring og responsivt mobillayout. Server-side authorize, kortlivet stream-token, 30-sekunders lease-heartbeat, fremdriftslagring hvert 10. sekund og sikker frigivelse af stream-plads ved stop er bevaret.
 - Konto-, bruger- og profilafgrænset playback-historik med idempotent upsert, positions-clamping, automatisk afslutning ved 90 procent og en live `Fortsæt med at se`-sektion, der genoptager fra den gemte position.
 - Klikbare `Afspil`-handlinger på film og enkelte serieepisoder. Inkompatible filer køres gennem en separat durable `playback.transcode`-kø og FFmpeg-container, så scanning og metadataarbejde ikke blokeres af en lang film.
-- Tokenbeskyttet HLS med atomisk master-manifest, separat variant-playliste, eksplicit `BANDWIDTH`, `AVERAGE-BANDWIDTH` og `RESOLUTION`, firesekunders MPEG-TS-segmenter, H.264/AAC-output, planens opløsnings-/bitrategrænser og `hls.js`-fallback i browsere uden native HLS. Kvalitetsmenuen viser derfor aldrig længere en kunstig nulværdi. HLS-tokenet skrives ikke til nginx-accessloggen.
+- Tokenbeskyttet HLS med atomisk master-manifest, separat variant-playliste, eksplicit `BANDWIDTH`, `AVERAGE-BANDWIDTH` og `RESOLUTION`, firesekunders MPEG-TS-segmenter, H.264/AAC-output, planens opløsnings-/bitrategrænser og `hls.js`-fallback i browsere uden native HLS. API'et venter som standard på tre komplette segmenter pr. rendition, og browseren venter på otte sekunders lokal buffer før start. Kvalitetsmenuen viser derfor aldrig længere en kunstig nulværdi. HLS-tokenet skrives ikke til nginx-accessloggen.
 - Nye installationers administratorplan starter på `2160p/50 Mbps`. Eksisterende abonnementer beholder bevidst deres immutable planversion/snapshot og skal have en ny aktiv 4K-planversion og et abonnement på denne version, før serveren må levere 4K.
 - Compose klargør det navngivne transcode-volume med en afgrænset engangs-init-container; API, worker og transcoder kører fortsat som ikke-root og starter først efter migrationer/API-health.
 - Chromecast Web Sender via Google Cast Default Media Receiver og et servervalideret handoff på den eksisterende logical session. Receiveren får absolutte medie- og WebVTT-URL'er med et HMAC-signeret, sessionsbundet Cast-token, mens browserens oprindelige stream-token forbliver uændret. HLS viderefører Cast-tokenet til variant-playlister og segmenter. Playeren synkroniserer remote play/pause, seek, lydstyrke, undertekster, heartbeat og playback-historik og fortsætter lokalt, hvis Cast-sessionen afbrydes.
@@ -422,7 +423,7 @@ CI-smoketesten bruger samme standardport `6555` som Compose og `.env.example`, s
 
 - Playback authorization beregner et serverstyret kvalitetsloft som minimum af abonnement, servermaksimum, fysisk sk?rmh?jde, enhedens kvalitetstilstand, databesparelse og upscaling-politik.
 - Den f?lles ladder indeholder 360p, 480p, 720p, 1080p, 1440p og 2160p og v?lger h?jst fire j?vnt fordelte renditions. Databesparelse begr?nser output til 720p og cirka 3 Mbps.
-- Workeren producerer renditions i ?n FFmpeg-dekodning med segmentjusterede streams, automatisk mastermanifest og nummererede playlists/segmenter. API-et markerer f?rst streamen klar, n?r alle variant-playlister har et l?sbart f?rste segment.
+- Workeren producerer renditions i ?n FFmpeg-dekodning med segmentjusterede streams, automatisk mastermanifest og nummererede playlists/segmenter. API-et markerer først streamen klar, når alle variant-playlister har den konfigurerede startbuffer; standarden er tre komplette segmenter og kan justeres med `BB_MEDIA_HLS_STARTUP_SEGMENTS=1-8`.
 - NVIDIA NVENC vælges kun, når GPU-runtime er synlig, `nvidia-smi` svarer, FFmpeg annoncerer den nødvendige H.264/HEVC-encoder, og en rigtig one-frame encode lykkes. En FFmpeg/NVENC-runtimefejl falder sikkert tilbage til `libx264`/`libx265` uden at slette udtrukne undertekster.
 - HDR bevares som HEVC Main10, n?r klient, plan og HDR-mode tillader det. `force_sdr` bruger tone mapping; opskalerede niveauer m?rkes tydeligt og p?st?r ikke at skabe ny kildedetalje.
 - Hls.js starter i Auto med player-size- og FPS-drop-capping. Manuelle niveauer kan v?lges, og Auto gendannes med level `-1`.
@@ -496,6 +497,12 @@ Tomme thread- og rendition-felter betyder automatisk detektion. Et eksplicit tal
 - Chromecast-knappen genprøver indlæsning af Google Cast SDK ved klik og viser resultatet synligt i playeren. Default Media Receiver og kravet om HTTPS samt samme lokale netværk er uændret.
 - Chromes separate, flytbare vindue `Livetekstning / Oversætter` er en browserfunktion, ligger uden for sidens DOM og kan ikke styles eller lukkes af BoltBytes. Luk vinduet med dets `X`, eller slå Live Caption fra i Chrome, hvis kun filens rigtige SRT/WebVTT-spor skal vises.
 - Matroska eller et browser-inkompatibelt lydspor kræver fortsat HLS. Ægte Direct Stream-remux uden videoreencoding er fortsat en separat leverance.
+
+## Stabil HLS-start og manuelle kvalitetsvalg (2026-08-17)
+
+- Progressive EVENT-playlister starter ved tidsposition `0` i stedet for at følge den voksende live-edge. Det forhindrer playeren i at ramme slutningen af det nyeste firesekunderssegment under opstart.
+- Auto starter konservativt på laveste rendition, bruger større båndbredde-margin før opgradering og har op til 60 sekunders normal buffer. Browseren starter først selve afspilningen med mindst otte sekunders lokal buffer.
+- Et manuelt kvalitetsvalg sætter Hls.js `loadLevel` og deaktiverer dermed ABR. Det eksisterende bufferindhold bevares, og UI'et viser skiftet som færdigt, når det valgte niveau faktisk leveres.
 
 
 ## Burn-in og session-rekonfiguration (2026-07-29)
