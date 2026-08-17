@@ -546,3 +546,18 @@ Valideret 17. august 2026:
 - `npx vitest run shared/contracts/src/playback-runtime.spec.ts`: `3/3` playback-policytests grønne.
 - `npx prisma validate --schema services/api/prisma/schema.prisma`: schema validt.
 - Lokal integrationstest blev sikkerhedsafvist uden en dedikeret `bbmedia_test`-database og test-JWT. GitHub `validate` med isoleret PostgreSQL/Redis er derfor obligatorisk før squash-merge.
+
+## Playback-synkronisering og standardundertekster (2026-08-17)
+
+Denne leverance retter tre sammenhaengende fejl i webafspilleren:
+
+- Resume og on-demand seek fra Direct Stream skifter til fuld video- og lydtranscoding, naar abonnementet tillader video-transcoding. Det undgaar forskellige starttidsstempler mellem kopieret video og genkodet lyd.
+- HLS-kvalitetsvisningen bruger serverens validerede rendition-bitrate matchet paa oploesning frem for HLS.js' midlertidige bootstrap-estimat.
+- Det valgte WebVTT-standardspor aktiveres eksplicit og holdes loadet. Browserens native cue-rendering er transparent, saa kun BoltBytes-rendereren viser tekst med brugerens placering, farve og offset.
+- Direct Play og Direct Stream fra filens begyndelse er uændret. Planer uden video-transcoding omgaas ikke.
+
+Validering:
+
+- `npm run test --workspace=@boltbytes/api -- playback-reconfiguration.spec.ts`: 2/2 tests bestaaet.
+- `npm run ci`: ESLint, contracts/API/worker/admin typecheck, 34 testfiler med 117/117 tests samt contracts-, NestJS-, worker- og Next.js-build bestaaet.
+- Tilbagevaerende driftskontrol: deploy den nye container og smoke-test den konkrete FBI-fil i en rigtig browser for fysisk A/V-synkronisering, korrekt rendition-bitrate og vedvarende standardundertekster.

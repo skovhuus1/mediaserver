@@ -28,6 +28,12 @@
   background: #000;
 }
 
+.video::cue {
+  color: transparent;
+  background: transparent;
+  text-shadow: none;
+}
+
 .topBar {
   position: absolute;
   top: 0;

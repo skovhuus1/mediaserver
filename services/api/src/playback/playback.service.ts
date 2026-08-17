@@ -126,7 +126,7 @@ export class PlaybackService {
         process.env.BB_MEDIA_AUTO_TRANSCODE_ON_BANDWIDTH?.trim() ?? '',
       ),
     });
-    const decision =
+    let decision =
       normalDecision.allowed
       && normalDecision.method !== 'transcode'
       && compatibleSourcePolicy.required
@@ -151,6 +151,18 @@ export class PlaybackService {
         Math.max(0, (media.file?.durationMs ?? 0) - 1_000),
       ),
     );
+    if (
+      startPositionMs > 0
+      && decision.method === 'direct_stream'
+      && entitlement.effective.allowVideoTranscode
+    ) {
+      decision = {
+        ...decision,
+        method: 'transcode',
+        code: 'accurate_seek_transcode',
+        reason: 'Accurate resume requires synchronized video and audio transcoding',
+      };
+    }
     try {
       const session = await this.reservations.reserve({
         actor,
@@ -341,6 +353,7 @@ export class PlaybackService {
       ),
     );
     const streamMode = dto.burnIn
+      || (startPositionMs > 0 && entitlement.effective.allowVideoTranscode)
       ? 'transcode' as const
       : session.method === 'direct_stream'
         ? 'direct_stream' as const
