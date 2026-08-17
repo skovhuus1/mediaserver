@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Prisma } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
+import { readdir, readFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { isPrivileged } from '../common/auth';
 import { correlationId } from '../common/request-context';
@@ -15,7 +17,10 @@ import {
   CreateUserDto,
   UpdateUserDto,
   UpdateProfileDto,
+  PlaybackAnalysisQueryDto,
+  UpdatePlaybackMarkersDto,
 } from './administration.dto';
+import { playbackJobMediaId, validateManualPlaybackMarkers } from './playback-analysis';
 
 @Injectable()
 export class AdministrationService {
@@ -621,6 +626,249 @@ export class AdministrationService {
     await this.prisma.entitlementOverride.delete({ where: { id: override.id } });
     await this.audit(actor, 'entitlement_override.deleted', override.id, { userId: override.userId });
     return { deleted: true };
+  }
+
+  async listPlaybackAnalysis(actor: AuthenticatedUser, query: PlaybackAnalysisQueryDto) {
+    const search = query.q?.trim();
+    const media = await this.prisma.mediaItem.findMany({
+      where: {
+        accountId: actor.accountId,
+        ...(search ? {
+          OR: [
+            { title: { contains: search, mode: 'insensitive' } },
+            { seriesTitle: { contains: search, mode: 'insensitive' } },
+            { seriesDisplayTitle: { contains: search, mode: 'insensitive' } },
+          ],
+        } : {}),
+      },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        seriesTitle: true,
+        seriesDisplayTitle: true,
+        seasonNumber: true,
+        episodeNumber: true,
+        updatedAt: true,
+        library: { select: { name: true } },
+        file: { select: { status: true, durationMs: true, modifiedAt: true } },
+        playbackAsset: {
+          select: {
+            status: true,
+            intervalSeconds: true,
+            frameCount: true,
+            sheetCount: true,
+            durationMs: true,
+            generatedAt: true,
+            updatedAt: true,
+            error: true,
+          },
+        },
+        timelineMarkers: {
+          select: { kind: true, startMs: true, endMs: true, source: true, confidence: true },
+          orderBy: { startMs: 'asc' },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const normalized = media.map((item) => ({
+      id: item.id,
+      title: item.seriesDisplayTitle ?? item.seriesTitle ?? item.title,
+      episodeTitle: item.type === 'episode' ? item.title : null,
+      type: item.type,
+      seasonNumber: item.seasonNumber,
+      episodeNumber: item.episodeNumber,
+      libraryName: item.library.name,
+      fileStatus: item.file?.status ?? 'missing',
+      durationMs: item.file?.durationMs ?? item.playbackAsset?.durationMs ?? null,
+      status: item.playbackAsset?.status ?? 'missing',
+      asset: item.playbackAsset,
+      markers: item.timelineMarkers,
+      updatedAt: item.playbackAsset?.updatedAt ?? item.updatedAt,
+    }));
+    const filtered = query.status === 'all' ? normalized : normalized.filter((item) => item.status === query.status);
+    const page = query.page ?? 1;
+    const take = query.take ?? 40;
+    const offset = (page - 1) * take;
+    return { items: filtered.slice(offset, offset + take), total: filtered.length, page, take };
+  }
+
+  async playbackAnalysisDetail(actor: AuthenticatedUser, mediaId: string) {
+    const media = await this.ownedPlaybackMedia(actor, mediaId);
+    const jobs = await this.prisma.systemJob.findMany({
+      where: { accountId: actor.accountId, type: 'media.playback-assets' },
+      select: {
+        id: true,
+        status: true,
+        payload: true,
+        attemptCount: true,
+        maxAttempts: true,
+        createdAt: true,
+        updatedAt: true,
+        attempts: {
+          select: { number: true, status: true, error: true, startedAt: true, endedAt: true },
+          orderBy: { number: 'desc' },
+          take: 3,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const latestJob = jobs.find((job) => playbackJobMediaId(job.payload) === media.id) ?? null;
+    return {
+      id: media.id,
+      title: media.seriesDisplayTitle ?? media.seriesTitle ?? media.title,
+      episodeTitle: media.type === 'episode' ? media.title : null,
+      type: media.type,
+      seasonNumber: media.seasonNumber,
+      episodeNumber: media.episodeNumber,
+      libraryName: media.library.name,
+      file: media.file,
+      asset: media.playbackAsset ? {
+        status: media.playbackAsset.status,
+        manifest: media.playbackAsset.manifest,
+        intervalSeconds: media.playbackAsset.intervalSeconds,
+        tileWidth: media.playbackAsset.tileWidth,
+        tileHeight: media.playbackAsset.tileHeight,
+        columns: media.playbackAsset.columns,
+        rows: media.playbackAsset.rows,
+        frameCount: media.playbackAsset.frameCount,
+        sheetCount: media.playbackAsset.sheetCount,
+        durationMs: media.playbackAsset.durationMs,
+        generatedAt: media.playbackAsset.generatedAt,
+        updatedAt: media.playbackAsset.updatedAt,
+        error: media.playbackAsset.error,
+      } : null,
+      markers: media.timelineMarkers,
+      latestJob,
+      previewDataUrl: await this.playbackPreview(media.playbackAsset?.spriteDirectory ?? null),
+    };
+  }
+
+  async queuePlaybackAnalysis(actor: AuthenticatedUser, mediaId: string) {
+    const media = await this.ownedPlaybackMedia(actor, mediaId);
+    if (!media.file || ['missing', 'error'].includes(String(media.file.status))) {
+      throw new BadRequestException({ code: 'media_file_unavailable', message: 'Mediet har ingen læsbar scannet fil.' });
+    }
+    const activeJobs = await this.prisma.systemJob.findMany({
+      where: {
+        accountId: actor.accountId,
+        type: 'media.playback-assets',
+        status: { in: ['queued', 'running', 'processing', 'retrying'] },
+      },
+      select: { id: true, status: true, payload: true },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const existing = activeJobs.find((job) => playbackJobMediaId(job.payload) === media.id);
+    if (existing) return { jobId: existing.id, status: existing.status, deduplicated: true };
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.mediaPlaybackAsset.upsert({
+        where: { mediaId: media.id },
+        create: { accountId: actor.accountId, mediaId: media.id, status: 'queued' },
+        update: { status: 'queued', error: null },
+      });
+      return tx.systemJob.create({
+        data: {
+          accountId: actor.accountId,
+          type: 'media.playback-assets',
+          status: 'queued',
+          payload: { mediaId: media.id, force: true },
+        },
+        select: { id: true, status: true },
+      });
+    });
+    await this.audit(actor, 'playback_analysis.rebuild_queued', media.id, { jobId: result.id });
+    return { jobId: result.id, status: result.status, deduplicated: false };
+  }
+
+  async updatePlaybackMarkers(actor: AuthenticatedUser, mediaId: string, dto: UpdatePlaybackMarkersDto) {
+    const media = await this.ownedPlaybackMedia(actor, mediaId);
+    const durationMs = media.file?.durationMs ?? media.playbackAsset?.durationMs ?? null;
+    const validationError = validateManualPlaybackMarkers(dto.markers, durationMs);
+    if (validationError) {
+      throw new BadRequestException({ code: 'playback_markers_invalid', message: validationError });
+    }
+    const kinds = ['intro', 'recap', 'credits'];
+    await this.prisma.$transaction(async (tx) => {
+      await tx.mediaTimelineMarker.deleteMany({ where: { accountId: actor.accountId, mediaId: media.id, kind: { in: kinds } } });
+      if (dto.markers.length) {
+        await tx.mediaTimelineMarker.createMany({
+          data: dto.markers.map((marker) => ({
+            accountId: actor.accountId,
+            mediaId: media.id,
+            kind: marker.kind,
+            startMs: marker.startMs,
+            endMs: marker.endMs,
+            source: 'manual',
+            confidence: 1,
+          })),
+        });
+      }
+    });
+    await this.audit(actor, 'playback_markers.updated', media.id, { markerKinds: dto.markers.map((marker) => marker.kind) });
+    return this.playbackAnalysisDetail(actor, media.id);
+  }
+
+  async resetPlaybackMarkers(actor: AuthenticatedUser, mediaId: string) {
+    const media = await this.ownedPlaybackMedia(actor, mediaId);
+    await this.prisma.mediaTimelineMarker.deleteMany({
+      where: { accountId: actor.accountId, mediaId: media.id, kind: { in: ['intro', 'recap', 'credits'] } },
+    });
+    await this.audit(actor, 'playback_markers.reset', media.id, {});
+    const job = await this.queuePlaybackAnalysis(actor, media.id);
+    return { reset: true, job };
+  }
+
+  private ownedPlaybackMedia(actor: AuthenticatedUser, mediaId: string) {
+    return this.prisma.mediaItem.findFirstOrThrow({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        seriesTitle: true,
+        seriesDisplayTitle: true,
+        seasonNumber: true,
+        episodeNumber: true,
+        library: { select: { name: true } },
+        file: {
+          select: {
+            status: true,
+            durationMs: true,
+            modifiedAt: true,
+            width: true,
+            height: true,
+            videoCodec: true,
+            audioCodec: true,
+            container: true,
+            bitrate: true,
+          },
+        },
+        playbackAsset: true,
+        timelineMarkers: {
+          select: { kind: true, startMs: true, endMs: true, source: true, confidence: true },
+          orderBy: { startMs: 'asc' },
+        },
+      },
+    }).catch(() => {
+      throw new NotFoundException({ code: 'media_not_found', message: 'Mediet findes ikke på denne konto.' });
+    });
+  }
+
+  private async playbackPreview(spriteDirectory: string | null) {
+    if (!spriteDirectory) return null;
+    try {
+      const names = (await readdir(spriteDirectory)).filter((name) => /\.(?:jpe?g|png)$/i.test(name)).sort();
+      if (!names[0]) return null;
+      const data = await readFile(join(spriteDirectory, names[0]));
+      if (data.byteLength > 2_500_000) return null;
+      const mime = extname(names[0]).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
+      return `data:${mime};base64,${data.toString('base64')}`;
+    } catch {
+      return null;
+    }
   }
 
   private async ownedUser(actor: AuthenticatedUser, userId: string) {

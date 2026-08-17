@@ -10,6 +10,7 @@ import { CorrelationInterceptor } from './common/http';
 import { readEnvironment } from './config/environment';
 import { CatalogModule } from './catalog/catalog.module';
 import { EntitlementsModule } from './entitlements/entitlements.module';
+import { ExperienceModule } from './experience/experience.module';
 import { InfraModule } from './infra/infra.module';
 import { PlaybackModule } from './playback/playback.module';
 import { PreferencesModule } from './preferences/preferences.module';
@@ -41,6 +42,7 @@ import { SystemModule } from './system/system.module';
     RecommendationsModule,
     CatalogModule,
     EntitlementsModule,
+    ExperienceModule,
     PlaybackModule,
     PreferencesModule,
     SystemModule,
