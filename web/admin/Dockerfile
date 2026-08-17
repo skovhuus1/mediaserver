@@ -17,7 +17,9 @@ RUN for attempt in 1 2 3; do \
 
 FROM dependencies AS build
 ARG API_INTERNAL_URL=http://api:3001
+ARG NEXT_PUBLIC_CAST_RECEIVER_APP_ID=
 ENV API_INTERNAL_URL=$API_INTERNAL_URL
+ENV NEXT_PUBLIC_CAST_RECEIVER_APP_ID=$NEXT_PUBLIC_CAST_RECEIVER_APP_ID
 COPY tsconfig.base.json ./
 COPY shared/contracts shared/contracts
 COPY web/admin web/admin

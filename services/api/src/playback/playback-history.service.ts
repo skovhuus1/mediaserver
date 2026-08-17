@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { detectVideoSignalProfile, type AuthenticatedUser } from '@boltbytes/contracts';
+import { detectVideoSignalProfile, selectSeriesContinuation, type AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { PlaybackProgressDto } from './playback-history.dto';
 import { normalizePlaybackProgress } from './playback-progress';
@@ -87,6 +87,7 @@ export class PlaybackHistoryService {
         profileId: actor.profileId,
         completed: false,
         positionMs: { gt: 0 },
+        media: { file: { is: { status: 'ready' } } },
       },
       include: {
         media: {
@@ -160,6 +161,7 @@ export class PlaybackHistoryService {
           : displayTitle
             ? { seriesDisplayTitle: { equals: displayTitle, mode: 'insensitive' as const } }
             : { seriesTitle: { equals: normalizedTitle!, mode: 'insensitive' as const } }),
+        file: { is: { status: 'ready' } },
       },
       include: {
         file: true,
@@ -177,22 +179,22 @@ export class PlaybackHistoryService {
       },
     });
     const progressByMedia = new Map(history.map((entry) => [entry.mediaId, entry]));
-    const unfinished = history
-      .filter((entry) => !entry.completed && entry.positionMs > 0)
-      .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())[0];
-    const unfinishedIndex = unfinished ? episodes.findIndex((episode) => episode.id === unfinished.mediaId) : -1;
-    const lastCompletedIndex = episodes.reduce(
-      (latest, episode, index) => progressByMedia.get(episode.id)?.completed ? Math.max(latest, index) : latest,
-      -1,
-    );
-    const afterIndex = request.afterMediaId
-      ? episodes.findIndex((episode) => episode.id === request.afterMediaId)
-      : -1;
-    const media = afterIndex >= 0
-      ? episodes[afterIndex + 1] ?? null
-      : unfinishedIndex >= 0
-        ? episodes[unfinishedIndex]
-        : episodes[lastCompletedIndex + 1] ?? null;
+    const continuation = selectSeriesContinuation(episodes.map((episode) => {
+      const progress = progressByMedia.get(episode.id);
+      return {
+        id: episode.id,
+        seasonNumber: episode.seasonNumber,
+        episodeNumber: episode.episodeNumber,
+        title: episode.title,
+        progress: progress ? {
+          positionMs: progress.positionMs,
+          durationMs: episode.file?.durationMs ?? 0,
+          completed: progress.completed,
+          updatedAt: progress.updatedAt,
+        } : null,
+      };
+    }), request.afterMediaId);
+    const media = continuation ? episodes.find((episode) => episode.id === continuation.mediaId) ?? null : null;
     if (!media) return null;
     const progress = progressByMedia.get(media.id);
     const file = media.file
@@ -204,7 +206,7 @@ export class PlaybackHistoryService {
         hdr: detectVideoSignalProfile(media.file?.probe).hdr,
         file,
       },
-      resumePositionMs: progress?.positionMs ?? 0,
+      resumePositionMs: continuation?.resumePositionMs ?? progress?.positionMs ?? 0,
     };
   }
 }

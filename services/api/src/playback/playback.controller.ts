@@ -41,6 +41,16 @@ export class PlaybackController {
     return this.reservations.heartbeat(actor, id, dto);
   }
 
+  @Patch('sessions/:id/cast-heartbeat')
+  @Public()
+  castHeartbeat(
+    @Param('id') id: string,
+    @Query('token') token: string | undefined,
+    @Body() dto: PlaybackHeartbeatDto,
+  ) {
+    return this.reservations.heartbeatWithToken(id, token, dto);
+  }
+
   @Delete('sessions/:id')
   stop(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.reservations.release(actor, id);
@@ -74,6 +84,12 @@ export class PlaybackController {
   @Public()
   transcodeStatus(@Param('id') id: string, @Query('token') token: string | undefined) {
     return this.transcodeStream.status(id, token);
+  }
+
+  @Get('sessions/:id/subtitle-status')
+  @Public()
+  subtitleStatus(@Param('id') id: string, @Query('token') token: string | undefined) {
+    return this.subtitleStream.status(id, token);
   }
 
   @Get('sessions/:id/hls/:asset')
@@ -124,7 +140,7 @@ export class PlaybackController {
     return this.directStream.send(id, token, range, origin, response, true);
   }
 
-  @Options(['sessions/:id/stream', 'sessions/:id/hls/:asset', 'sessions/:id/subtitles/:asset'])
+  @Options(['sessions/:id/stream', 'sessions/:id/hls/:asset', 'sessions/:id/subtitles/:asset', 'sessions/:id/cast-heartbeat'])
   @Public()
   mediaPreflight(@Headers('origin') origin: string | undefined, @Res() response: Response) {
     applyMediaCors(response, origin);

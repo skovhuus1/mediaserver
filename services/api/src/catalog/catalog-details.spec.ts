@@ -10,12 +10,13 @@ describe('series detail loading', () => {
         findFirst: vi.fn().mockResolvedValue(seed),
         findMany: vi.fn()
           .mockResolvedValueOnce([
-            { seasonNumber: 1, seasonPosterPath: '/season-1.jpg', releaseYear: 2024 },
-            { seasonNumber: 1, seasonPosterPath: '/season-1.jpg', releaseYear: 2024 },
-            { seasonNumber: 2, seasonPosterPath: '/season-2.jpg', releaseYear: 2025 },
+            { id: 'episode-1', title: 'Episode 1', episodeNumber: 1, seasonNumber: 1, seasonPosterPath: '/season-1.jpg', releaseYear: 2024 },
+            { id: 'episode-2', title: 'Episode 2', episodeNumber: 2, seasonNumber: 1, seasonPosterPath: '/season-1.jpg', releaseYear: 2024 },
+            { id: 'episode-3', title: 'Episode 1', episodeNumber: 1, seasonNumber: 2, seasonPosterPath: '/season-2.jpg', releaseYear: 2025 },
           ])
           .mockResolvedValueOnce([requested]),
       },
+      playbackHistory: { findMany: vi.fn().mockResolvedValue([]) },
     };
     const catalog = new CatalogService(prisma as never);
 

@@ -72,6 +72,7 @@ services:
       dockerfile: web/admin/Dockerfile
       args:
         API_INTERNAL_URL: http://api:3001
+        NEXT_PUBLIC_CAST_RECEIVER_APP_ID: ${BB_MEDIA_CAST_RECEIVER_APP_ID:-}
     restart: unless-stopped
     environment:
       API_INTERNAL_URL: http://api:3001

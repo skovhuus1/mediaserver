@@ -1,5 +1,5 @@
 import { GoneException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { access, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
@@ -77,6 +77,37 @@ export class SubtitleStreamService {
     return tracks;
   }
 
+  async status(sessionId: string, token: string | undefined) {
+    const session = await this.validSession(sessionId, token);
+    const embedded = embeddedSubtitleDescriptors(session.media.file!.probe);
+    if (!embedded.length) return { state: 'ready', message: 'No embedded text subtitles require preparation' };
+    const ready = await Promise.all(embedded.map((track) =>
+      access(resolve(this.transcodeRoot, session.id, `embedded-${track.streamIndex}.vtt`))
+        .then(() => true)
+        .catch(() => false),
+    ));
+    if (ready.every(Boolean)) return { state: 'ready', message: 'Embedded subtitles are ready' };
+    const job = await this.prisma.systemJob.findFirst({
+      where: {
+        accountId: session.accountId,
+        type: 'playback.transcode',
+        payload: { path: ['sessionId'], equals: session.id },
+      },
+      include: { attempts: { orderBy: { number: 'desc' }, take: 1 } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!job || job.status === 'failed' || job.status === 'completed') {
+      return {
+        state: 'failed',
+        message: job?.attempts[0]?.error ?? 'Embedded subtitles could not be prepared',
+      };
+    }
+    return {
+      state: job.status === 'running' ? 'running' : 'queued',
+      message: job.status === 'running' ? 'FFmpeg is preparing embedded subtitles' : 'Waiting for a subtitle worker',
+    };
+  }
+
   async send(
     sessionId: string,
     asset: string,
@@ -98,7 +129,7 @@ export class SubtitleStreamService {
         throw new NotFoundException({ code: 'subtitle_invalid', message: 'Subtitle track is not a supported text file' });
       }
       body = subtitleToWebVtt(await readFile(track.path, 'utf8'), track.format);
-    } else if (embeddedMatch && ['transcode', 'direct_stream'].includes(session.method)) {
+    } else if (embeddedMatch) {
       const embeddedPath = resolve(this.transcodeRoot, session.id, asset);
       if (!isPathWithin(resolve(this.transcodeRoot, session.id), embeddedPath)) {
         throw new UnauthorizedException({ code: 'subtitle_path_invalid', message: 'Subtitle path escapes its session' });

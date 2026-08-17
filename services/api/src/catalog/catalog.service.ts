@@ -3,6 +3,7 @@ import {
   detectVideoSignalProfile,
   groupBySeriesIdentity,
   sanitizeMediaTitle,
+  selectSeriesContinuation,
   type AuthenticatedUser,
 } from '@boltbytes/contracts';
 import { Prisma } from '@prisma/client';
@@ -237,23 +238,43 @@ export class CatalogService {
     };
 
     if (query.type === 'series') {
-      const rows = await this.prisma.mediaItem.findMany({
+      const aggregates = await this.prisma.mediaItem.groupBy({
+        by: [
+          'seriesMetadataProviderId',
+          'seriesDisplayTitle',
+          'seriesTitle',
+          'seriesOverview',
+          'posterPath',
+          'backdropPath',
+          'metadataProvider',
+          'category',
+        ],
         where,
-        select: {
+        _count: { _all: true },
+        _min: {
           id: true,
           title: true,
-          category: true,
-          seriesTitle: true,
-          seriesDisplayTitle: true,
-          seriesOverview: true,
-          seriesMetadataProviderId: true,
-          posterPath: true,
-          backdropPath: true,
-          metadataProvider: true,
           releaseYear: true,
+        },
+        _max: {
           updatedAt: true,
         },
       });
+      const rows = aggregates.flatMap((row) => row._min.id && row._min.title ? [{
+        id: row._min.id,
+        title: row._min.title,
+        category: row.category,
+        seriesTitle: row.seriesTitle,
+        seriesDisplayTitle: row.seriesDisplayTitle,
+        seriesOverview: row.seriesOverview,
+        seriesMetadataProviderId: row.seriesMetadataProviderId,
+        posterPath: row.posterPath,
+        backdropPath: row.backdropPath,
+        metadataProvider: row.metadataProvider,
+        releaseYear: row._min.releaseYear,
+        updatedAt: row._max.updatedAt ?? new Date(0),
+        episodeCount: row._count._all,
+      }] : []);
       const grouped = groupBySeriesIdentity(rows).map((episodes) => {
         const representative = [...episodes].sort(
           (left, right) => seriesMetadataScore(right) - seriesMetadataScore(left),
@@ -275,7 +296,7 @@ export class CatalogService {
           posterPath: episodes.find((episode) => episode.posterPath)?.posterPath ?? null,
           backdropPath: episodes.find((episode) => episode.backdropPath)?.backdropPath ?? null,
           releaseYear: releaseYears.length ? Math.min(...releaseYears) : null,
-          episodeCount: episodes.length,
+          episodeCount: episodes.reduce((total, episode) => total + episode.episodeCount, 0),
           updatedAt: new Date(Math.max(...episodes.map((episode) => episode.updatedAt.getTime()))),
         };
       });
@@ -373,6 +394,7 @@ export class CatalogService {
     const seriesWhere: Prisma.MediaItemWhereInput = {
       accountId: actor.accountId,
       type: 'episode',
+      file: { is: { status: 'ready' } },
       ...(seed.seriesMetadataProviderId
         ? { seriesMetadataProviderId: seed.seriesMetadataProviderId }
         : seed.seriesDisplayTitle
@@ -382,17 +404,39 @@ export class CatalogService {
     const episodeHeaders = await this.prisma.mediaItem.findMany({
       where: seriesWhere,
       select: {
+        id: true,
+        title: true,
         seasonNumber: true,
+        episodeNumber: true,
         seasonPosterPath: true,
         releaseYear: true,
       },
       orderBy: [{ seasonNumber: 'asc' }, { episodeNumber: 'asc' }],
     });
+    const history = actor.profileId ? await this.prisma.playbackHistory.findMany({
+      where: {
+        accountId: actor.accountId,
+        profileId: actor.profileId,
+        mediaId: { in: episodeHeaders.map((episode) => episode.id) },
+      },
+      select: { mediaId: true, positionMs: true, completed: true, updatedAt: true },
+    }) : [];
+    const progressByMedia = new Map(history.map((entry) => [entry.mediaId, entry]));
+    const continuation = selectSeriesContinuation(episodeHeaders.map((episode) => {
+      const progress = progressByMedia.get(episode.id);
+      return {
+        id: episode.id,
+        title: episode.title,
+        seasonNumber: episode.seasonNumber,
+        episodeNumber: episode.episodeNumber,
+        progress: progress ? { ...progress, durationMs: 0 } : null,
+      };
+    }));
     const seasonNumbers = [...new Set(episodeHeaders.map((episode) => episode.seasonNumber ?? 0))]
       .sort((left, right) => left - right);
     const selectedSeason = requestedSeason !== undefined && seasonNumbers.includes(requestedSeason)
       ? requestedSeason
-      : seasonNumbers[0] ?? 0;
+      : continuation?.seasonNumber ?? seasonNumbers[0] ?? 0;
     const episodes = await this.prisma.mediaItem.findMany({
       where: { ...seriesWhere, seasonNumber: selectedSeason },
       include: {
@@ -415,15 +459,30 @@ export class CatalogService {
       },
       orderBy: [{ seasonNumber: 'asc' }, { episodeNumber: 'asc' }, { title: 'asc' }],
     });
-    const serializedEpisodes = episodes.map((episode) => this.serializeMedia({
-      ...episode,
-      file: episode.file ? { ...episode.file, probe: null } : null,
-    }));
+    const serializedEpisodes = episodes.map((episode) => {
+      const progress = progressByMedia.get(episode.id);
+      const durationMs = episode.file?.durationMs ?? 0;
+      return {
+        ...this.serializeMedia({
+          ...episode,
+          file: episode.file ? { ...episode.file, probe: null } : null,
+        }),
+        progress: progress ? {
+          positionMs: progress.positionMs,
+          durationMs,
+          completed: progress.completed,
+          percent: durationMs ? Math.min(100, Math.round(progress.positionMs / durationMs * 100)) : 0,
+          updatedAt: progress.updatedAt,
+        } : null,
+      };
+    });
     const releaseYears = episodeHeaders.flatMap((episode) =>
       episode.releaseYear === null ? [] : [episode.releaseYear],
     );
     return {
       kind: 'series' as const,
+      selectedSeason,
+      continuation,
       item: {
         ...this.serializeMedia(seed),
         id: seed.id,
@@ -441,6 +500,14 @@ export class CatalogService {
           (episode) => (episode.seasonNumber ?? 0) === number && episode.seasonPosterPath,
         )?.seasonPosterPath ?? null,
         episodeCount: episodeHeaders.filter((episode) => (episode.seasonNumber ?? 0) === number).length,
+        completedCount: episodeHeaders.filter((episode) =>
+          (episode.seasonNumber ?? 0) === number && progressByMedia.get(episode.id)?.completed,
+        ).length,
+        inProgressCount: episodeHeaders.filter((episode) => {
+          const progress = progressByMedia.get(episode.id);
+          return (episode.seasonNumber ?? 0) === number
+            && Boolean(progress && !progress.completed && progress.positionMs > 0);
+        }).length,
         episodes: number === selectedSeason ? serializedEpisodes : [],
       })),
     };
@@ -792,6 +859,7 @@ export class CatalogService {
   private catalogWhere(actor: AuthenticatedUser, query: CatalogQueryDto): Prisma.MediaItemWhereInput {
     const where: Prisma.MediaItemWhereInput = {
       accountId: actor.accountId,
+      file: { is: { status: 'ready' } },
       ...(query.libraryId ? { libraryId: query.libraryId } : {}),
       ...(query.category ? { category: { equals: query.category, mode: 'insensitive' } } : {}),
       ...(query.seriesTitle ? { seriesTitle: { equals: query.seriesTitle, mode: 'insensitive' } } : {}),

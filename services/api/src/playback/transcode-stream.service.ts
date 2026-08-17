@@ -69,6 +69,18 @@ export class TranscodeStreamService {
     });
   }
 
+  async enqueueSubtitles(sessionId: string, accountId: string) {
+    await this.prisma.systemJob.create({
+      data: {
+        accountId,
+        type: 'playback.transcode',
+        status: 'queued',
+        payload: { sessionId, streamMode: 'subtitle_only' },
+        maxAttempts: 1,
+      },
+    });
+  }
+
   async status(sessionId: string, token: string | undefined) {
     const session = await this.validSession(sessionId, token);
     const manifestPath = this.assetPath(session.id, 'master.m3u8');

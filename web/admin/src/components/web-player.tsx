@@ -7,6 +7,7 @@ import {
   deferredUpscaleLevelCap,
   playbackResumeTargetSeconds,
   presentPlaybackQualityLevel,
+  resolveInitialPlaybackQualitySelection,
   sanitizeMediaTitle,
 } from '@boltbytes/contracts';
 import {
@@ -64,6 +65,7 @@ type Authorization = {
   streamUrl: string;
   contentType: string;
   transcodeStatusUrl?: string;
+  subtitlePreparationStatusUrl?: string;
   subtitleTracks: SubtitleTrack[];
   videoProfile: {
     source: {
@@ -125,6 +127,7 @@ type CastHandoff = {
   contentType: string;
   subtitleTracks: SubtitleTrack[];
   tokenExpiresAt: string;
+  heartbeatUrl: string;
 };
 
 type CastMediaInfo = {
@@ -132,6 +135,7 @@ type CastMediaInfo = {
   tracks?: CastTrack[];
   streamType?: string;
   duration?: number;
+  customData?: { heartbeatUrl: string };
 };
 type CastTrack = {
   trackContentId?: string;
@@ -244,6 +248,9 @@ export function WebPlayer() {
   const qualitySelectionRef = useRef(-1);
   const timelineOffsetRef = useRef(0);
   const upscaleUnlockedRef = useRef(false);
+  const completedTransitionRef = useRef(false);
+  const hlsNetworkRecoveriesRef = useRef(0);
+  const hlsMediaRecoveriesRef = useRef(0);
   const [media, setMedia] = useState<PlayableMedia | null>(null);
   const [authorization, setAuthorization] = useState<Authorization | null>(null);
   const [sourceReady, setSourceReady] = useState(false);
@@ -301,10 +308,10 @@ export function WebPlayer() {
     window.dispatchEvent(new Event(historyEvent));
   }, []);
 
-  const stop = useCallback(async () => {
+  const stop = useCallback(async (skipProgress = false) => {
     requestNumber.current += 1;
     const wasCasting = castingRef.current;
-    if (wasCasting) await saveProgress(false).catch(() => undefined);
+    if (wasCasting && !skipProgress) await saveProgress(false).catch(() => undefined);
     castingRef.current = false;
     clearCastListenerRef.current?.();
     clearCastListenerRef.current = null;
@@ -316,7 +323,7 @@ export function WebPlayer() {
     const sessionId = sessionRef.current;
     if (sessionId) {
       await Promise.allSettled([
-        ...(wasCasting ? [] : [saveProgress(false)]),
+        ...(wasCasting || skipProgress ? [] : [saveProgress(false)]),
         api(`/playback/sessions/${sessionId}`, { method: 'DELETE', keepalive: true }),
       ]);
     }
@@ -451,7 +458,8 @@ export function WebPlayer() {
     const onRequest = (event: Event) => {
       const request = (event as CustomEvent<PlaybackRequest>).detail;
       void (async () => {
-        if (sessionRef.current) await stop();
+        if (sessionRef.current) await stop(completedTransitionRef.current);
+        completedTransitionRef.current = false;
         const currentRequest = ++requestNumber.current;
         setMedia(request.media);
         mediaRef.current = request.media;
@@ -498,8 +506,16 @@ export function WebPlayer() {
           );
           activeSubtitleRef.current = defaultSubtitle;
           setActiveSubtitle(defaultSubtitle);
-          setAuthorization(next);
           setPlaybackRate(next.playbackPreferences?.playbackRate ?? 1);
+          if (next.subtitlePreparationStatusUrl) {
+            setStatus('Forbereder indbyggede undertekster...');
+            const subtitlesReady = await waitForTranscode(
+              next.subtitlePreparationStatusUrl,
+              () => currentRequest === requestNumber.current,
+            );
+            if (!subtitlesReady) return;
+          }
+          setAuthorization(next);
           if (next.method !== 'direct_play') {
             if (!next.transcodeStatusUrl) throw new Error('HLS-status mangler i serverens svar.');
             setStatus(next.method === 'direct_stream' ? 'FFmpeg remuxer streamen...' : 'FFmpeg forbereder streamen...');
@@ -568,7 +584,7 @@ export function WebPlayer() {
         maxBufferLength: authorization.playbackPreferences.allowUpscale ? 240 : 60,
         maxMaxBufferLength: authorization.playbackPreferences.allowUpscale ? 300 : 120,
         enableWorker: true,
-        startLevel: 0,
+        startLevel: -1,
         startPosition: 0,
         abrBandWidthFactor: 0.8,
         abrBandWidthUpFactor: 0.55,
@@ -581,6 +597,8 @@ export function WebPlayer() {
       hls.loadSource(authorization.streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hlsNetworkRecoveriesRef.current = 0;
+        hlsMediaRecoveriesRef.current = 0;
         const presentedQualities = hls.levels.map((level, index) => {
           const rendition = authorization.adaptiveQuality.renditions.find(
             (candidate) => candidate.height === level.height,
@@ -608,10 +626,17 @@ export function WebPlayer() {
         upscaleUnlockedRef.current = !hasDeferredUpscale;
         setUpscaleUnlocked(!hasDeferredUpscale);
         hls.autoLevelCapping = hasDeferredUpscale ? Math.max(0, lastSourceLevel) : -1;
-        if (authorization.method === 'direct_stream') hls.loadLevel = 0;
-        qualitySelectionRef.current = authorization.method === 'direct_stream'
+        const initialSelection = authorization.method === 'direct_stream'
           ? 0
-          : hls.autoLevelEnabled ? -1 : hls.manualLevel;
+          : resolveInitialPlaybackQualitySelection(
+              authorization.playbackPreferences.qualityMode,
+              authorization.playbackPreferences.fixedQualityHeight,
+              hls.levels,
+            );
+        hls.currentLevel = initialSelection;
+        hls.nextLevel = initialSelection;
+        hls.loadLevel = initialSelection;
+        qualitySelectionRef.current = initialSelection;
         setQualitySelection(qualitySelectionRef.current);
         setCurrentQuality(hls.currentLevel);
         setAudioTracks(hls.audioTracks.map((track, index) => ({
@@ -635,27 +660,26 @@ export function WebPlayer() {
       hls.on(Hls.Events.BUFFER_APPENDED, start);
       hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => {
         const selected = qualitySelectionRef.current;
-        if (selected >= 0 && data.level !== selected) {
-          hls.loadLevel = selected;
-          setQualitySwitching(selected);
-          return;
-        }
         setQualitySwitching(selected >= 0 && data.level === selected ? null : data.level);
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         setCurrentQuality(data.level);
         const selected = qualitySelectionRef.current;
-        if (selected >= 0 && data.level !== selected) {
-          hls.loadLevel = selected;
-          setQualitySwitching(selected);
-        } else {
-          setQualitySwitching(null);
-        }
+        setQualitySwitching(selected >= 0 && data.level !== selected ? selected : null);
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsNetworkRecoveriesRef.current < 3) {
+          hlsNetworkRecoveriesRef.current += 1;
+          hls.startLoad();
+          return;
+        }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsMediaRecoveriesRef.current < 2) {
+          hlsMediaRecoveriesRef.current += 1;
+          hls.recoverMediaError();
+          return;
+        }
         setError(`HLS-afspilningen stoppede: ${data.details}`);
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
       });
     } else {
       video.src = authorization.streamUrl;
@@ -800,6 +824,7 @@ export function WebPlayer() {
       metadata.subtitle = media.seriesTitle ? episodeLabel(media) : status;
       mediaInfo.metadata = metadata;
       mediaInfo.streamType = mediaApi.StreamType.BUFFERED;
+      mediaInfo.customData = { heartbeatUrl: handoff.heartbeatUrl };
       if (media.file?.durationMs) {
         mediaInfo.duration = Math.max(0, media.file.durationMs / 1000 - timelineOffsetRef.current);
       }
@@ -905,6 +930,8 @@ export function WebPlayer() {
     qualitySelectionRef.current = selected;
     setQualitySelection(selected);
     setQualitySwitching(selected === -1 || selected === hls.currentLevel ? null : selected);
+    hls.currentLevel = selected;
+    hls.nextLevel = selected;
     hls.loadLevel = selected;
     setMenu(null);
   };
@@ -974,7 +1001,7 @@ export function WebPlayer() {
           element.track.addEventListener('cuechange', updateCue);
         }
         const selected = element.dataset.trackId === activeSubtitle;
-        element.track.mode = selected ? 'showing' : 'disabled';
+        element.track.mode = selected ? 'hidden' : 'disabled';
         if (selected) selectedTrack = element.track;
       });
       setSubtitleCue(selectedTrack
@@ -982,10 +1009,14 @@ export function WebPlayer() {
         : '');
     };
     video.addEventListener('loadedmetadata', applyTrackSelection);
+    video.addEventListener('loadeddata', applyTrackSelection);
+    video.addEventListener('canplay', applyTrackSelection);
     video.textTracks.addEventListener('addtrack', applyTrackSelection);
     applyTrackSelection();
     return () => {
       video.removeEventListener('loadedmetadata', applyTrackSelection);
+      video.removeEventListener('loadeddata', applyTrackSelection);
+      video.removeEventListener('canplay', applyTrackSelection);
       video.textTracks.removeEventListener('addtrack', applyTrackSelection);
       wiredElements.forEach((element) => {
         element.removeEventListener('load', applyTrackSelection);
@@ -1080,7 +1111,7 @@ export function WebPlayer() {
     let selectedTextTrack: TextTrack | null = null;
     trackElements.forEach((element) => {
       const selected = element.dataset.trackId === id;
-      element.track.mode = selected ? 'showing' : 'disabled';
+      element.track.mode = selected ? 'hidden' : 'disabled';
       if (selected) selectedTextTrack = element.track;
     });
     setSubtitleCue(selectedTextTrack
@@ -1112,10 +1143,10 @@ export function WebPlayer() {
     setSubtitleCue(video && activeTrack ? cueTextAt(activeTrack.track, timelineOffsetRef.current + video.currentTime, offsetMs) : '');
   };
 
-  const playNextEpisode = useCallback(async () => {
+  const playNextEpisode = useCallback(async (automatic = true) => {
     await saveProgress(true).catch(() => undefined);
     const current = mediaRef.current;
-    if (!authorization?.playbackPreferences.autoplayNext || current?.type !== 'episode') {
+    if ((automatic && !authorization?.playbackPreferences.autoplayNext) || current?.type !== 'episode') {
       setStatus('Færdig');
       return;
     }
@@ -1136,6 +1167,7 @@ export function WebPlayer() {
         setStatus('Serien er færdig');
         return;
       }
+      completedTransitionRef.current = true;
       requestPlayback(next.media, next.resumePositionMs);
     } catch {
       setStatus('Næste episode kunne ikke startes automatisk');
@@ -1193,7 +1225,7 @@ export function WebPlayer() {
           lastProgressAt.current = now;
           void saveProgress(false).catch(() => undefined);
         }}
-        onEnded={() => void playNextEpisode()}
+        onEnded={() => void playNextEpisode(true)}
         onError={() => {
           if (sourceReady) setError('Browseren kunne ikke afspille den leverede stream.');
         }}
@@ -1206,6 +1238,7 @@ export function WebPlayer() {
             src={track.src ?? undefined}
             srcLang={track.language}
             label={track.label}
+            default={track.id === activeSubtitle}
           />
         ))}
       </video>
@@ -1516,7 +1549,7 @@ export function WebPlayer() {
                 {paused ? <Play fill="currentColor" /> : <Pause fill="currentColor" />}
               </button>
               <button onClick={() => seekBy(10)} title="10 sekunder frem"><RotateCw /><small>10</small></button>
-              <button disabled={media.type !== 'episode'} onClick={() => void playNextEpisode()} title="Næste titel"><SkipForward /></button>
+              <button disabled={media.type !== 'episode'} onClick={() => void playNextEpisode(false)} title="Næste titel"><SkipForward /></button>
             </div>
             <div className={styles.optionControls}>
               <button onClick={() => setMenu(menu === 'speed' ? null : 'speed')}><Gauge /><small>{playbackRate}x</small><span>Hastighed</span></button>
@@ -1749,9 +1782,11 @@ function configureCastFramework(castWindow: CastWindow): boolean {
   if (!framework || !media) return false;
   try {
     framework.CastContext.getInstance().setOptions({
-      receiverApplicationId: media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+      receiverApplicationId: process.env.NEXT_PUBLIC_CAST_RECEIVER_APP_ID?.trim()
+        || media.DEFAULT_MEDIA_RECEIVER_APP_ID,
       autoJoinPolicy: castWindow.chrome?.cast?.AutoJoinPolicy?.ORIGIN_SCOPED
-        ?? framework.AutoJoinPolicy.ORIGIN_SCOPED,
+        ?? framework.AutoJoinPolicy?.ORIGIN_SCOPED
+        ?? 'origin_scoped',
     });
     return true;
   } catch {

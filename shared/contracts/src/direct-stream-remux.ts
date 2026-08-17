@@ -31,6 +31,7 @@ export function buildDirectStreamHlsArguments(input: DirectStreamHlsInput): stri
         ? ['-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000']
         : ['-c:a', 'copy']
       : []),
+    '-avoid_negative_ts', 'make_zero',
     '-max_muxing_queue_size', '4096',
     '-f', 'hls',
     '-hls_time', '4',
