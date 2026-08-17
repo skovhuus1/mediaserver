@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EffectiveEntitlements } from '@boltbytes/contracts';
-import { choosePlaybackMethod } from './playback-decision';
+import { choosePlaybackMethod, shouldTranscodeCompatibleSource } from './playback-decision';
 
 const entitlements: EffectiveEntitlements = {
   maxConcurrentStreams: 1,
@@ -41,5 +41,31 @@ describe('playback decision quality and HDR gates', () => {
       ...base,
       entitlements: { ...entitlements, maxVideoResolution: 1080 },
     }).method).toBe('transcode');
+  });
+});
+
+describe('compatible source Direct Play policy', () => {
+  const input = {
+    qualityMode: 'auto' as const,
+    sourceHeight: 1080,
+    sourceBitrate: 12_000_000,
+    targetHeight: 1080,
+    estimatedDownlinkMbps: 10,
+    dataSaver: false,
+    preferDirectPlay: true,
+  };
+
+  it('does not force a compatible source through HLS from the browser estimate alone', () => {
+    expect(shouldTranscodeCompatibleSource(input)).toMatchObject({
+      required: false,
+      code: 'direct_play_preferred',
+    });
+  });
+
+  it('can explicitly opt into bandwidth-triggered adaptive transcoding', () => {
+    expect(shouldTranscodeCompatibleSource({ ...input, autoTranscodeOnBandwidth: true })).toMatchObject({
+      required: true,
+      code: 'bandwidth_limited',
+    });
   });
 });

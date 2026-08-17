@@ -83,6 +83,7 @@ export function shouldTranscodeCompatibleSource(input: {
   estimatedDownlinkMbps: number | null;
   dataSaver: boolean;
   preferDirectPlay: boolean;
+  autoTranscodeOnBandwidth?: boolean;
 }): { required: boolean; code: string; reason: string } {
   if (input.qualityMode === 'original') {
     return { required: false, code: 'original_requested', reason: 'Original quality explicitly prefers Direct Play' };
@@ -104,7 +105,8 @@ export function shouldTranscodeCompatibleSource(input: {
     ? input.estimatedDownlinkMbps * 1_000_000 * 0.75
     : null;
   if (
-    input.qualityMode === 'auto'
+    input.autoTranscodeOnBandwidth
+    && input.qualityMode === 'auto'
     && bandwidthBudget !== null
     && input.sourceBitrate !== null
     && input.sourceBitrate > bandwidthBudget

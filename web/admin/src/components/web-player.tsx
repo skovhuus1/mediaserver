@@ -87,6 +87,14 @@ type Authorization = {
     renditions: Array<{ height: number; bitrate: number; upscaled: boolean; hdr: boolean }>;
   };
   leaseExpiresAt: string;
+  decision?: {
+    playback: {
+      method: 'direct_play' | 'direct_stream' | 'transcode';
+      code: string;
+      reason: string;
+      directPlayBlockers: string[];
+    };
+  };
 };
 type TranscodeStatus = { state: 'queued' | 'running' | 'ready' | 'failed'; message: string };
 type PlayerMenu = 'playlist' | 'speed' | 'subtitles' | 'audio' | 'quality' | 'info' | null;
@@ -159,7 +167,7 @@ type CastRemotePlayerController = {
   stop(): void;
 };
 type CastWindow = Window & {
-  __onGCastApiAvailable?: (available: boolean) => void;
+  __onGCastApiAvailable?: (available: boolean, errorInfo?: unknown) => void;
   cast?: {
     framework?: {
       CastContext: { getInstance(): CastContext };
@@ -230,11 +238,13 @@ export function WebPlayer() {
   const [currentQuality, setCurrentQuality] = useState(-1);
   const [qualitySwitching, setQualitySwitching] = useState<number | null>(null);
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
+  const [subtitleCue, setSubtitleCue] = useState('');
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [castAvailable, setCastAvailable] = useState(false);
   const [castReason, setCastReason] = useState('Google Cast Framework indlæses...');
+  const [castNotice, setCastNotice] = useState('');
   const [casting, setCasting] = useState(false);
 
   const saveProgress = useCallback(async (completed = false) => {
@@ -292,9 +302,11 @@ export function WebPlayer() {
     setMenu(null);
     setStatus('');
     setError('');
+    setCastNotice('');
     setCasting(false);
     activeSubtitleRef.current = null;
     setActiveSubtitle(null);
+    setSubtitleCue('');
     setQualities([]);
     setQualitySelection(-1);
     setCurrentQuality(-1);
@@ -340,6 +352,8 @@ export function WebPlayer() {
         setCurrentQuality(-1);
         setQualitySwitching(null);
         setError('');
+        setCastNotice('');
+        setSubtitleCue('');
         setStatus('Autoriserer afspilning...');
         try {
           const context = await api<PlaybackContext>('/playback/context');
@@ -366,9 +380,15 @@ export function WebPlayer() {
           const defaultSubtitle = next.playbackPreferences.subtitleMode === 'off'
             ? null
             : next.playbackPreferences.preferredSubtitleLanguages
-                .map((language) => subtitleCandidates.find(
-                  (track) => subtitleLanguageCode(track.language) === subtitleLanguageCode(language),
-                ))
+                .map((language) =>
+                  subtitleCandidates.find(
+                    (track) => track.delivery === 'webvtt'
+                      && subtitleLanguageCode(track.language) === subtitleLanguageCode(language),
+                  )
+                  ?? subtitleCandidates.find(
+                    (track) => subtitleLanguageCode(track.language) === subtitleLanguageCode(language),
+                  ),
+                )
                 .find(Boolean)?.id ?? null;
           activeSubtitleRef.current = defaultSubtitle;
           setActiveSubtitle(defaultSubtitle);
@@ -571,13 +591,16 @@ export function WebPlayer() {
   const startCast = async () => {
     if (!authorization || !media) return;
     setCasting(true);
-    setError('');
+    setCastNotice('');
     let handoffAccepted = false;
     try {
       if (!window.isSecureContext) {
         throw new Error('Chromecast fra webpanelet kræver HTTPS. Åbn serveren via en HTTPS-adresse og prøv igen.');
       }
-      if (!castAvailable) throw new Error(castReason);
+      const castState = await loadCastFramework(!castAvailable);
+      setCastAvailable(castState.available);
+      setCastReason(castState.reason);
+      if (!castState.available) throw new Error(castState.reason);
       const castWindow = window as CastWindow;
       const framework = castWindow.cast?.framework;
       const mediaApi = castWindow.chrome?.cast?.media;
@@ -601,8 +624,8 @@ export function WebPlayer() {
       mediaInfo.metadata = metadata;
       mediaInfo.streamType = mediaApi.StreamType.BUFFERED;
       if (media.file?.durationMs) mediaInfo.duration = media.file.durationMs / 1000;
-      mediaInfo.tracks = handoff.subtitleTracks
-        .filter((subtitle) => subtitle.delivery === 'webvtt' && subtitle.src)
+      const castSubtitles = castTextTracks(handoff.subtitleTracks);
+      mediaInfo.tracks = castSubtitles
         .map((subtitle, index) => {
         const track = new mediaApi.Track(index + 1, mediaApi.TrackType.TEXT);
         track.trackContentId = subtitle.src!;
@@ -614,8 +637,8 @@ export function WebPlayer() {
       });
       const request = new mediaApi.LoadRequest(mediaInfo);
       request.currentTime = videoRef.current?.currentTime ?? 0;
-      const selectedTrackIndex = handoff.subtitleTracks.findIndex((track) => track.id === activeSubtitleRef.current);
-      if (selectedTrackIndex >= 0) request.activeTrackIds = [selectedTrackIndex + 1];
+      const selectedTrackId = castTextTrackId(handoff.subtitleTracks, activeSubtitleRef.current);
+      if (selectedTrackId !== null) request.activeTrackIds = [selectedTrackId];
       await castSession.loadMedia(request);
       videoRef.current?.pause();
       castingRef.current = true;
@@ -663,12 +686,14 @@ export function WebPlayer() {
       castRemotePlayerRef.current = remotePlayer;
       castRemoteControllerRef.current = remoteController;
       setStatus('Chromecast');
+      setCastNotice('Afspilningen er sendt til Chromecast.');
     } catch (caught) {
       if (handoffAccepted) {
         await api(`/playback/sessions/${authorization.sessionId}/cast-handoff`, { method: 'DELETE' })
           .catch(() => undefined);
       }
-      setError(caught instanceof Error ? caught.message : 'Chromecast kunne ikke startes.');
+      setCastNotice(caught instanceof Error ? caught.message : 'Chromecast kunne ikke startes.');
+      setControlsVisible(true);
     } finally {
       setCasting(false);
     }
@@ -737,12 +762,14 @@ export function WebPlayer() {
     const video = videoRef.current;
     if (!video || !authorization) return;
     const applyTrackSelection = () => {
-      const textTracks = Array.from(video.textTracks);
-      authorization.subtitleTracks.forEach((track, index) => {
-        if (textTracks[index]) {
-          textTracks[index].mode = track.id === activeSubtitle ? 'showing' : 'disabled';
-        }
-        });
+      const trackElements = Array.from(video.querySelectorAll<HTMLTrackElement>('track[data-track-id]'));
+      let selectedTrack: TextTrack | null = null;
+      trackElements.forEach((element) => {
+        const selected = element.dataset.trackId === activeSubtitle;
+        element.track.mode = selected ? 'hidden' : 'disabled';
+        if (selected) selectedTrack = element.track;
+      });
+      setSubtitleCue(selectedTrack ? activeCueText(selectedTrack) : '');
     };
     video.addEventListener('loadedmetadata', applyTrackSelection);
     video.textTracks.addEventListener('addtrack', applyTrackSelection);
@@ -775,6 +802,7 @@ export function WebPlayer() {
     ) {
       resumeRef.current = Math.round((videoRef.current?.currentTime ?? currentTime) * 1_000);
       resumeAppliedRef.current = false;
+      setSubtitleCue('');
       setSourceReady(false);
       setStatus(selectedTrack ? 'Forbereder undertekster med burn-in...' : 'Fjerner burn-in...');
       void api<{
@@ -823,16 +851,22 @@ export function WebPlayer() {
       const mediaApi = castWindow.chrome?.cast?.media;
       const castMedia = castWindow.cast?.framework?.CastContext.getInstance().getCurrentSession()?.getMediaSession();
       if (mediaApi && castMedia) {
-        const selectedIndex = authorization?.subtitleTracks.findIndex((track) => track.id === id) ?? -1;
-        const request = new mediaApi.EditTracksInfoRequest(selectedIndex >= 0 ? [selectedIndex + 1] : []);
+        const selectedTrackId = castTextTrackId(authorization?.subtitleTracks ?? [], id);
+        const request = new mediaApi.EditTracksInfoRequest(selectedTrackId === null ? [] : [selectedTrackId]);
         void new Promise<void>((resolve, reject) => castMedia.editTracksInfo(request, resolve, reject))
-          .catch(() => setError('Chromecast kunne ikke skifte undertekstspor.'));
+          .catch(() => setCastNotice('Chromecast kunne ikke skifte undertekstspor.'));
       }
     }
-    const tracks = Array.from(videoRef.current?.textTracks ?? []);
-    authorization?.subtitleTracks.forEach((track, index) => {
-      if (tracks[index]) tracks[index].mode = track.id === id ? 'showing' : 'disabled';
+    const trackElements = Array.from(
+      videoRef.current?.querySelectorAll<HTMLTrackElement>('track[data-track-id]') ?? [],
+    );
+    let selectedTextTrack: TextTrack | null = null;
+    trackElements.forEach((element) => {
+      const selected = element.dataset.trackId === id;
+      element.track.mode = selected ? 'hidden' : 'disabled';
+      if (selected) selectedTextTrack = element.track;
     });
+    setSubtitleCue(selectedTextTrack ? activeCueText(selectedTextTrack) : '');
     activeSubtitleRef.current = id;
     setActiveSubtitle(id);
     setMenu(null);
@@ -887,11 +921,16 @@ export function WebPlayer() {
         {authorization?.subtitleTracks.filter((track) => track.delivery === 'webvtt' && track.src).map((track) => (
           <track
             key={track.id}
+            data-track-id={track.id}
             kind="subtitles"
             src={track.src ?? undefined}
             srcLang={track.language}
             label={track.label}
             default={track.id === activeSubtitle}
+            onCueChange={(event) => {
+              if (event.currentTarget.dataset.trackId !== activeSubtitleRef.current) return;
+              setSubtitleCue(activeCueText(event.currentTarget.track));
+            }}
           />
         ))}
       </video>
@@ -919,6 +958,14 @@ export function WebPlayer() {
         </div>
       </div>
 
+      {castNotice && (
+        <div className={styles.castNotice} role="status" aria-live="polite">
+          <Cast size={19} />
+          <span><strong>Chromecast</strong><small>{castNotice}</small></span>
+          <button type="button" onClick={() => setCastNotice('')} aria-label="Luk Chromecast-status"><X size={16} /></button>
+        </div>
+      )}
+
       {!sourceReady && (
         <div
           className={`${styles.notice} ${error ? styles.noticeError : styles.noticeLoading}`}
@@ -939,11 +986,18 @@ export function WebPlayer() {
         </div>
       )}
 
+      {subtitleCue && !casting && (
+        <div className={styles.subtitleCue} aria-label="Undertekster">
+          <span>{subtitleCue}</span>
+        </div>
+      )}
+
       {sourceReady && (
         <aside className={styles.playbackBadge}>
           <span>Afspilning</span>
           <strong>{status}</strong>
           <small>{authorization?.method === 'transcode' ? 'H.264 · AAC · HLS' : authorization?.contentType}</small>
+          {authorization && <small className={styles.playbackReason}>{playbackReason(authorization)}</small>}
         </aside>
       )}
 
@@ -1237,7 +1291,7 @@ async function waitForTranscode(statusUrl: string, isCurrent: () => boolean): Pr
   throw new Error('Transcoding tog længere end fem minutter om at levere det første segment.');
 }
 
-async function loadCastFramework(): Promise<{ available: boolean; reason: string }> {
+async function loadCastFramework(retry = false): Promise<{ available: boolean; reason: string }> {
   if (!window.isSecureContext) {
     return {
       available: false,
@@ -1252,7 +1306,7 @@ async function loadCastFramework(): Promise<{ available: boolean; reason: string
   }
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (available: boolean) => {
+    const finish = (available: boolean, errorInfo?: unknown) => {
       if (settled) return;
       settled = true;
       if (available) {
@@ -1265,20 +1319,75 @@ async function loadCastFramework(): Promise<{ available: boolean; reason: string
       }
       resolve({
         available: false,
-        reason: 'Google Cast Framework kunne ikke indlæses. Brug en understøttet Chrome-browser på samme netværk.',
+        reason: castFrameworkFailureReason(errorInfo),
       });
     };
     castWindow.__onGCastApiAvailable = finish;
+    const existingScript = document.getElementById(castScriptId);
+    if (retry) existingScript?.remove();
     if (!document.getElementById(castScriptId)) {
       const script = document.createElement('script');
       script.id = castScriptId;
       script.src = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
       script.async = true;
       script.onerror = () => finish(false);
+      script.onload = () => {
+        if (castWindow.cast?.framework && castWindow.chrome?.cast?.media) finish(true);
+      };
       document.head.appendChild(script);
     }
     window.setTimeout(() => finish(Boolean(castWindow.cast?.framework)), 10_000);
   });
+}
+
+function castFrameworkFailureReason(errorInfo: unknown): string {
+  const detail = errorInfo && typeof errorInfo === 'object'
+    ? ['description', 'code']
+        .map((key) => key in errorInfo ? String((errorInfo as Record<string, unknown>)[key] ?? '').trim() : '')
+        .find(Boolean)
+    : '';
+  return detail
+    ? `Google Cast Framework kunne ikke indlæses (${detail}).`
+    : 'Google Cast Framework kunne ikke indlæses. Brug Chrome via HTTPS og kontrollér, at browseren og Chromecast er på samme netværk.';
+}
+
+function castTextTracks(tracks: SubtitleTrack[]): SubtitleTrack[] {
+  return tracks.filter((track) => track.delivery === 'webvtt' && Boolean(track.src));
+}
+
+function castTextTrackId(tracks: SubtitleTrack[], selectedId: string | null): number | null {
+  if (!selectedId) return null;
+  const index = castTextTracks(tracks).findIndex((track) => track.id === selectedId);
+  return index >= 0 ? index + 1 : null;
+}
+
+function activeCueText(track: TextTrack): string {
+  return Array.from(track.activeCues ?? [])
+    .map((cue) => 'text' in cue ? String((cue as VTTCue).text) : '')
+    .map((text) => text.replace(/<[^>]*>/g, '').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function playbackReason(authorization: Authorization): string {
+  if (authorization.method === 'direct_play') return 'Originalfilen afspilles direkte uden video-transcoding.';
+  if (authorization.method === 'direct_stream') return 'Videoen leveres i et browserkompatibelt format uden ny videokodning.';
+  const blockers = authorization.decision?.playback.directPlayBlockers ?? [];
+  const blocker = blockers.map((code) => ({
+    codec_unsupported: 'videocodec understøttes ikke direkte af browseren',
+    audio_codec_unsupported: 'lydsporet understøttes ikke direkte af browseren',
+    container_unsupported: 'filcontaineren understøttes ikke direkte af browseren',
+    hdr_unsupported: 'HDR-formatet understøttes ikke af skærmen eller browseren',
+    resolution_limit: 'kildens opløsning overstiger abonnementets grænse',
+    bitrate_limit: 'kildens bitrate overstiger abonnementets grænse',
+  } as Record<string, string>)[code]).find(Boolean);
+  if (blocker) return `HLS bruges, fordi ${blocker}.`;
+  const decisionCode = authorization.decision?.playback.code;
+  return ({
+    adaptive_transcode: 'HLS bruges på grund af den valgte kvalitets- eller databesparelsesindstilling.',
+    playback_method_selected: 'HLS bruges for at levere et browserkompatibelt videoformat.',
+  } as Record<string, string>)[decisionCode ?? '']
+    ?? 'HLS bruges, fordi originalfilen ikke kan afspilles direkte med de aktuelle krav.';
 }
 
 function configureCastFramework(castWindow: CastWindow): boolean {

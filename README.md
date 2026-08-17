@@ -487,6 +487,15 @@ Tomme thread- og rendition-felter betyder automatisk detektion. Et eksplicit tal
 - Tekniske FFmpeg-forberedelsesbeskeder eksponeres ikke længere i den almindelige kundevisning.
 - Hvis forberedelsen fejler, skifter samme panel til en tydelig fejltilstand og bevarer den konkrete tekniske fejlbesked til fejlfinding.
 
+## Playback-diagnose, Chromecast og rigtige undertekster (2026-08-17)
+
+- En kompatibel originalfil sendes ikke længere til HLS alene på grund af Chromes afrundede `navigator.connection.downlink`-estimat. Den tidligere adfærd kan vælges eksplicit med `BB_MEDIA_AUTO_TRANSCODE_ON_BANDWIDTH=true`; standarden er `false`.
+- Afspilningsstatus viser nu en konkret kundevendt årsag, når container, video-/lydcodec, HDR, opløsning, bitrate eller en aktiv kvalitetsindstilling kræver HLS.
+- SRT-sidecars og indlejrede tekstspor leveres fortsat som WebVTT, men cues renderes nu i et dedikeret BoltBytes-lag over player-gradienten og bindes med stabile track-id’er. Burn-in-spor kan derfor ikke forskyde browser- eller Cast-tracknumre.
+- Chromecast-knappen genprøver indlæsning af Google Cast SDK ved klik og viser resultatet synligt i playeren. Default Media Receiver og kravet om HTTPS samt samme lokale netværk er uændret.
+- Chromes separate vindue `Livetekstning / Oversætter` er en browserfunktion og kommer ikke fra BoltBytes. Slå Live Caption fra i Chrome, hvis kun filens rigtige SRT/WebVTT-spor skal vises.
+- Matroska eller et browser-inkompatibelt lydspor kræver fortsat HLS. Ægte Direct Stream-remux uden videoreencoding er fortsat en separat leverance.
+
 
 ## Burn-in og session-rekonfiguration (2026-07-29)
 
