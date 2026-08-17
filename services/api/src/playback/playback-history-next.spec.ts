@@ -42,6 +42,29 @@ describe('next series episode', () => {
       }),
     );
   });
+
+  it('returns the episode immediately after the completed player item', async () => {
+    const first = episode('episode-1', 1, 1);
+    const second = episode('episode-2', 1, 2);
+    const third = episode('episode-3', 1, 3);
+    const prisma = {
+      mediaItem: { findMany: vi.fn().mockResolvedValue([first, second, third]) },
+      playbackHistory: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const service = new PlaybackHistoryService(prisma as never, {} as never);
+
+    const result = await service.nextEpisode({
+      accountId: 'account-id',
+      sub: 'user-id',
+      profileId: 'profile-id',
+    } as never, {
+      seriesMetadataProviderId: '366972',
+      afterMediaId: second.id,
+    });
+
+    expect(result?.media.id).toBe(third.id);
+    expect(result?.resumePositionMs).toBe(0);
+  });
 });
 
 function episode(id: string, seasonNumber: number, episodeNumber: number) {

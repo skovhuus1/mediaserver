@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import {
   detectVideoSignalProfile,
   groupBySeriesIdentity,
@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { readdir, realpath } from 'node:fs/promises';
 import { posix } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../infra/redis.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
 import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
@@ -17,7 +18,10 @@ import { searchMetadataProviders, validateMetadataSelection } from './metadata-p
 
 @Injectable()
 export class CatalogService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly redis?: RedisService,
+  ) {}
 
   listStorageRoots(actor: AuthenticatedUser) {
     return this.prisma.storageRoot.findMany({
@@ -204,6 +208,13 @@ export class CatalogService {
   }
 
   async listCatalog(actor: AuthenticatedUser, query: CatalogQueryDto) {
+    const seriesCacheKey = query.type === 'series'
+      ? `catalog:series:${actor.accountId}:${JSON.stringify(query)}`
+      : null;
+    if (seriesCacheKey && this.redis) {
+      const cached = await this.redis.get(seriesCacheKey).catch(() => null);
+      if (cached) return JSON.parse(cached);
+    }
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 24;
     const where = this.catalogWhere(actor, query);
@@ -275,7 +286,7 @@ export class CatalogService {
         return right.updatedAt.getTime() - left.updatedAt.getTime();
       });
       const total = grouped.length;
-      return {
+      const result = {
         items: grouped.slice((page - 1) * pageSize, page * pageSize),
         page,
         pageSize,
@@ -283,6 +294,10 @@ export class CatalogService {
         totalPages: Math.max(1, Math.ceil(total / pageSize)),
         facets,
       };
+      if (seriesCacheKey && this.redis) {
+        await this.redis.setEx(seriesCacheKey, 60, JSON.stringify(result)).catch(() => undefined);
+      }
+      return result;
     }
 
     const orderBy: Prisma.MediaItemOrderByWithRelationInput[] =
@@ -337,7 +352,7 @@ export class CatalogService {
     return this.serializeMedia(item);
   }
 
-  async getMediaDetails(actor: AuthenticatedUser, mediaId: string) {
+  async getMediaDetails(actor: AuthenticatedUser, mediaId: string, requestedSeason?: number) {
     const seed = await this.prisma.mediaItem.findFirst({
       where: { id: mediaId, accountId: actor.accountId },
       include: {
@@ -355,52 +370,78 @@ export class CatalogService {
       return { kind: 'movie' as const, item: this.serializeMedia(seed), seasons: [] };
     }
 
-    const episodes = await this.prisma.mediaItem.findMany({
-      where: {
-        accountId: actor.accountId,
-        type: 'episode',
-        ...(seed.seriesMetadataProviderId
-          ? { seriesMetadataProviderId: seed.seriesMetadataProviderId }
-          : seed.seriesDisplayTitle
-            ? { seriesDisplayTitle: { equals: seed.seriesDisplayTitle, mode: 'insensitive' } }
-            : { seriesTitle: { equals: seed.seriesTitle ?? seed.title, mode: 'insensitive' } }),
+    const seriesWhere: Prisma.MediaItemWhereInput = {
+      accountId: actor.accountId,
+      type: 'episode',
+      ...(seed.seriesMetadataProviderId
+        ? { seriesMetadataProviderId: seed.seriesMetadataProviderId }
+        : seed.seriesDisplayTitle
+          ? { seriesDisplayTitle: { equals: seed.seriesDisplayTitle, mode: 'insensitive' } }
+          : { seriesTitle: { equals: seed.seriesTitle ?? seed.title, mode: 'insensitive' } }),
+    };
+    const episodeHeaders = await this.prisma.mediaItem.findMany({
+      where: seriesWhere,
+      select: {
+        seasonNumber: true,
+        seasonPosterPath: true,
+        releaseYear: true,
       },
+      orderBy: [{ seasonNumber: 'asc' }, { episodeNumber: 'asc' }],
+    });
+    const seasonNumbers = [...new Set(episodeHeaders.map((episode) => episode.seasonNumber ?? 0))]
+      .sort((left, right) => left - right);
+    const selectedSeason = requestedSeason !== undefined && seasonNumbers.includes(requestedSeason)
+      ? requestedSeason
+      : seasonNumbers[0] ?? 0;
+    const episodes = await this.prisma.mediaItem.findMany({
+      where: { ...seriesWhere, seasonNumber: selectedSeason },
       include: {
         library: { select: { id: true, name: true, type: true } },
-        file: true,
+        file: {
+          select: {
+            id: true,
+            relativePath: true,
+            sizeBytes: true,
+            status: true,
+            durationMs: true,
+            videoCodec: true,
+            audioCodec: true,
+            width: true,
+            height: true,
+            bitrate: true,
+            container: true,
+          },
+        },
       },
       orderBy: [{ seasonNumber: 'asc' }, { episodeNumber: 'asc' }, { title: 'asc' }],
     });
-    const representative = [...episodes].sort(
-      (left, right) => seriesMetadataScore(right) - seriesMetadataScore(left),
-    )[0] ?? seed;
-    const serializedEpisodes = episodes.map((episode) => this.serializeMedia(episode));
-    const seasonNumbers = [...new Set(episodes.map((episode) => episode.seasonNumber ?? 0))]
-      .sort((left, right) => left - right);
-    const releaseYears = episodes.flatMap((episode) =>
+    const serializedEpisodes = episodes.map((episode) => this.serializeMedia({
+      ...episode,
+      file: episode.file ? { ...episode.file, probe: null } : null,
+    }));
+    const releaseYears = episodeHeaders.flatMap((episode) =>
       episode.releaseYear === null ? [] : [episode.releaseYear],
     );
     return {
       kind: 'series' as const,
       item: {
-        ...this.serializeMedia(representative),
+        ...this.serializeMedia(seed),
         id: seed.id,
         type: 'series',
-        title: representative.seriesDisplayTitle
-          ?? sanitizeMediaTitle(representative.seriesTitle ?? representative.title),
-        overview: representative.seriesOverview ?? representative.overview,
+        title: seed.seriesDisplayTitle
+          ?? sanitizeMediaTitle(seed.seriesTitle ?? seed.title),
+        overview: seed.seriesOverview ?? seed.overview,
         releaseYear: releaseYears.length ? Math.min(...releaseYears) : null,
-        episodeCount: episodes.length,
+        episodeCount: episodeHeaders.length,
       },
       seasons: seasonNumbers.map((number) => ({
         number,
         title: number === 0 ? 'Specials' : `Sæson ${number}`,
-        posterPath: episodes.find(
+        posterPath: episodeHeaders.find(
           (episode) => (episode.seasonNumber ?? 0) === number && episode.seasonPosterPath,
         )?.seasonPosterPath ?? null,
-        episodes: serializedEpisodes.filter(
-          (episode) => (episode.seasonNumber ?? 0) === number,
-        ),
+        episodeCount: episodeHeaders.filter((episode) => (episode.seasonNumber ?? 0) === number).length,
+        episodes: number === selectedSeason ? serializedEpisodes : [],
       })),
     };
   }

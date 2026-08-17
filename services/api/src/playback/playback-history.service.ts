@@ -139,6 +139,7 @@ export class PlaybackHistoryService {
       seriesTitle?: string;
       seriesDisplayTitle?: string;
       seriesMetadataProviderId?: string;
+      afterMediaId?: string;
     },
   ) {
     const request = typeof identity === 'string' ? { seriesTitle: identity } : identity;
@@ -184,9 +185,14 @@ export class PlaybackHistoryService {
       (latest, episode, index) => progressByMedia.get(episode.id)?.completed ? Math.max(latest, index) : latest,
       -1,
     );
-    const media = unfinishedIndex >= 0
-      ? episodes[unfinishedIndex]
-      : episodes[lastCompletedIndex + 1] ?? null;
+    const afterIndex = request.afterMediaId
+      ? episodes.findIndex((episode) => episode.id === request.afterMediaId)
+      : -1;
+    const media = afterIndex >= 0
+      ? episodes[afterIndex + 1] ?? null
+      : unfinishedIndex >= 0
+        ? episodes[unfinishedIndex]
+        : episodes[lastCompletedIndex + 1] ?? null;
     if (!media) return null;
     const progress = progressByMedia.get(media.id);
     const file = media.file

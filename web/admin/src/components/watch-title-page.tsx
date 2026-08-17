@@ -19,7 +19,7 @@ type Media = PlayableMedia & {
   episodeStillPath?: string | null;
   seasonPosterPath?: string | null;
 };
-type Season = { number: number; title: string; posterPath: string | null; episodes: Media[] };
+type Season = { number: number; title: string; posterPath: string | null; episodeCount: number; episodes: Media[] };
 type Detail = { kind: 'movie' | 'series'; item: Media; seasons: Season[] };
 type NextEpisode = { media: Media; resumePositionMs: number };
 
@@ -30,6 +30,7 @@ export function WatchTitlePage() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [next, setNext] = useState<NextEpisode | null>(null);
   const [seasonNumber, setSeasonNumber] = useState<number | null>(null);
+  const [seasonLoading, setSeasonLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -61,6 +62,19 @@ export function WatchTitlePage() {
     () => detail?.seasons.find((entry) => entry.number === seasonNumber) ?? null,
     [detail, seasonNumber],
   );
+  async function selectSeason(number: number) {
+    setSeasonNumber(number);
+    if (detail?.seasons.find((entry) => entry.number === number)?.episodes.length) return;
+    setSeasonLoading(true);
+    try {
+      const loaded = await api<Detail>(`/media/${encodeURIComponent(id)}/details?season=${number}`);
+      setDetail(loaded);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Sæsonen kunne ikke hentes.');
+    } finally {
+      setSeasonLoading(false);
+    }
+  }
   if (!user) return <main className="watch-loading" aria-busy={!error}>{error}</main>;
   if (!detail) return <CustomerShell user={user}><div className={styles.error}>{error}</div></CustomerShell>;
   const item = detail.item;
@@ -77,15 +91,15 @@ export function WatchTitlePage() {
             <div className={styles.meta}>
               {item.releaseYear && <b>{item.releaseYear}</b>}
               {item.rating != null && <b>{item.rating.toFixed(1)}/10</b>}
-              {detail.kind === 'series' && <b>{detail.seasons.reduce((sum, entry) => sum + entry.episodes.length, 0)} episoder</b>}
+              {detail.kind === 'series' && <b>{detail.seasons.reduce((sum, entry) => sum + entry.episodeCount, 0)} episoder</b>}
             </div>
             {playTarget && <button onClick={() => requestPlayback(playTarget, next?.media.id === playTarget.id ? next.resumePositionMs : 0)}><Play fill="currentColor" />{next?.resumePositionMs ? 'Fortsæt' : detail.kind === 'series' ? 'Afspil næste' : 'Afspil'}</button>}
           </div>
         </header>
         {detail.kind === 'series' && (
           <section className={styles.episodes}>
-            <nav>{detail.seasons.map((entry) => <button className={entry.number === seasonNumber ? styles.active : ''} onClick={() => setSeasonNumber(entry.number)} key={entry.number}>{entry.title}</button>)}</nav>
-            <div>{season?.episodes.map((episode) => (
+            <nav>{detail.seasons.map((entry) => <button className={entry.number === seasonNumber ? styles.active : ''} onClick={() => void selectSeason(entry.number)} key={entry.number}>{entry.title} <small>{entry.episodeCount}</small></button>)}</nav>
+            <div aria-busy={seasonLoading}>{seasonLoading ? <p>Henter sæson...</p> : season?.episodes.map((episode) => (
               <button className={styles.episode} onClick={() => requestPlayback(episode, next?.media.id === episode.id ? next.resumePositionMs : 0)} key={episode.id}>
                 <i style={imageStyle(episode.episodeStillPath ?? season.posterPath)} />
                 <span><b>S{String(episode.seasonNumber ?? 0).padStart(2, '0')}E{String(episode.episodeNumber ?? 0).padStart(2, '0')} · {episode.title}</b><small>{episode.overview ?? 'Episodebeskrivelse afventer metadata.'}</small></span>

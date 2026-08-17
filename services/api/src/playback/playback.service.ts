@@ -144,6 +144,13 @@ export class PlaybackService {
       throw new ForbiddenException({ code: decision.code, message: decision.reason });
     }
 
+    const startPositionMs = Math.max(
+      0,
+      Math.min(
+        dto.startPositionMs ?? 0,
+        Math.max(0, (media.file?.durationMs ?? 0) - 1_000),
+      ),
+    );
     try {
       const session = await this.reservations.reserve({
         actor,
@@ -177,6 +184,7 @@ export class PlaybackService {
             ),
             adaptiveQuality: deliveryQuality,
             hdrMode: device.hdrMode,
+            startPositionMs,
           });
         } catch (error) {
           await this.reservations.release(actor, session.id, 'hls_queue_failed');
@@ -189,6 +197,7 @@ export class PlaybackService {
         decisionCode: decision.code,
         reason: decision.reason,
         directPlayBlockers: decision.directPlayBlockers,
+        startPositionMs,
       });
       const token = encodeURIComponent(session.streamToken);
       const streamUrl = decision.method === 'direct_play'
@@ -324,6 +333,18 @@ export class PlaybackService {
     }
 
     const sourceVideo = detectVideoSignalProfile(session.media.file.probe);
+    const startPositionMs = Math.max(
+      0,
+      Math.min(
+        dto.startPositionMs ?? 0,
+        Math.max(0, (session.media.file.durationMs ?? 0) - 1_000),
+      ),
+    );
+    const streamMode = dto.burnIn
+      ? 'transcode' as const
+      : session.method === 'direct_stream'
+        ? 'direct_stream' as const
+        : 'transcode' as const;
     const adaptiveQuality = buildAdaptiveQualityPlan({
       sourceWidth: session.media.width,
       sourceHeight: session.media.height,
@@ -354,11 +375,12 @@ export class PlaybackService {
       }),
       this.prisma.playbackSession.update({
         where: { id: session.id },
-        data: { method: 'transcode', lastHeartbeatAt: new Date() },
+        data: { method: streamMode, lastHeartbeatAt: new Date() },
       }),
     ]);
     await this.transcodeStream.enqueue(session.id, actor.accountId, {
-      streamMode: 'transcode',
+      streamMode,
+      ...(streamMode === 'direct_stream' ? { audioMode: 'aac' as const } : {}),
       maxVideoResolution: entitlement.effective.maxVideoResolution,
       maxVideoBitrate: entitlement.effective.maxVideoBitrate,
       preserveHdr: Boolean(
@@ -368,6 +390,7 @@ export class PlaybackService {
       adaptiveQuality,
       hdrMode: session.device.hdrMode,
       subtitleTrackId: dto.burnIn ? dto.subtitleTrackId ?? null : null,
+      startPositionMs,
     });
     await this.prisma.auditLog.create({
       data: {
@@ -383,6 +406,7 @@ export class PlaybackService {
           logicalSessionId: session.logicalSessionId,
           burnIn: dto.burnIn,
           subtitleTrackId: dto.subtitleTrackId ?? null,
+          startPositionMs,
         },
       },
     });
@@ -391,7 +415,7 @@ export class PlaybackService {
       accepted: true,
       sessionId: session.id,
       logicalSessionId: session.logicalSessionId,
-      method: 'transcode',
+      method: streamMode,
       streamUrl: `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${token}`,
       transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?token=${token}`,
       adaptiveQuality,

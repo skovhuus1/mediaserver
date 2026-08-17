@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MetadataMatchQueryDto, QueueMetadataDto, SetMetadataLockDto, UpdateLibraryDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MediaDetailsQueryDto, MetadataMatchQueryDto, QueueMetadataDto, SetMetadataLockDto, UpdateLibraryDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -71,8 +71,12 @@ export class CatalogController {
   }
 
   @Get('media/:id/details')
-  mediaDetailPage(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
-    return this.catalog.getMediaDetails(actor, id);
+  mediaDetailPage(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Query() query: MediaDetailsQueryDto,
+  ) {
+    return this.catalog.getMediaDetails(actor, id, query.season);
   }
 
   @Post('media/metadata/jobs')

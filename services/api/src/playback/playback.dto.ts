@@ -52,6 +52,13 @@ export class AuthorizePlaybackDto {
   deviceId!: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(2_147_483_647)
+  startPositionMs?: number;
+
+  @IsOptional()
   @IsBoolean()
   isCastSession = false;
 
@@ -78,6 +85,13 @@ export class ReconfigurePlaybackDto {
 
   @IsBoolean()
   burnIn!: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(2_147_483_647)
+  startPositionMs?: number;
 }
 
 export class PlaybackHeartbeatDto {

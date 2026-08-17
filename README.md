@@ -521,3 +521,28 @@ Tomme thread- og rendition-felter betyder automatisk detektion. Et eksplicit tal
 - Workeren l?gger billedsporet oven p? videoen f?r HDR-bevarelse eller SDR tone mapping og bygger derefter alle adaptive renditions fra samme filtergraf.
 - Tekstspor leveres fortsat som WebVTT. Chromecast-tracklisten indeholder kun WebVTT; burn-in ligger allerede i videostr?mmen.
 - Unit-testen verificerer, at reconfiguration genbruger session og logical session og ikke opretter en ny reservation.
+
+## Playback reliability: serier, seek, undertekster, Cast og bufferstyret upscaling
+
+Leverancen på `agent/playback-series-cast-buffering` gør følgende:
+
+- Serie-detaljer indlæser kun den valgte sæsons episodefiler. De øvrige sæsoner returneres som små summaries med episodeantal, og PostgreSQL har målrettede indeks til provider-id og visningstitel.
+- Serieoversigten caches i Redis i 60 sekunder. Redis-fejl må ikke blokere kataloget.
+- `GET /api/v1/playback/history/series-next` understøtter `afterMediaId`, så autoplay og knappen Næste altid vælger episoden umiddelbart efter den aktuelle episode.
+- Playback-autorisation og session-rekonfiguration understøtter `startPositionMs`. FFmpeg bruger input-seek, mens samme reservation og logical session bevares. Det gør Fortsæt og seek uden for en endnu produceret HLS-buffer brugbare.
+- WebVTT-cues evalueres mod den absolutte medietid efter seek. Standardsporet bindes igen ved `load`, `addtrack` og `cuechange`, og et image/burn-in-spor auto-vælges aldrig som et usynligt tekstspor.
+- Google Cast SDK-callback registreres før SDK-scriptet indlæses. Et tidligere fejlet script kan genindlæses, og Cast bruger Google Default Media Receiver via HTTPS.
+- Auto-kvalitet starter på source-kvalitet eller lavere. Upscalede renditions låses først op, når den lokale HLS-buffer er mindst 210 sekunder; playeren kan opbygge op til fem minutters buffer, når upscaling er tilladt.
+
+Driftsbemærkninger:
+
+- Chromecast kræver en Cast-understøttet Chrome-browser, HTTPS på den offentlige URL og at sender og receiver kan opdage hinanden på netværket.
+- Reel Cast-hardware, Nginx Proxy Manager og et produktionsbibliotek skal stadig indgå i staging-smoke efter deployment; unit- og CI-tests kan ikke bevise lokal mDNS/device discovery.
+- Efter merge opdateres serveren gennem updateren eller med den dokumenterede Docker Compose bootstrap. Prisma-migrationen køres af API-startflowet før den nye version bliver healthy.
+
+Valideret 17. august 2026:
+
+- `npm run ci`: grøn lint, typecheck, `34/34` API-testfiler, `117/117` API-tests samt contracts-, API-, worker- og Next.js-produktionsbuild.
+- `npx vitest run shared/contracts/src/playback-runtime.spec.ts`: `3/3` playback-policytests grønne.
+- `npx prisma validate --schema services/api/prisma/schema.prisma`: schema validt.
+- Lokal integrationstest blev sikkerhedsafvist uden en dedikeret `bbmedia_test`-database og test-JWT. GitHub `validate` med isoleret PostgreSQL/Redis er derfor obligatorisk før squash-merge.

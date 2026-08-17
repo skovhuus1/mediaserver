@@ -26,11 +26,13 @@ export class PlaybackHistoryController {
     @Query('seriesTitle') seriesTitle?: string,
     @Query('seriesDisplayTitle') seriesDisplayTitle?: string,
     @Query('seriesMetadataProviderId') seriesMetadataProviderId?: string,
+    @Query('afterMediaId') afterMediaId?: string,
   ) {
     return this.history.nextEpisode(actor, {
       ...(seriesTitle ? { seriesTitle } : {}),
       ...(seriesDisplayTitle ? { seriesDisplayTitle } : {}),
       ...(seriesMetadataProviderId ? { seriesMetadataProviderId } : {}),
+      ...(afterMediaId ? { afterMediaId } : {}),
     });
   }
 
