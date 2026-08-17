@@ -122,6 +122,9 @@ export class PlaybackService {
       estimatedDownlinkMbps: dto.capabilities.estimatedDownlinkMbps ?? null,
       dataSaver: device.dataSaver,
       preferDirectPlay: !/^(?:false|0|no)$/i.test(process.env.BB_MEDIA_PREFER_DIRECT_PLAY?.trim() ?? ''),
+      autoTranscodeOnBandwidth: /^(?:true|1|yes)$/i.test(
+        process.env.BB_MEDIA_AUTO_TRANSCODE_ON_BANDWIDTH?.trim() ?? '',
+      ),
     });
     const decision =
       normalDecision.allowed
@@ -169,7 +172,13 @@ export class PlaybackService {
           throw error;
         }
       }
-      await this.audit(actor, dto, 'allowed', 'playback_authorized', { method: decision.method, sessionId: session.id });
+      await this.audit(actor, dto, 'allowed', 'playback_authorized', {
+        method: decision.method,
+        sessionId: session.id,
+        decisionCode: decision.code,
+        reason: decision.reason,
+        directPlayBlockers: decision.directPlayBlockers,
+      });
       const token = encodeURIComponent(session.streamToken);
       const streamUrl = decision.method === 'transcode'
         ? `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?token=${token}`

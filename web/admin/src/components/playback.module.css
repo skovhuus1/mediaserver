@@ -184,6 +184,82 @@
   color: #aeb6c2;
 }
 
+.castNotice {
+  position: absolute;
+  top: 94px;
+  left: 50%;
+  z-index: 7;
+  display: grid;
+  width: min(520px, calc(100vw - 32px));
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(180, 111, 255, .25);
+  border-radius: 12px;
+  background: rgba(9, 11, 14, .94);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, .5);
+  transform: translateX(-50%);
+  backdrop-filter: blur(18px);
+}
+
+.castNotice > svg {
+  color: #bb78ff;
+}
+
+.castNotice span,
+.castNotice strong,
+.castNotice small {
+  display: block;
+  min-width: 0;
+}
+
+.castNotice small {
+  margin-top: 3px;
+  color: #aeb6c2;
+  line-height: 1.4;
+}
+
+.castNotice button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #d9dce1;
+  background: rgba(255, 255, 255, .06);
+  cursor: pointer;
+}
+
+.subtitleCue {
+  position: absolute;
+  right: 8%;
+  bottom: clamp(105px, 15vh, 165px);
+  left: 8%;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+  transition: bottom 180ms ease;
+}
+
+.subtitleCue span {
+  max-width: min(920px, 88vw);
+  padding: .22em .48em;
+  border-radius: 5px;
+  color: #fff;
+  background: rgba(0, 0, 0, .78);
+  box-decoration-break: clone;
+  font-size: clamp(18px, 2.2vw, 34px);
+  font-weight: 650;
+  line-height: 1.28;
+  text-shadow: 0 2px 5px #000;
+  white-space: pre-line;
+  -webkit-box-decoration-break: clone;
+}
+
 @keyframes streamLoadingPulse {
   0%, 70%, 100% {
     opacity: .3;
@@ -240,6 +316,14 @@
 .playbackBadge small {
   margin-top: 5px;
   color: #a8adb5;
+}
+
+.playbackBadge .playbackReason {
+  max-width: 285px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+  line-height: 1.45;
 }
 
 .controls {
@@ -977,4 +1061,26 @@
 .overlayIdle > :not(video) {
   pointer-events: none;
   opacity: 0;
+}
+
+.overlayIdle > .subtitleCue {
+  bottom: clamp(30px, 6vh, 68px);
+  opacity: 1;
+  transform: none;
+}
+
+@media (max-width: 760px) {
+  .castNotice {
+    top: 70px;
+  }
+
+  .subtitleCue {
+    right: 4%;
+    bottom: 128px;
+    left: 4%;
+  }
+
+  .subtitleCue span {
+    font-size: clamp(16px, 5vw, 24px);
+  }
 }
