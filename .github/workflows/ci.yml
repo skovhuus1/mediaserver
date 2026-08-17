@@ -120,7 +120,7 @@ jobs:
             -f lavfi -i testsrc2=s=320x240:r=24:d=1 \
             -f lavfi -i anullsrc=r=48000:cl=stereo \
             -shortest -c:v libx264 -g 24 -c:a ac3 \
-            "/ci-media/CI Remux (2026).mkv"
+            "/ci-media/CI Direct Stream (2026).mkv"
           cat > "media/Film/Action/CI Smoke (2026).da.srt" <<'SUBTITLE'
           1
           00:00:00,000 --> 00:00:00,900
@@ -197,7 +197,7 @@ jobs:
           test "$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/media" | jq 'length')" -ge 2
           media="$(curl --fail --silent --show-error -H "authorization: Bearer $token" "$api_base/media")"
           smoke_media="$(jq -er '.[] | select(.title == "CI Smoke")' <<<"$media")"
-          remux_media="$(jq -er '.[] | select(.title == "CI Remux")' <<<"$media")"
+          remux_media="$(jq -er '.[] | select(.title == "CI Direct Stream")' <<<"$media")"
           test "$(jq -r '.type' <<<"$smoke_media")" = "movie"
           test "$(jq -r '.category' <<<"$smoke_media")" = "Action"
           test "$(jq -r '.releaseYear' <<<"$smoke_media")" -eq 2026
