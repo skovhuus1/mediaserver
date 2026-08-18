@@ -378,11 +378,13 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Future<void> _handleCastState(CastState state) async {
     if (!mounted) return;
-    final ended = _casting && {
-      'sessionEnded',
-      'sessionStartFailed',
-      'sessionResumeFailed',
-    }.contains(state.event);
+    final ended =
+        _casting &&
+        {
+          'sessionEnded',
+          'sessionStartFailed',
+          'sessionResumeFailed',
+        }.contains(state.event);
     setState(() {
       _castConnected = state.connected;
       _castDeviceName = state.deviceName ?? _castDeviceName;
@@ -487,7 +489,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         _castPositionMs = absolutePosition;
         _castRuntimeState = 'playing';
         _buffering = false;
-        _status = 'Chromecast${state.deviceName == null ? '' : ' · ${state.deviceName}'}';
+        _status =
+            'Chromecast${state.deviceName == null ? '' : ' · ${state.deviceName}'}';
       });
     } on PlatformException catch (failure) {
       if (accepted) await _cancelCastHandoff();
@@ -528,9 +531,9 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _showCastMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   String _language(String value) =>
@@ -539,7 +542,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _setSubtitle(SubtitleTrack? track) async {
     if (_casting && (track == null || track.isText)) {
       try {
-        await _cast.setTextTrack(track == null ? null : _castTrackIds[track.id]);
+        await _cast.setTextTrack(
+          track == null ? null : _castTrackIds[track.id],
+        );
         if (!mounted) return;
         setState(() {
           _subtitle = track;

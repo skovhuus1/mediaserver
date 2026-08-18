@@ -160,12 +160,12 @@ class CastService {
       _methods.invokeMethod('seek', {'positionMs': positionMs});
   Future<void> setVolume(double volume) =>
       _methods.invokeMethod('setVolume', {'volume': volume.clamp(0, 1)});
-  Future<void> setTextTrack(int? trackId) => _methods.invokeMethod(
-    'setTextTrack',
-    {'trackIds': trackId == null ? <int>[] : [trackId]},
-  );
-  Future<void> endSession({bool stopReceiver = false}) => _methods
-      .invokeMethod('endSession', {'stopReceiver': stopReceiver});
+  Future<void> setTextTrack(int? trackId) =>
+      _methods.invokeMethod('setTextTrack', {
+        'trackIds': trackId == null ? <int>[] : [trackId],
+      });
+  Future<void> endSession({bool stopReceiver = false}) =>
+      _methods.invokeMethod('endSession', {'stopReceiver': stopReceiver});
 }
 
 class CastRouteButton extends StatelessWidget {
