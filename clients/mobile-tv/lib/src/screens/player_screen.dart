@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/api_client.dart';
+import '../core/cast_service.dart';
 import '../core/models.dart';
 import '../core/webvtt.dart';
 import '../widgets/brand.dart';
@@ -44,12 +45,28 @@ class _PlayerScreenState extends State<PlayerScreen>
   Timer? _progressTimer;
   Timer? _uiTimer;
   Timer? _hideTimer;
+  final CastService _cast = CastService.instance;
+  StreamSubscription<CastState>? _castSubscription;
+  bool _casting = false;
+  bool _castStarting = false;
+  bool _handoffAccepted = false;
+  bool _finishing = false;
+  int _castPositionMs = 0;
+  String _castRuntimeState = 'paused';
+  String? _castDeviceName;
+  Map<String, int> _castTrackIds = const {};
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    if (CastService.isSupported) {
+      _castSubscription = _cast.states.listen(
+        (state) => unawaited(_handleCastState(state)),
+        onError: (_) {},
+      );
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_start(widget.resumePositionMs));
     });
@@ -114,6 +131,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         directPlaySeekMs: startPositionMs,
       );
       await _selectDefaultSubtitle();
+      await _attachToConnectedCast();
       _startTimers();
       _scheduleHide();
     } on ApiException catch (failure) {
@@ -210,6 +228,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _tick() {
+    if (_casting) {
+      if (mounted && _controls) setState(() {});
+      return;
+    }
     final video = _video;
     if (!mounted || video == null || !video.value.isInitialized) return;
     final value = video.value;
@@ -235,6 +257,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   int get _absolutePositionMs {
+    if (_casting) return math.max(0, _castPositionMs);
     final local = _video?.value.position.inMilliseconds ?? 0;
     return math.max(0, _timelineOffsetMs + local);
   }
@@ -260,7 +283,29 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _heartbeat() async {
     final auth = _authorization;
     final video = _video;
-    if (auth == null || video == null || _released) return;
+    if (auth == null || _released) return;
+    if (_casting) {
+      try {
+        await widget.api
+            .patchJson('/playback/sessions/${auth.sessionId}/heartbeat', {
+              'runtimeState': switch (_castRuntimeState) {
+                'playing' || 'paused' || 'buffering' => _castRuntimeState,
+                _ => 'starting',
+              },
+              'positionMs': _absolutePositionMs,
+              'durationMs': _durationMs > 0 ? _durationMs : null,
+              'currentBitrate': auth.sourceBitrate,
+              'currentHeight': auth.sourceHeight,
+              'bufferAheadMs': null,
+              'playbackRate': 1,
+              'subtitleTrack': _subtitle?.label,
+            });
+      } catch (_) {
+        // The custom receiver and next mobile heartbeat both renew the lease.
+      }
+      return;
+    }
+    if (video == null) return;
     final rendition = auth.renditions
         .where((item) => (item.height - video.value.size.height).abs() < 32)
         .firstOrNull;
@@ -317,10 +362,198 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (selected != null) await _setSubtitle(selected);
   }
 
+  Future<void> _attachToConnectedCast() async {
+    if (!CastService.isSupported) return;
+    try {
+      final state = await _cast.currentState();
+      if (!mounted) return;
+      _castDeviceName = state.deviceName;
+      if (state.connected) await _beginCast();
+    } catch (_) {
+      // Discovery remains available through the native route button.
+    }
+  }
+
+  Future<void> _handleCastState(CastState state) async {
+    if (!mounted) return;
+    final ended =
+        _casting &&
+        {
+          'sessionEnded',
+          'sessionStartFailed',
+          'sessionResumeFailed',
+        }.contains(state.event);
+    setState(() {
+      _castDeviceName = state.deviceName ?? _castDeviceName;
+      if (_casting && state.positionMs > 0) {
+        _castPositionMs = _timelineOffsetMs + state.positionMs;
+      }
+      if (_casting && state.runtimeState != 'unknown') {
+        _castRuntimeState = state.runtimeState;
+        _buffering = state.isBuffering;
+        _status = state.event == 'sessionSuspended'
+            ? 'Chromecast genopretter forbindelsen...'
+            : 'Chromecast${_castDeviceName == null ? '' : ' · $_castDeviceName'}';
+      }
+    });
+    if (ended) {
+      await _resumeAfterCast();
+    } else if (state.connected &&
+        !_casting &&
+        !_castStarting &&
+        {'sessionStarted', 'sessionResumed'}.contains(state.event)) {
+      await _beginCast();
+    }
+  }
+
+  Future<void> _beginCast({bool forceReload = false}) async {
+    final auth = _authorization;
+    if (auth == null || _castStarting || (_casting && !forceReload)) return;
+    _castStarting = true;
+    var accepted = false;
+    final absolutePosition = _absolutePositionMs;
+    final localPosition = math.max(0, absolutePosition - _timelineOffsetMs);
+    try {
+      final state = await _cast.currentState();
+      if (!state.connected) return;
+      if (mounted) {
+        setState(() {
+          _status = 'Forbereder Chromecast...';
+          _buffering = true;
+        });
+      }
+      await _saveProgress();
+      final handoff = jsonMap(
+        await widget.api.postJson(
+          '/playback/sessions/${auth.sessionId}/cast-handoff',
+          {'streamToken': auth.streamToken},
+        ),
+      );
+      accepted = true;
+      _handoffAccepted = true;
+      final castSubtitles = jsonList(handoff['subtitleTracks'])
+          .map(SubtitleTrack.fromJson)
+          .where((track) => track.isText)
+          .toList(growable: false);
+      final trackIds = <String, int>{};
+      final tracks = <CastLoadTrack>[];
+      for (var index = 0; index < castSubtitles.length; index++) {
+        final track = castSubtitles[index];
+        final castId = index + 1;
+        trackIds[track.id] = castId;
+        tracks.add(
+          CastLoadTrack(
+            id: castId,
+            contentUrl: track.src!,
+            label: track.label,
+            language: track.language,
+          ),
+        );
+      }
+      _castTrackIds = trackIds;
+      final selectedTrackId = _subtitle == null
+          ? null
+          : _castTrackIds[_subtitle!.id];
+      final poster = widget.api.absoluteMediaUrl(
+        widget.media.posterPath,
+        imageSize: 'w500',
+      );
+      await _cast.loadMedia(
+        contentUrl: stringValue(handoff['streamUrl']) ?? '',
+        contentType:
+            stringValue(handoff['contentType']) ?? 'application/x-mpegURL',
+        title: widget.media.displayTitle,
+        subtitle: widget.media.isEpisode ? widget.media.episodeLabel : _status,
+        posterUrl: poster.isEmpty ? null : poster,
+        positionMs: localPosition,
+        durationMs: math.max(0, _durationMs - _timelineOffsetMs),
+        tracks: tracks,
+        activeTrackIds: selectedTrackId == null ? const [] : [selectedTrackId],
+        customData: {
+          'heartbeatUrl': handoff['heartbeatUrl'],
+          'timelineOffsetMs': _timelineOffsetMs,
+          'fullDurationMs': _durationMs > 0 ? _durationMs : null,
+          'currentBitrate': auth.sourceBitrate,
+          'currentHeight': auth.sourceHeight,
+          'subtitleTrack': _subtitle?.label,
+        },
+      );
+      await _video?.pause();
+      if (!mounted) return;
+      setState(() {
+        _casting = true;
+        _castPositionMs = absolutePosition;
+        _castRuntimeState = 'playing';
+        _buffering = false;
+        _status =
+            'Chromecast${state.deviceName == null ? '' : ' · ${state.deviceName}'}';
+      });
+    } on PlatformException catch (failure) {
+      if (accepted) await _cancelCastHandoff();
+      _showCastMessage(failure.message ?? 'Chromecast kunne ikke starte.');
+    } on ApiException catch (failure) {
+      if (accepted) await _cancelCastHandoff();
+      _showCastMessage(failure.message);
+    } finally {
+      _castStarting = false;
+      if (mounted && !_casting) setState(() => _buffering = false);
+    }
+  }
+
+  Future<void> _cancelCastHandoff() async {
+    final auth = _authorization;
+    _handoffAccepted = false;
+    if (auth == null) return;
+    try {
+      await widget.api.deleteJson(
+        '/playback/sessions/${auth.sessionId}/cast-handoff',
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _resumeAfterCast() async {
+    final resumeAt = _castPositionMs;
+    _casting = false;
+    _castRuntimeState = 'paused';
+    await _cancelCastHandoff();
+    if (!mounted || resumeAt >= _durationMs - 1_000) return;
+    setState(() {
+      _status = 'Chromecast afbrudt · fortsætter lokalt';
+      _buffering = true;
+    });
+    await _seekTo(resumeAt);
+    await _video?.play();
+  }
+
+  void _showCastMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   String _language(String value) =>
       value.toLowerCase().split(RegExp('[-_]')).first;
 
   Future<void> _setSubtitle(SubtitleTrack? track) async {
+    if (_casting && (track == null || track.isText)) {
+      try {
+        await _cast.setTextTrack(
+          track == null ? null : _castTrackIds[track.id],
+        );
+        if (!mounted) return;
+        setState(() {
+          _subtitle = track;
+          _cues = const [];
+          _cueText = '';
+        });
+      } on PlatformException catch (failure) {
+        _showCastMessage(
+          failure.message ?? 'Chromecast kunne ikke skifte undertekst.',
+        );
+      }
+      return;
+    }
     if (track == null) {
       setState(() {
         _subtitle = null;
@@ -389,7 +622,11 @@ class _PlayerScreenState extends State<PlayerScreen>
         _cues = const [];
         _cueText = '';
       }
-      await _prepareController(next);
+      if (_casting) {
+        await _beginCast(forceReload: true);
+      } else {
+        await _prepareController(next);
+      }
     } on ApiException catch (failure) {
       if (!mounted) return;
       setState(() {
@@ -404,6 +641,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     final auth = _authorization;
     if (video == null || auth == null) return;
     final target = targetMs.clamp(0, math.max(_durationMs, 0)).toInt();
+    if (_casting) {
+      await _cast.seek(math.max(0, target - _timelineOffsetMs));
+      setState(() => _castPositionMs = target);
+      return;
+    }
     if (auth.isDirectPlay) {
       await video.seekTo(Duration(milliseconds: target));
       return;
@@ -425,6 +667,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _changeQuality(String value) async {
+    if (_casting) {
+      _showCastMessage(
+        'Chromecast bruger streamens adaptive kvalitet. Afbryd Cast for at ændre enhedens kvalitetsprofil.',
+      );
+      return;
+    }
     final position = _absolutePositionMs;
     final body = <String, dynamic>{};
     if (value == 'auto' || value == 'original') {
@@ -447,6 +695,17 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _togglePlayback() {
+    if (_casting) {
+      if (_castRuntimeState == 'playing') {
+        unawaited(_cast.pause());
+        setState(() => _castRuntimeState = 'paused');
+      } else {
+        unawaited(_cast.play());
+        setState(() => _castRuntimeState = 'playing');
+      }
+      _revealControls();
+      return;
+    }
     final video = _video;
     if (video == null) return;
     video.value.isPlaying ? unawaited(video.pause()) : unawaited(video.play());
@@ -478,9 +737,22 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  Future<void> _close() async {
+  Future<void> _finishPlayback() async {
+    if (_finishing) return;
+    _finishing = true;
     await _saveProgress();
+    if (_casting || _handoffAccepted) {
+      try {
+        await _cast.stop();
+      } catch (_) {}
+      _casting = false;
+      await _cancelCastHandoff();
+    }
     await _release();
+  }
+
+  Future<void> _close() async {
+    await _finishPlayback();
     if (mounted) Navigator.pop(context);
   }
 
@@ -491,8 +763,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _progressTimer?.cancel();
     _uiTimer?.cancel();
     _hideTimer?.cancel();
-    unawaited(_saveProgress());
-    unawaited(_release());
+    unawaited(_castSubscription?.cancel());
+    unawaited(_finishPlayback());
     unawaited(_video?.dispose());
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
@@ -504,8 +776,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     return PopScope(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
-          unawaited(_saveProgress());
-          unawaited(_release());
+          unawaited(_finishPlayback());
         }
       },
       child: Scaffold(
@@ -596,7 +867,9 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Widget _controlsOverlay() {
     final video = _video;
-    final playing = video?.value.isPlaying ?? false;
+    final playing = _casting
+        ? _castRuntimeState == 'playing'
+        : video?.value.isPlaying ?? false;
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -642,6 +915,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ],
                     ),
                   ),
+                  const CastRouteButton(),
+                  const SizedBox(width: 8),
                   _PlaybackBadge(
                     status: _status,
                     authorization: _authorization,

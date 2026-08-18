@@ -4,10 +4,19 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val castReceiverAppId = providers
+    .gradleProperty("BB_MEDIA_CAST_RECEIVER_APP_ID")
+    .orElse(providers.environmentVariable("BB_MEDIA_CAST_RECEIVER_APP_ID"))
+    .getOrElse("CC1AD845")
+
 android {
     namespace = "com.boltbytes.boltbytes_media"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    buildFeatures {
+        resValues = true
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -23,6 +32,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        resValue("string", "cast_receiver_app_id", castReceiverAppId)
     }
 
     buildTypes {
@@ -32,6 +42,10 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+dependencies {
+    implementation("com.google.android.gms:play-services-cast-framework:22.3.1")
 }
 
 kotlin {
