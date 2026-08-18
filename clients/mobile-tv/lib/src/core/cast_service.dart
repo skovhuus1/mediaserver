@@ -174,7 +174,7 @@ class CastRouteButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!CastService.isSupported) return const SizedBox.shrink();
-    return const Semantics(
+    return Semantics(
       button: true,
       label: 'Chromecast',
       child: SizedBox(
@@ -182,8 +182,7 @@ class CastRouteButton extends StatelessWidget {
         height: 48,
         child: AndroidView(
           viewType: 'boltbytes.media/cast_button',
-          hitTestBehavior: PlatformViewHitTestBehavior.opaque,
-          creationParamsCodec: StandardMessageCodec(),
+          creationParamsCodec: const StandardMessageCodec(),
         ),
       ),
     );

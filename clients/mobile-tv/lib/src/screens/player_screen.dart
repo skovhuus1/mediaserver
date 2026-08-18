@@ -47,7 +47,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   Timer? _hideTimer;
   final CastService _cast = CastService.instance;
   StreamSubscription<CastState>? _castSubscription;
-  bool _castConnected = false;
   bool _casting = false;
   bool _castStarting = false;
   bool _handoffAccepted = false;
@@ -368,7 +367,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     try {
       final state = await _cast.currentState();
       if (!mounted) return;
-      _castConnected = state.connected;
       _castDeviceName = state.deviceName;
       if (state.connected) await _beginCast();
     } catch (_) {
@@ -386,7 +384,6 @@ class _PlayerScreenState extends State<PlayerScreen>
           'sessionResumeFailed',
         }.contains(state.event);
     setState(() {
-      _castConnected = state.connected;
       _castDeviceName = state.deviceName ?? _castDeviceName;
       if (_casting && state.positionMs > 0) {
         _castPositionMs = _timelineOffsetMs + state.positionMs;
@@ -485,7 +482,6 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (!mounted) return;
       setState(() {
         _casting = true;
-        _castConnected = true;
         _castPositionMs = absolutePosition;
         _castRuntimeState = 'playing';
         _buffering = false;
