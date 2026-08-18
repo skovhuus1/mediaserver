@@ -71,6 +71,44 @@ class CastState {
   }
 }
 
+class CastDiagnostics {
+  const CastDiagnostics({
+    required this.available,
+    required this.connected,
+    required this.receiverApplicationId,
+    required this.receiverMode,
+    required this.runtimeState,
+    this.deviceName,
+    this.mediaTitle,
+    this.contentType,
+  });
+
+  final bool available;
+  final bool connected;
+  final String receiverApplicationId;
+  final String receiverMode;
+  final String runtimeState;
+  final String? deviceName;
+  final String? mediaTitle;
+  final String? contentType;
+
+  factory CastDiagnostics.fromValue(dynamic value) {
+    final map = value is Map
+        ? Map<String, dynamic>.from(value)
+        : const <String, dynamic>{};
+    return CastDiagnostics(
+      available: map['available'] == true,
+      connected: map['connected'] == true,
+      receiverApplicationId: map['receiverApplicationId']?.toString() ?? '',
+      receiverMode: map['receiverMode']?.toString() ?? 'default',
+      runtimeState: map['runtimeState']?.toString() ?? 'unknown',
+      deviceName: map['deviceName']?.toString(),
+      mediaTitle: map['mediaTitle']?.toString(),
+      contentType: map['contentType']?.toString(),
+    );
+  }
+}
+
 class CastLoadTrack {
   const CastLoadTrack({
     required this.id,
@@ -125,6 +163,21 @@ class CastService {
       );
     }
     return CastState.fromValue(await _methods.invokeMethod('getState'));
+  }
+
+  Future<CastDiagnostics> diagnostics() async {
+    if (!isSupported) {
+      return const CastDiagnostics(
+        available: false,
+        connected: false,
+        receiverApplicationId: '',
+        receiverMode: 'unsupported',
+        runtimeState: 'unavailable',
+      );
+    }
+    return CastDiagnostics.fromValue(
+      await _methods.invokeMethod<dynamic>('getState'),
+    );
   }
 
   Future<CastState> loadMedia({

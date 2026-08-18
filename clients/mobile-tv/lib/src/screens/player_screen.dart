@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 
 import '../core/api_client.dart';
 import '../core/cast_service.dart';
+import '../core/cast_playback_coordinator.dart';
 import '../core/models.dart';
 import '../core/webvtt.dart';
 import '../widgets/brand.dart';
@@ -478,6 +479,16 @@ class _PlayerScreenState extends State<PlayerScreen>
           'subtitleTrack': _subtitle?.label,
         },
       );
+      CastPlaybackCoordinator.instance.activate(
+        api: widget.api,
+        media: widget.media,
+        authorization: auth,
+        timelineOffsetMs: _timelineOffsetMs,
+        durationMs: _durationMs,
+        positionMs: absolutePosition,
+        posterUrl: poster.isEmpty ? null : poster,
+        subtitleLabel: _subtitle?.label,
+      );
       await _video?.pause();
       if (!mounted) return;
       setState(() {
@@ -741,6 +752,13 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_finishing) return;
     _finishing = true;
     await _saveProgress();
+    final auth = _authorization;
+    if ((_casting || _handoffAccepted) &&
+        auth != null &&
+        CastPlaybackCoordinator.instance.owns(auth.sessionId)) {
+      CastPlaybackCoordinator.instance.detachPlayer();
+      return;
+    }
     if (_casting || _handoffAccepted) {
       try {
         await _cast.stop();
