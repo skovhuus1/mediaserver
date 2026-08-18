@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/api_client.dart';
 import '../core/app_config.dart';
+import '../core/cast_playback_coordinator.dart';
 import '../core/models.dart';
 import '../core/session_store.dart';
 
@@ -100,6 +101,7 @@ class AppController extends ChangeNotifier {
     busy = true;
     notifyListeners();
     try {
+      await CastPlaybackCoordinator.instance.stop();
       await api.logout();
     } catch (_) {
       await api.clearLocalSession();

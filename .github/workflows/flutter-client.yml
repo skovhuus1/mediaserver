@@ -11,6 +11,8 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      BB_MEDIA_CAST_RECEIVER_APP_ID: ${{ vars.BB_MEDIA_CAST_RECEIVER_APP_ID }}
     defaults:
       run:
         working-directory: clients/mobile-tv

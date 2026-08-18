@@ -721,3 +721,18 @@ Lokal validering 18. august 2026:
 - Mobil-debug-APK bygget med `BB_MEDIA_DEVICE_TYPE=mobile`; TV-debug-APK bygget med `BB_MEDIA_DEVICE_TYPE=tv` og samme produktions-API-base.
 - `npm run ci`: ESLint, alle TypeScript-typechecks, `43/43` API-testfiler med `144/144` tests, `3/3` worker-tests samt contracts-, API-, worker- og Next.js-produktionsbuild bestået.
 - Fysisk Android-enhed, Android TV, rigtig mediefil og Chromecast er ikke tilsluttet udviklingsmaskinen og forbliver derfor eksplicit staging-acceptance, ikke lokal testbevis.
+# Flutter Chromecast: global session and diagnostics
+
+The Android sender now keeps an active Chromecast playback alive when the full-screen player is closed. A global mini player owns server heartbeat and playback-history updates and provides remote play/pause, seek and stop controls. Logout stops and releases the remote playback before tokens are revoked.
+
+The profile screen includes a Chromecast diagnostic dialog. It reports Google Cast SDK availability, receiver mode, receiver application ID, connected device, receiver state and active media. This separates build configuration from the remaining physical-device acceptance test.
+
+For a registered BoltBytes Custom Web Receiver, configure the same application ID in both deployment and GitHub Actions:
+
+```env
+BB_MEDIA_CAST_RECEIVER_APP_ID=YOUR_REGISTERED_CAST_APP_ID
+```
+
+Create the repository Actions variable `BB_MEDIA_CAST_RECEIVER_APP_ID` before building the APK. The server's public receiver URL is `https://media.boltbytes.com/cast/receiver`; register that HTTPS URL in the Google Cast SDK Developer Console and register the physical Chromecast as a test device while the receiver is unpublished. If the variable is absent, Android deliberately falls back to Google's Default Media Receiver (`CC1AD845`) and the diagnostic dialog shows that fallback.
+
+Physical acceptance still requires an Android phone and Chromecast on the same Wi-Fi: discovery must list the device, handoff must start media, subtitles must switch, navigation away from the player must leave playback running, the global mini player must control the receiver, and stop/logout must release the server session.

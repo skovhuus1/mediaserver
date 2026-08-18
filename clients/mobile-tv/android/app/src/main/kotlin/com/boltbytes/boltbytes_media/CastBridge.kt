@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.CastMediaControlIntent
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
 import com.google.android.gms.cast.MediaMetadata
@@ -266,6 +267,7 @@ class CastBridge(
         val session = suppliedSession ?: castContext?.sessionManager?.currentCastSession
         val remote = session?.remoteMediaClient
         val mediaStatus = remote?.mediaStatus
+        val receiverApplicationId = activity.getString(R.string.cast_receiver_app_id)
         val runtimeState = when (mediaStatus?.playerState) {
             MediaStatus.PLAYER_STATE_PLAYING -> "playing"
             MediaStatus.PLAYER_STATE_PAUSED -> "paused"
@@ -286,6 +288,12 @@ class CastBridge(
             "muted" to (session?.isMute ?: false),
             "idleReason" to (mediaStatus?.idleReason ?: 0),
             "activeTrackIds" to (mediaStatus?.activeTrackIds?.toList() ?: emptyList<Long>()),
+            "receiverApplicationId" to receiverApplicationId,
+            "receiverMode" to if (
+                receiverApplicationId == CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID
+            ) "default" else "custom",
+            "mediaTitle" to remote?.mediaInfo?.metadata?.getString(MediaMetadata.KEY_TITLE),
+            "contentType" to remote?.mediaInfo?.contentType,
         )
     }
 

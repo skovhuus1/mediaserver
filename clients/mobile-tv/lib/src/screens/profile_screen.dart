@@ -4,6 +4,7 @@ import '../app.dart';
 import '../core/models.dart';
 import '../state/app_controller.dart';
 import '../widgets/brand.dart';
+import '../widgets/cast_diagnostics.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({required this.controller, super.key});
@@ -36,6 +37,12 @@ class ProfileScreen extends StatelessWidget {
                 children: [
                   const BrandLockup(compact: true),
                   const Spacer(),
+                  IconButton(
+                    tooltip: 'Chromecast-diagnose',
+                    onPressed: () => showCastDiagnostics(context),
+                    icon: const Icon(Icons.cast_connected),
+                  ),
+                  const SizedBox(width: 8),
                   TextButton.icon(
                     onPressed: controller.busy ? null : controller.logout,
                     icon: const Icon(Icons.logout),

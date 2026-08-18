@@ -7,6 +7,7 @@ import 'screens/library_screen.dart';
 import 'screens/profile_screen.dart';
 import 'state/app_controller.dart';
 import 'widgets/brand.dart';
+import 'widgets/cast_miniplayer.dart';
 
 class BoltBytesApp extends StatelessWidget {
   const BoltBytesApp({required this.controller, super.key});
@@ -84,7 +85,10 @@ class BoltBytesApp extends StatelessWidget {
           statusBarColor: Colors.transparent,
           systemNavigationBarColor: background,
         ),
-        child: child ?? const SizedBox.shrink(),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [child ?? const SizedBox.shrink(), const CastMiniPlayer()],
+        ),
       ),
       home: AnimatedBuilder(
         animation: controller,
