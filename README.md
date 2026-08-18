@@ -673,6 +673,8 @@ Valgfri workerkapacitet: `BB_MEDIA_PLAYBACK_ASSET_MAX_CONCURRENT` (standard `2`,
 
 Den første native klientleverance ligger i `clients/mobile-tv` og bruger serverens eksisterende `/api/v1`-kontrakter direkte. Det er ikke en statisk prototype.
 
+Klientens centrale URL-builder accepterer både klientrelative endpoints som `/playback/context`, serverudstedte API-stier som `/api/v1/playback/...` og komplette HTTPS-URL'er. Dermed tilføjes `/api/v1` aldrig to gange ved polling af Direct Stream/transcode-status. Følsomme query-parametre, herunder stream-tokens, sløres desuden i fejlbeskeder, før de vises i appen.
+
 Implementeret:
 
 - Android mobil/tablet og Android TV fra samme Flutter-kodebase med separat `BB_MEDIA_DEVICE_TYPE`, Leanback-launcher og retningsbestemt fjernbetjeningsfokus.

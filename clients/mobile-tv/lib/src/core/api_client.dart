@@ -44,9 +44,13 @@ class ApiClient {
   }
 
   Uri endpoint(String path) {
-    final parsed = Uri.tryParse(path);
+    final value = path.trim();
+    final parsed = Uri.tryParse(value);
     if (parsed != null && parsed.hasScheme) return parsed;
-    final clean = path.startsWith('/') ? path.substring(1) : path;
+    final clean = value.replaceFirst(RegExp(r'^/+'), '');
+    if (clean == 'api' || clean.startsWith('api/')) {
+      return Uri.parse('${_baseUri.origin}/$clean');
+    }
     final base = _baseUri.toString().replaceAll(RegExp(r'/+$'), '');
     return Uri.parse('$base/$clean');
   }
@@ -254,9 +258,21 @@ class ApiClient {
     } catch (_) {
       // Keep the status-based fallback for non-JSON proxy errors.
     }
-    return ApiException(message, code: code, statusCode: response.statusCode);
+    return ApiException(
+      _redactSensitiveQueryParameters(message),
+      code: code,
+      statusCode: response.statusCode,
+    );
   }
 }
 
 Map<String, dynamic> _asMap(dynamic value) =>
     value is Map<String, dynamic> ? value : <String, dynamic>{};
+
+String _redactSensitiveQueryParameters(String value) => value.replaceAllMapped(
+  RegExp(
+    r'([?&](?:token|streamToken|accessToken|refreshToken|access_token)=)[^&\s]+',
+    caseSensitive: false,
+  ),
+  (match) => '${match.group(1)}[redacted]',
+);
