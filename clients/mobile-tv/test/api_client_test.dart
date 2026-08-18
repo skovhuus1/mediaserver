@@ -82,12 +82,61 @@ void main() {
       'https://media.example.test/api/v1/playback/context',
     );
     expect(
+      api
+          .endpoint(
+            '/api/v1/playback/sessions/session-1/transcode-status?token=secret&generation=one',
+          )
+          .toString(),
+      'https://media.example.test/api/v1/playback/sessions/session-1/transcode-status?token=secret&generation=one',
+    );
+    expect(
+      api.endpoint('api/v1/playback/context').toString(),
+      'https://media.example.test/api/v1/playback/context',
+    );
+    expect(
+      api.endpoint('https://stream.example.test/video.m3u8').toString(),
+      'https://stream.example.test/video.m3u8',
+    );
+    expect(
       api.absoluteMediaUrl('/api/v1/playback/stream'),
       'https://media.example.test/api/v1/playback/stream',
     );
     expect(
       api.absoluteMediaUrl('/poster.jpg'),
       'https://image.tmdb.org/t/p/w780/poster.jpg',
+    );
+  });
+
+  test('redacts playback tokens from server error messages', () async {
+    final api = ApiClient(
+      baseUrl: 'https://media.example.test/api/v1',
+      storage: _MemoryStorage(),
+      httpClient: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'message':
+                'Cannot GET /api/v1/playback/status?token=secret-stream-token&generation=one',
+          }),
+          404,
+        ),
+      ),
+    );
+
+    await expectLater(
+      api.getJson('/api/v1/playback/status?token=secret-stream-token'),
+      throwsA(
+        isA<ApiException>()
+            .having(
+              (failure) => failure.message,
+              'message',
+              contains('token=[redacted]'),
+            )
+            .having(
+              (failure) => failure.message,
+              'message',
+              isNot(contains('secret-stream-token')),
+            ),
+      ),
     );
   });
 }
