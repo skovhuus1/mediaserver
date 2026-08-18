@@ -685,6 +685,18 @@ Implementeret:
 - Heartbeat og progression bruger absolut medietid og gemmes hvert 10. sekund. Afslutning frigiver sessionen, mens serverens lease fortsat er crash-sikker fallback.
 - Serverens foretrukne tekstundertekst vælges automatisk, WebVTT rendres uafhængigt af control-overlayet, og billedbaserede spor anmoder om burn-in gennem sessionens configuration-endpoint.
 - Kvalitetsmenuen har Auto, Original og de serverautoriserede renditions. Ændringer gemmes på den registrerede enhed og genautoriserer fra den aktuelle position.
+- Android-mobilbuildet bruger Google Cast Framework `22.3.1` gennem en vedligeholdt Kotlin/Flutter-bro. Den native Cast-knap håndterer discovery, session start/resume, reconnect og enhedsstatus; Android TV-buildet skjuler senderknappen.
+- Cast genbruger den eksisterende logical playback-session via `/cast-handoff`, sender kun serverudstedte HTTPS-streams og WebVTT-spor til receiveren og synkroniserer remote play/pause, seek, position, heartbeat, historik og valgt undertekst. Billedbaserede undertekster genindlæser den samme Cast-session med server-side burn-in.
+- Androids Cast-notifikation fortsætter med remote controls i baggrunden. Når playeren lukkes eksplicit, stoppes receiver-mediet, handoff rulles tilbage og streamreservationen frigives deterministisk.
+
+Chromecast receiver-ID til mobilbuildet kan leveres som Gradle-property eller miljøvariabel. Uden værdien bruges Google Default Media Receiver (`CC1AD845`):
+
+```powershell
+$env:BB_MEDIA_CAST_RECEIVER_APP_ID = '<registreret Cast Application ID>'
+C:\dev\flutter\bin\flutter.bat build apk --debug --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 --dart-define=BB_MEDIA_DEVICE_TYPE=mobile
+```
+
+Værdien skal være samme registrerede Custom Web Receiver-ID som serverens `BB_MEDIA_CAST_RECEIVER_APP_ID`, og receiver-URL'en skal være `https://media.boltbytes.com/cast/receiver`. Default Receiver virker uden registrering, men receiver-ejet heartbeat kræver BoltBytes receiver-ID'et. Fysisk discovery, TLS, HLS, 4K/HDR og subtitle-acceptance kræver fortsat en rigtig Chromecast/Google TV-enhed på samme netværk; CI kan validere kode, builds og kontrakter, men kan ikke simulere Googles discovery-protokol.
 
 Lokal udvikling:
 
