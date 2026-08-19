@@ -58,7 +58,7 @@ class OfflineDownloadRecord {
   bool get playable =>
       status == 'downloaded' &&
       licenseValid &&
-      localPath != null &&
+      isEncryptedOfflinePath(localPath) &&
       File(localPath!).existsSync();
 
   String get displayTitle {
@@ -198,6 +198,9 @@ class OfflineDownloadRecord {
     'error': error,
   };
 }
+
+bool isEncryptedOfflinePath(String? path) =>
+    path != null && path.toLowerCase().endsWith('.bbenc');
 
 class OfflineDownloadsManager extends ChangeNotifier {
   OfflineDownloadsManager._();

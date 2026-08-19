@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 
 import '../core/api_client.dart';
+import '../core/client_telemetry.dart';
+import '../core/push_notifications.dart';
 import '../core/app_config.dart';
 import '../core/cast_playback_coordinator.dart';
 import '../core/models.dart';
@@ -111,6 +113,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       await CastPlaybackCoordinator.instance.stop();
+      await PushNotifications.instance.unregister();
       await api.logout();
     } catch (_) {
       await api.clearLocalSession();
@@ -127,6 +130,10 @@ class AppController extends ChangeNotifier {
     final response = await api.getJson('/auth/me');
     user = SessionUser.fromJson(response);
     await storage.writeCachedUser(response);
+    await Future.wait([
+      PushNotifications.instance.configure(api),
+      ClientTelemetry.instance.configure(api),
+    ]);
     offlineMode = false;
     if (!forceLibrary &&
         user!.activeProfileId == null &&

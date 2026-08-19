@@ -1,5 +1,95 @@
 # BoltBytes Media Server
 
+## Leverance 2026-08-19: krypteret offline, push, crash-ledger og Android-release
+
+Denne leverance gør Android- og Android TV-klienten klar til en kontrolleret produktionsudgivelse på fire områder:
+
+- Offline-medier gemmes i formatet `.bbenc` med AES-256-GCM i uafhængige 1 MiB-blokke. Hver blok har tilfældig nonce og autentifikationstag, så manipulation opdages ved afspilning.
+- Krypteringsnøglen genereres som en ikke-eksporterbar Android Keystore-nøgle pr. download. En kopieret fil kan derfor ikke afspilles på en anden enhed eller efter sletning af appens nøgle.
+- Android WorkManager henter og krypterer direkte til en midlertidig krypteret fil og committer først den færdige container. Der oprettes ikke en færdig ukrypteret mediefil på enheden.
+- Offline-playeren læser kun gennem en tokenbeskyttet loopback-server på `127.0.0.1`. Serveren understøtter `HEAD`, byte ranges og autentificeret blokvis dekryptering, så seeking ikke kræver dekryptering af hele filmen.
+- Eksisterende `.mp4`-offlinefiler slettes ved første opstart med den nye klient og kan ikke afspilles. Titlerne skal hentes igen; der findes ingen usikker legacy-fallback.
+- Firebase Cloud Messaging-tokenet bindes server-side til account, user, aktiv profil og device. Tokenrotation deaktiverer tidligere tokens for samme device.
+- Notifikationer har en server-side indbakke og leveringsstatus. En færdig offline-klargøring opretter automatisk en notifikation; `POST /api/v1/client-services/notifications/test` kan bruges til en kontrolleret ende-til-ende-test.
+- Flutter framework-fejl, ufangede Dart-fejl og seneste native Android-crash køes krypteret lokalt og sendes til den selvhostede crash-ledger efter login. Authorization, cookies, passwords, secrets og token-queryparametre redigeres før lagring.
+- Produktionsworkflowet kræver rigtig release-keystore, bygger mobil-APK, Android TV-APK og Google Play AAB og kan efter eksplicit valg publicere til `internal`, `alpha`, `beta` eller `production` via Android Publisher API.
+
+### Sikkerhedsgrænser for offline
+
+Offline-licensen kontrolleres før den lokale dekrypteringsserver startes. En enhed uden netværk kan ikke modtage en øjeblikkelig tilbagekaldelse; derfor er den eksisterende licensudløbstid den hårde offlinegrænse. Suspension og device-revocation forhindrer fornyelse. Android Keystore beskytter nøglen mod normal filkopiering, men en kompromitteret/rootet enhed ligger uden for DRM-garantien.
+
+Kun loopback-trafik må bruge klartekst. Androids network security config afviser almindelig HTTP til eksterne hosts; produktions-API’en skal derfor være `https://media.boltbytes.com/api/v1`.
+
+### Push-konfiguration
+
+Serverens worker kræver Firebase-servicekontoen som base64-kodet JSON i `.env`:
+
+```bash
+BB_MEDIA_FCM_SERVICE_ACCOUNT_JSON_BASE64=<base64-af-service-account-json>
+BB_MEDIA_NOTIFICATION_MAX_CONCURRENT=4
+```
+
+Android-buildet kræver disse Dart-defines for rigtig push. Hvis de mangler, starter klienten fortsat, men viser push som ikke konfigureret og bruger kun serverindbakken:
+
+```text
+BB_MEDIA_FIREBASE_API_KEY
+BB_MEDIA_FIREBASE_APP_ID
+BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID
+BB_MEDIA_FIREBASE_PROJECT_ID
+```
+
+GitHub Actions bruger repository variable for `BB_MEDIA_FIREBASE_APP_ID`, `BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID` og `BB_MEDIA_FIREBASE_PROJECT_ID` samt secret `BB_MEDIA_FIREBASE_API_KEY`. FCM-servicekontoen til serveren og Play-servicekontoen er to særskilte rettigheder og bør ikke genbruges.
+
+### Crash-ledger og klientservices
+
+Følgende kontrakter er aktive under `/api/v1/client-services`:
+
+```text
+POST   /push/register
+DELETE /push/register
+GET    /notifications
+POST   /notifications/:id/read
+POST   /notifications/read-all
+POST   /notifications/test
+POST   /crashes
+GET    /crashes                 admin/operator
+```
+
+Crash-ledgeren deduplikerer samme fingerprint fra samme device i 15 minutter og øger `occurrences`. Klienten gemmer højst 20 usendte rapporter i Flutter Secure Storage. Native Android gemmer kun den seneste ufangede fejl i appens private storage indtil næste opstart.
+
+### Google Play og Android TV
+
+Workflowet `.github/workflows/android-release.yml` kræver de eksisterende Android-keystore-secrets. Ved Play-publicering kræves desuden secret `BB_MEDIA_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64`. Servicekontoen skal være knyttet til Play Console og have rettighed til den valgte track for pakken `com.boltbytes.boltbytes_media`.
+
+Kør workflowet manuelt, angiv semantisk version, vælg `publish_play=true`, og start med `internal`. Et tag `android-vX.Y.Z` bygger og publicerer fortsat GitHub Release-artefakter, men skubber ikke automatisk til Play. Release-konfigurationen sætter `BB_MEDIA_REQUIRE_PRODUCTION_SIGNING=true`; manglende eller ufuldstændig keystore stopper buildet i stedet for at falde tilbage til debug-signering.
+
+Før promotion ud af internal track skal disse fysiske gates dokumenteres:
+
+- Krypteret download, airplane-mode playback, seeking og udløbet licens på en rigtig telefon og Android TV-enhed.
+- FCM i foreground, background og terminated state.
+- Installation/opgradering fra signerede Play-artefakter.
+- Chromecast-certificering på fysisk Cast-hardware er fortsat en separat gate.
+
+Apple iOS/tvOS er ikke inkluderet i denne leverance. Det kræver macOS/Xcode, Apple-signering og fysisk validering og må ikke markeres som leveret fra Windows-CI.
+
+### Valideringsbevis for leverancen
+
+Følgende gates blev kørt lokalt på den færdige ændring:
+
+```text
+npm run ci                                      PASS
+npx prisma validate                            PASS
+API unit tests                                 45 filer / 148 tests PASS
+Worker unit tests                               5 filer / 9 tests PASS
+flutter analyze                                PASS, 0 findings
+flutter test                                   18 tests PASS
+flutter build apk --debug                      PASS
+flutter build appbundle --release              PASS, app-release.aab 54.3 MB
+production signing guard uden credentials      PASS, build afvist som forventet
+```
+
+Release-AAB’en ovenfor blev kun brugt som lokal compile/lint-gate og er ikke et udgivelsesartefakt, fordi den lokale maskine ikke havde produktions-keystore. Rigtig FCM-levering, Play Console-publicering og krypteret offlineafspilning på fysisk Android/Android TV forbliver eksterne release-gates og skal dokumenteres separat; de er ikke antaget bestået.
+
 ## Seneste leverance: Offline-downloads og fysisk Android-certificering
 
 - Mobilklienten kan sætte film og enkelte episoder i kø som 360p, 480p, 720p eller 1080p offlinefiler. Serveren håndhæver fortsat profilens `allowOfflineDownload` og opløsningsloft.

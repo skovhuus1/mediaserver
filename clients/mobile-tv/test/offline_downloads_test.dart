@@ -62,4 +62,10 @@ void main() {
     expect(record.licenseValid, isFalse);
     expect(record.playable, isFalse);
   });
+
+  test('only the device-encrypted container is accepted for playback', () {
+    expect(isEncryptedOfflinePath('/data/offline/item.bbenc'), isTrue);
+    expect(isEncryptedOfflinePath('/data/offline/item.mp4'), isFalse);
+    expect(isEncryptedOfflinePath(null), isFalse);
+  });
 }

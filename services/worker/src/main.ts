@@ -15,6 +15,7 @@ import {
 } from './job-concurrency.js';
 import { generatePlaybackAssets } from './playback-assets.js';
 import { prepareOfflineDownload } from './offline-downloads.js';
+import { deliverPushNotification, queueOfflineReadyNotification } from './push-notifications.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -28,6 +29,7 @@ const workerConcurrency = resolveWorkerConcurrency({
   metadataMaxConcurrent: process.env.BB_MEDIA_METADATA_MAX_CONCURRENT,
   playbackAssetMaxConcurrent: process.env.BB_MEDIA_PLAYBACK_ASSET_MAX_CONCURRENT,
   transcodeMaxConcurrent: process.env.BB_MEDIA_TRANSCODE_MAX_CONCURRENT,
+  notificationMaxConcurrent: process.env.BB_MEDIA_NOTIFICATION_MAX_CONCURRENT,
 });
 const transcodeMaxConcurrent = workerConcurrency.transcodes;
 const transcodeStatusKey = 'runtime.transcoder.status';
@@ -178,6 +180,10 @@ async function processJob(job: ClaimedJob): Promise<void> {
       return;
     case 'offline.prepare':
       await prepareOfflineDownload(prisma, job, transcodeRoot, () => renewJobLease(job.id));
+      await queueOfflineReadyNotification(prisma, job);
+      return;
+    case 'notification.push':
+      await deliverPushNotification(prisma, job);
       return;
     case 'playback.expire-leases':
       await expirePlaybackLeases();

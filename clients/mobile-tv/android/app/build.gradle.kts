@@ -19,6 +19,14 @@ val hasReleaseSigning = listOf(
     releaseKeyAlias,
     releaseKeyPassword,
 ).all { !it.isNullOrBlank() }
+val requireProductionSigning = providers
+    .environmentVariable("BB_MEDIA_REQUIRE_PRODUCTION_SIGNING")
+    .getOrElse("false")
+    .equals("true", ignoreCase = true)
+
+if (requireProductionSigning && !hasReleaseSigning) {
+    throw GradleException("Production Android signing is required but the keystore configuration is incomplete")
+}
 
 android {
     namespace = "com.boltbytes.boltbytes_media"
@@ -64,6 +72,7 @@ android {
 
 dependencies {
     implementation("com.google.android.gms:play-services-cast-framework:22.3.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.5")
 }
 
 kotlin {

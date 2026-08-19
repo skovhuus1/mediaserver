@@ -9,18 +9,21 @@ describe('worker job concurrency', () => {
       playbackAssets: 2,
       maintenance: 1,
       transcodes: 1,
+      notifications: 4,
     });
     expect(resolveWorkerConcurrency({
       scanMaxConcurrent: '99',
       metadataMaxConcurrent: '0',
       playbackAssetMaxConcurrent: '3',
       transcodeMaxConcurrent: '4',
+      notificationMaxConcurrent: '99',
     })).toEqual({
       scans: 8,
       metadata: 1,
       playbackAssets: 3,
       maintenance: 1,
       transcodes: 4,
+      notifications: 32,
     });
   });
 
@@ -34,13 +37,18 @@ describe('worker job concurrency', () => {
       workerMode: 'jobs',
       activeJobTypes: ['library.scan', 'library.scan', 'media.metadata'],
       limits,
-    })).toEqual(['media.metadata', 'media.playback-assets', 'playback.expire-leases']);
+    })).toEqual([
+      'media.metadata',
+      'media.playback-assets',
+      'playback.expire-leases',
+      'notification.push',
+    ]);
 
     expect(claimableWorkerJobTypes({
       workerMode: 'jobs',
       activeJobTypes: ['media.metadata', 'media.metadata', 'playback.expire-leases'],
       limits,
-    })).toEqual(['library.scan', 'media.playback-assets']);
+    })).toEqual(['library.scan', 'media.playback-assets', 'notification.push']);
   });
 
   it('isolates transcode workers from catalog jobs', () => {

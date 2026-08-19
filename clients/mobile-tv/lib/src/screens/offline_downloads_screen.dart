@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/api_client.dart';
@@ -218,8 +219,22 @@ class _OfflinePlayerScreenState extends State<OfflinePlayerScreen> {
       );
       return;
     }
-    final next = VideoPlayerController.file(
-      File(path),
+    final response =
+        await const MethodChannel(
+          'boltbytes.media/offline_downloads',
+        ).invokeMapMethod<String, dynamic>('serve', {
+          'id': widget.record.id,
+          'localPath': path,
+          'licenseExpiresAtMs':
+              widget.record.licenseExpiresAt.millisecondsSinceEpoch,
+        });
+    final streamUrl = response?['url']?.toString();
+    if (streamUrl == null || streamUrl.isEmpty) {
+      setState(() => error = 'Den krypterede offlinefil kunne ikke åbnes.');
+      return;
+    }
+    final next = VideoPlayerController.networkUrl(
+      Uri.parse(streamUrl),
       videoPlayerOptions: VideoPlayerOptions(allowBackgroundPlayback: true),
     );
     controller = next;
@@ -265,6 +280,11 @@ class _OfflinePlayerScreenState extends State<OfflinePlayerScreen> {
       );
       unawaited(video.dispose());
     }
+    unawaited(
+      const MethodChannel(
+        'boltbytes.media/offline_downloads',
+      ).invokeMethod<void>('stopServe'),
+    );
     super.dispose();
   }
 
