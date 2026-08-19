@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/api_client.dart';
+import '../core/app_config.dart';
 import '../core/cast_service.dart';
 import '../core/cast_playback_coordinator.dart';
 import '../core/models.dart';
+import '../core/playback_platform.dart';
 import '../core/webvtt.dart';
 import '../widgets/brand.dart';
 
@@ -56,6 +58,17 @@ class _PlayerScreenState extends State<PlayerScreen>
   String _castRuntimeState = 'paused';
   String? _castDeviceName;
   Map<String, int> _castTrackIds = const {};
+  final PlaybackPlatform _platform = PlaybackPlatform.instance;
+  StreamSubscription<PlaybackPlatformCommand>? _platformSubscription;
+  List<_TimelineMarker> _markers = const [];
+  _TimelineMarker? _activeMarker;
+  Timer? _nextEpisodeTimer;
+  int? _nextEpisodeCountdown;
+  bool _autoplaySuppressed = false;
+  bool _recovering = false;
+  int _reconnectAttempts = 0;
+  DateTime _lastPlatformUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _inPictureInPicture = false;
 
   @override
   void initState() {
@@ -68,6 +81,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         onError: (_) {},
       );
     }
+    _platformSubscription = _platform.commands.listen(_handlePlatformCommand);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_start(widget.resumePositionMs));
     });
@@ -78,7 +92,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       unawaited(_saveProgress());
-      unawaited(_video?.pause());
+      unawaited(_syncPlatform(force: true));
+    }
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_syncPlatform(force: true));
+      if (_video?.value.hasError == true) unawaited(_recoverPlayback());
     }
   }
 
@@ -126,6 +144,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         );
       }
       _authorization = authorization;
+      await _loadPlaybackAssets();
       _timelineOffsetMs = authorization.isDirectPlay ? 0 : startPositionMs;
       await _prepareController(
         authorization,
@@ -167,7 +186,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     final controller = VideoPlayerController.networkUrl(
       widget.api.endpoint(authorization.streamUrl),
       formatHint: authorization.isHls ? VideoFormat.hls : null,
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+      videoPlayerOptions: VideoPlayerOptions(
+        mixWithOthers: false,
+        allowBackgroundPlayback: true,
+      ),
     );
     _video = controller;
     await previous?.dispose();
@@ -177,6 +199,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     await controller.setPlaybackSpeed(authorization.preferences.playbackRate);
     await controller.play();
+    _reconnectAttempts = 0;
     if (!mounted) return;
     setState(() {
       _buffering = false;
@@ -236,6 +259,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     final video = _video;
     if (!mounted || video == null || !video.value.isInitialized) return;
     final value = video.value;
+    if (value.hasError && !_recovering) {
+      unawaited(_recoverPlayback());
+      return;
+    }
     final nextCue = _cues
         .where(
           (cue) => cue.contains(Duration(milliseconds: _absolutePositionMs)),
@@ -253,7 +280,214 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     if (value.isCompleted && !_completed) {
       _completed = true;
-      unawaited(_saveProgress());
+      unawaited(_playNextEpisode());
+    }
+    _updateMarkers();
+    unawaited(_syncPlatform());
+  }
+
+  Future<void> _loadPlaybackAssets() async {
+    try {
+      final assets = jsonMap(
+        await widget.api.getJson('/media/${widget.media.id}/playback-assets'),
+      );
+      _markers = jsonList(assets['markers'])
+          .map(_TimelineMarker.fromJson)
+          .where((marker) => marker.endMs > marker.startMs)
+          .toList(growable: false);
+    } catch (_) {
+      _markers = const [];
+    }
+  }
+
+  void _updateMarkers() {
+    final position = _absolutePositionMs;
+    final next = _markers
+        .where(
+          (marker) =>
+              position >= marker.startMs - 750 && position < marker.endMs,
+        )
+        .firstOrNull;
+    if (next?.kind == _activeMarker?.kind &&
+        next?.startMs == _activeMarker?.startMs) {
+      return;
+    }
+    _activeMarker = next;
+    if (next?.kind == 'credits' &&
+        widget.media.isEpisode &&
+        _authorization?.preferences.autoplayNext == true &&
+        !_autoplaySuppressed) {
+      _startNextEpisodeCountdown();
+    } else {
+      _cancelNextEpisodeCountdown();
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _startNextEpisodeCountdown() {
+    if (_nextEpisodeCountdown != null) return;
+    _nextEpisodeCountdown = 10;
+    _nextEpisodeTimer?.cancel();
+    _nextEpisodeTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      final current = _nextEpisodeCountdown ?? 0;
+      if (current <= 1) {
+        timer.cancel();
+        _nextEpisodeCountdown = null;
+        unawaited(_playNextEpisode());
+      } else {
+        setState(() => _nextEpisodeCountdown = current - 1);
+      }
+    });
+  }
+
+  void _cancelNextEpisodeCountdown({bool suppress = false}) {
+    _nextEpisodeTimer?.cancel();
+    _nextEpisodeTimer = null;
+    _nextEpisodeCountdown = null;
+    if (suppress) _autoplaySuppressed = true;
+  }
+
+  Future<void> _playNextEpisode({bool automatic = true}) async {
+    final auth = _authorization;
+    if (auth == null || !widget.media.isEpisode) return;
+    if (automatic && !auth.preferences.autoplayNext) return;
+    _cancelNextEpisodeCountdown();
+    try {
+      await widget.api
+          .patchJson('/playback/sessions/${auth.sessionId}/progress', {
+            'positionMs': _durationMs,
+            if (_durationMs > 0) 'durationMs': _durationMs,
+            'completed': true,
+          });
+      final query = <String, String>{'afterMediaId': widget.media.id};
+      if (widget.media.seriesMetadataProviderId?.isNotEmpty == true) {
+        query['seriesMetadataProviderId'] =
+            widget.media.seriesMetadataProviderId!;
+      } else if (widget.media.seriesDisplayTitle?.isNotEmpty == true) {
+        query['seriesDisplayTitle'] = widget.media.seriesDisplayTitle!;
+      } else if (widget.media.seriesTitle?.isNotEmpty == true) {
+        query['seriesTitle'] = widget.media.seriesTitle!;
+      } else {
+        return;
+      }
+      final next = jsonMap(
+        await widget.api.getJson(
+          '/playback/history/series-next?${Uri(queryParameters: query).query}',
+        ),
+      );
+      if (next.isEmpty) {
+        if (mounted) setState(() => _status = 'Serien er færdig');
+        return;
+      }
+      final media = MediaItem.fromJson(next['media']);
+      if (media.id.isEmpty || !mounted) return;
+      if (_casting || CastPlaybackCoordinator.instance.owns(auth.sessionId)) {
+        await CastPlaybackCoordinator.instance.stop();
+      } else {
+        await _release();
+      }
+      _finishing = true;
+      if (!mounted) return;
+      await Navigator.of(context).pushReplacement<void, void>(
+        MaterialPageRoute(
+          builder: (_) => PlayerScreen(
+            api: widget.api,
+            media: media,
+            resumePositionMs: intValue(next['resumePositionMs']) ?? 0,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) setState(() => _status = 'Næste episode kunne ikke startes');
+    }
+  }
+
+  Future<void> _recoverPlayback() async {
+    if (_recovering || _released || _reconnectAttempts >= 3) return;
+    _recovering = true;
+    _reconnectAttempts += 1;
+    final position = _absolutePositionMs;
+    if (mounted) {
+      setState(() {
+        _buffering = true;
+        _status = 'Genopretter stream ($_reconnectAttempts/3)...';
+      });
+    }
+    await _saveProgress();
+    await _release();
+    await _video?.dispose();
+    _video = null;
+    await Future<void>.delayed(Duration(seconds: _reconnectAttempts));
+    _released = false;
+    _finishing = false;
+    _recovering = false;
+    if (mounted) await _start(position);
+  }
+
+  void _handlePlatformCommand(PlaybackPlatformCommand command) {
+    if (!mounted) return;
+    switch (command.event) {
+      case 'play':
+        if (!(_video?.value.isPlaying ?? false)) _togglePlayback();
+      case 'pause':
+        if (_video?.value.isPlaying ?? false) _togglePlayback();
+      case 'seek':
+        if (command.positionMs != null) unawaited(_seekTo(command.positionMs!));
+      case 'forward':
+        unawaited(_seekTo(_absolutePositionMs + 10000));
+      case 'rewind':
+        unawaited(_seekTo(_absolutePositionMs - 10000));
+      case 'stop':
+        unawaited(_close());
+      case 'pipChanged':
+        setState(() {
+          _inPictureInPicture = command.inPictureInPicture;
+          if (_inPictureInPicture) _controls = false;
+        });
+    }
+  }
+
+  Future<void> _syncPlatform({bool force = false}) async {
+    final now = DateTime.now();
+    if (!force &&
+        now.difference(_lastPlatformUpdate) < const Duration(seconds: 1)) {
+      return;
+    }
+    _lastPlatformUpdate = now;
+    final video = _video;
+    final playing = _casting
+        ? _castRuntimeState == 'playing'
+        : video?.value.isPlaying ?? false;
+    final size = video?.value.size;
+    try {
+      await _platform.update(
+        title: widget.media.displayTitle,
+        subtitle: widget.media.isEpisode ? widget.media.episodeLabel : _status,
+        playing: playing,
+        buffering: _buffering,
+        positionMs: _absolutePositionMs,
+        durationMs: _durationMs,
+        playbackRate: video?.value.playbackSpeed ?? 1,
+        allowPictureInPicture: !AppConfig.isTvBuild && !_casting,
+        videoWidth: size?.width.round() ?? 16,
+        videoHeight: size?.height.round() ?? 9,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _enterPictureInPicture() async {
+    _controls = false;
+    await _syncPlatform(force: true);
+    try {
+      await _platform.enterPictureInPicture();
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () =>
+              _error = 'Picture-in-Picture er ikke tilgængelig på denne enhed.',
+        );
+      }
     }
   }
 
@@ -767,6 +1001,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       await _cancelCastHandoff();
     }
     await _release();
+    await _platform.clear().catchError((_) {});
   }
 
   Future<void> _close() async {
@@ -781,7 +1016,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     _progressTimer?.cancel();
     _uiTimer?.cancel();
     _hideTimer?.cancel();
+    _nextEpisodeTimer?.cancel();
     unawaited(_castSubscription?.cancel());
+    unawaited(_platformSubscription?.cancel());
+    unawaited(_platform.clear());
     unawaited(_finishPlayback());
     unawaited(_video?.dispose());
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -943,6 +1181,40 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
             const Spacer(),
+            if (_activeMarker != null && !_buffering && _error == null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Wrap(
+                  spacing: 10,
+                  children: [
+                    FilledButton.tonalIcon(
+                      onPressed: () => _seekTo(_activeMarker!.endMs),
+                      icon: const Icon(Icons.skip_next),
+                      label: Text(switch (_activeMarker!.kind) {
+                        'intro' => 'Spring intro over',
+                        'recap' => 'Spring recap over',
+                        _ => 'Spring rulletekster over',
+                      }),
+                    ),
+                    if (_activeMarker!.kind == 'credits' &&
+                        _nextEpisodeCountdown != null)
+                      FilledButton.icon(
+                        onPressed: () => _playNextEpisode(automatic: false),
+                        icon: const Icon(Icons.play_arrow),
+                        label: Text(
+                          'Næste episode om $_nextEpisodeCountdown sek.',
+                        ),
+                      ),
+                    if (_nextEpisodeCountdown != null)
+                      OutlinedButton(
+                        onPressed: () => setState(
+                          () => _cancelNextEpisodeCountdown(suppress: true),
+                        ),
+                        child: const Text('Bliv her'),
+                      ),
+                  ],
+                ),
+              ),
             if (_error != null)
               Container(
                 constraints: const BoxConstraints(maxWidth: 580),
@@ -1043,6 +1315,14 @@ class _PlayerScreenState extends State<PlayerScreen>
                         icon: const Icon(Icons.tune),
                         label: const Text('Kvalitet'),
                       ),
+                      if (!AppConfig.isTvBuild && !_casting) ...[
+                        const SizedBox(width: 10),
+                        TextButton.icon(
+                          onPressed: _enterPictureInPicture,
+                          icon: const Icon(Icons.picture_in_picture_alt),
+                          label: const Text('PiP'),
+                        ),
+                      ],
                       const SizedBox(width: 10),
                       TextButton.icon(
                         onPressed: () {
@@ -1182,6 +1462,26 @@ class _PlayerScreenState extends State<PlayerScreen>
       return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     }
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+}
+
+class _TimelineMarker {
+  const _TimelineMarker({
+    required this.kind,
+    required this.startMs,
+    required this.endMs,
+  });
+  final String kind;
+  final int startMs;
+  final int endMs;
+
+  factory _TimelineMarker.fromJson(dynamic value) {
+    final json = jsonMap(value);
+    return _TimelineMarker(
+      kind: stringValue(json['kind']) ?? 'unknown',
+      startMs: intValue(json['startMs']) ?? 0,
+      endMs: intValue(json['endMs']) ?? 0,
+    );
   }
 }
 

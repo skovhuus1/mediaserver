@@ -9,7 +9,10 @@ class AppConfig {
     'BB_MEDIA_DEVICE_TYPE',
     defaultValue: 'mobile',
   );
-  static const appVersion = '0.1.0';
+  static const appVersion = String.fromEnvironment(
+    'BB_MEDIA_APP_VERSION',
+    defaultValue: '0.1.0',
+  );
 
   static bool get isTvBuild => deviceType.toLowerCase() == 'tv';
 

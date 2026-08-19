@@ -1,9 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { detectVideoSignalProfile, selectSeriesContinuation, type AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { PlaybackProgressDto } from './playback-history.dto';
 import { normalizePlaybackProgress } from './playback-progress';
 import { StreamReservationService } from './stream-reservation.service';
+
+const watchlistMediaInclude = Prisma.validator<Prisma.MediaItemInclude>()({
+  file: true,
+  library: { select: { id: true, name: true, type: true } },
+});
+
+type WatchlistMedia = Prisma.MediaItemGetPayload<{
+  include: typeof watchlistMediaInclude;
+}>;
 
 @Injectable()
 export class PlaybackHistoryService {
@@ -134,6 +144,85 @@ export class PlaybackHistoryService {
     });
   }
 
+  async watchlist(actor: AuthenticatedUser) {
+    const profileId = this.profileId(actor);
+    const entries = await this.prisma.watchlistEntry.findMany({
+      where: { accountId: actor.accountId, profileId },
+      include: { media: { include: watchlistMediaInclude } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const histories = await this.prisma.playbackHistory.findMany({
+      where: {
+        accountId: actor.accountId,
+        profileId,
+        mediaId: { in: entries.map((entry) => entry.mediaId) },
+      },
+    });
+    const progress = new Map(histories.map((entry) => [entry.mediaId, entry]));
+    return entries.map((entry) => this.publicMedia(entry.media, progress.get(entry.mediaId)));
+  }
+
+  async addToWatchlist(actor: AuthenticatedUser, mediaId: string) {
+    const profileId = this.profileId(actor);
+    await this.media(actor, mediaId);
+    const entry = await this.prisma.watchlistEntry.upsert({
+      where: { profileId_mediaId: { profileId, mediaId } },
+      create: { accountId: actor.accountId, profileId, mediaId },
+      update: {},
+    });
+    return { mediaId: entry.mediaId, inWatchlist: true, createdAt: entry.createdAt };
+  }
+
+  async removeFromWatchlist(actor: AuthenticatedUser, mediaId: string) {
+    const profileId = this.profileId(actor);
+    await this.prisma.watchlistEntry.deleteMany({
+      where: { accountId: actor.accountId, profileId, mediaId },
+    });
+    return { mediaId, inWatchlist: false };
+  }
+
+  async mediaStatus(actor: AuthenticatedUser, mediaId: string) {
+    const profileId = this.profileId(actor);
+    await this.media(actor, mediaId);
+    const [watchlist, history] = await Promise.all([
+      this.prisma.watchlistEntry.findUnique({
+        where: { profileId_mediaId: { profileId, mediaId } },
+      }),
+      this.prisma.playbackHistory.findUnique({
+        where: { profileId_mediaId: { profileId, mediaId } },
+      }),
+    ]);
+    return {
+      mediaId,
+      inWatchlist: Boolean(watchlist),
+      watched: history?.completed ?? false,
+      positionMs: history?.positionMs ?? 0,
+    };
+  }
+
+  async setWatched(actor: AuthenticatedUser, mediaId: string, watched: boolean) {
+    const profileId = this.profileId(actor);
+    const media = await this.media(actor, mediaId);
+    const positionMs = watched ? media.file?.durationMs ?? 0 : 0;
+    const history = await this.prisma.playbackHistory.upsert({
+      where: { profileId_mediaId: { profileId, mediaId } },
+      create: {
+        accountId: actor.accountId,
+        userId: actor.sub,
+        profileId,
+        mediaId,
+        positionMs,
+        completed: watched,
+      },
+      update: { positionMs, completed: watched },
+    });
+    return {
+      mediaId,
+      watched: history.completed,
+      positionMs: history.positionMs,
+    };
+  }
+
   async nextEpisode(
     actor: AuthenticatedUser,
     identity: string | {
@@ -207,6 +296,74 @@ export class PlaybackHistoryService {
         file,
       },
       resumePositionMs: continuation?.resumePositionMs ?? progress?.positionMs ?? 0,
+    };
+  }
+
+  private profileId(actor: AuthenticatedUser) {
+    if (!actor.profileId) {
+      throw new BadRequestException({
+        code: 'active_profile_required',
+        message: 'An active profile is required',
+      });
+    }
+    return actor.profileId;
+  }
+
+  private async media(actor: AuthenticatedUser, mediaId: string) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      include: watchlistMediaInclude,
+    });
+    if (!media) {
+      throw new NotFoundException({
+        code: 'media_not_found',
+        message: 'Media was not found in this account',
+      });
+    }
+    return media;
+  }
+
+  private publicMedia(
+    media: WatchlistMedia,
+    history?: { positionMs: number; completed: boolean; updatedAt: Date },
+  ) {
+    const durationMs = media.file?.durationMs ?? null;
+    const file = media.file
+      ? (({ probe: _probe, ...publicFile }) => ({
+          ...publicFile,
+          sizeBytes: media.file!.sizeBytes.toString(),
+        }))(media.file)
+      : null;
+    return {
+      id: media.id,
+      title: media.title,
+      type: media.type,
+      category: media.category,
+      seriesTitle: media.seriesTitle,
+      seriesDisplayTitle: media.seriesDisplayTitle,
+      seriesMetadataProviderId: media.seriesMetadataProviderId,
+      releaseYear: media.releaseYear,
+      seasonNumber: media.seasonNumber,
+      episodeNumber: media.episodeNumber,
+      overview: media.overview,
+      posterPath: media.posterPath,
+      backdropPath: media.backdropPath,
+      width: media.width,
+      height: media.height,
+      hdr: detectVideoSignalProfile(media.file?.probe).hdr,
+      library: media.library,
+      file,
+      progress: history && !history.completed
+        ? {
+            positionMs: history.positionMs,
+            durationMs,
+            percent: durationMs
+              ? Math.min(100, Math.round((history.positionMs / durationMs) * 100))
+              : 0,
+            updatedAt: history.updatedAt,
+          }
+        : null,
+      watched: history?.completed ?? false,
     };
   }
 }

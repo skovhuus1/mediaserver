@@ -23,6 +23,9 @@ class _TitleScreenState extends State<TitleScreen> {
   bool loading = true;
   String? error;
   int? selectedSeason;
+  bool inWatchlist = false;
+  bool watched = false;
+  bool actionBusy = false;
 
   @override
   void initState() {
@@ -37,9 +40,12 @@ class _TitleScreenState extends State<TitleScreen> {
     });
     try {
       final query = season == null ? '' : '?seasonNumber=$season';
-      final next = TitleExperience.fromJson(
-        await widget.api.getJson('/experience/titles/${widget.media.id}$query'),
-      );
+      final responses = await Future.wait([
+        widget.api.getJson('/experience/titles/${widget.media.id}$query'),
+        widget.api.getJson('/playback/history/${widget.media.id}/status'),
+      ]);
+      final next = TitleExperience.fromJson(responses[0]);
+      final status = jsonMap(responses[1]);
       if (!mounted) return;
       setState(() {
         experience = next;
@@ -48,6 +54,8 @@ class _TitleScreenState extends State<TitleScreen> {
             season ??
             next.seasons.firstOrNull?.number;
         loading = false;
+        inWatchlist = status['inWatchlist'] == true;
+        watched = status['watched'] == true;
       });
     } on ApiException catch (failure) {
       if (!mounted) return;
@@ -72,6 +80,55 @@ class _TitleScreenState extends State<TitleScreen> {
     await _load(selectedSeason);
   }
 
+  Future<void> _toggleWatchlist() async {
+    if (actionBusy) return;
+    setState(() => actionBusy = true);
+    try {
+      if (inWatchlist) {
+        await widget.api.deleteJson('/playback/watchlist/${widget.media.id}');
+      } else {
+        await widget.api.putJson('/playback/watchlist/${widget.media.id}');
+      }
+      if (mounted) {
+        setState(() {
+          inWatchlist = !inWatchlist;
+          actionBusy = false;
+        });
+      }
+    } on ApiException catch (failure) {
+      if (mounted) {
+        setState(() {
+          actionBusy = false;
+          error = failure.message;
+        });
+      }
+    }
+  }
+
+  Future<void> _toggleWatched() async {
+    if (actionBusy) return;
+    setState(() => actionBusy = true);
+    try {
+      await widget.api.patchJson(
+        '/playback/history/${widget.media.id}/watched',
+        {'watched': !watched},
+      );
+      if (mounted) {
+        setState(() {
+          watched = !watched;
+          actionBusy = false;
+        });
+      }
+    } on ApiException catch (failure) {
+      if (mounted) {
+        setState(() {
+          actionBusy = false;
+          error = failure.message;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = experience;
@@ -88,6 +145,24 @@ class _TitleScreenState extends State<TitleScreen> {
             expandedHeight: tv ? 560 : 470,
             pinned: true,
             backgroundColor: const Color(0xFF090D12),
+            actions: [
+              IconButton(
+                tooltip: inWatchlist
+                    ? 'Fjern fra Min liste'
+                    : 'Føj til Min liste',
+                onPressed: actionBusy ? null : _toggleWatchlist,
+                icon: Icon(
+                  inWatchlist ? Icons.bookmark : Icons.bookmark_outline,
+                ),
+              ),
+              IconButton(
+                tooltip: watched ? 'Markér som ikke set' : 'Markér som set',
+                onPressed: actionBusy ? null : _toggleWatched,
+                icon: Icon(
+                  watched ? Icons.check_circle : Icons.check_circle_outline,
+                ),
+              ),
+            ],
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(
                 fit: StackFit.expand,

@@ -10,6 +10,7 @@ import '../state/app_controller.dart';
 import '../widgets/brand.dart';
 import '../widgets/media_card.dart';
 import 'player_screen.dart';
+import 'client_settings_screen.dart';
 import 'title_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
@@ -28,6 +29,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   List<MediaItem> _movies = const [];
   List<MediaItem> _series = const [];
   List<MediaItem> _continue = const [];
+  List<MediaItem> _watchlist = const [];
   RecommendationFeed _recommendations = const RecommendationFeed(sections: []);
 
   ApiClient get api => widget.controller.api;
@@ -50,6 +52,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         api.getJson('/media/catalog?type=movie&pageSize=36&sort=newest'),
         api.getJson('/media/catalog?type=series&pageSize=36&sort=newest'),
         api.getJson('/playback/history/continue'),
+        api.getJson('/playback/watchlist'),
         api
             .getJson('/media/recommendations')
             .catchError((_) => <String, dynamic>{}),
@@ -62,7 +65,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
             .map(MediaItem.fromJson)
             .where((item) => item.id.isNotEmpty)
             .toList(growable: false);
-        _recommendations = RecommendationFeed.fromJson(responses[3]);
+        _watchlist = jsonList(responses[3])
+            .map(MediaItem.fromJson)
+            .where((item) => item.id.isNotEmpty)
+            .toList(growable: false);
+        _recommendations = RecommendationFeed.fromJson(responses[4]);
         _loading = false;
       });
     } on ApiException catch (failure) {
@@ -125,15 +132,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => ClientSettingsScreen(api: api)),
+    );
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final tv = useTvLayout(context);
-    final labels = const ['Hjem', 'Film', 'Serier', 'Fortsæt'];
+    final labels = const ['Hjem', 'Film', 'Serier', 'Fortsæt', 'Min liste'];
     final icons = const [
       Icons.home_outlined,
       Icons.movie_outlined,
       Icons.tv_outlined,
       Icons.play_circle_outline,
+      Icons.bookmark_outline,
     ];
     final content = Column(
       children: [
@@ -142,6 +157,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           selected: _tab,
           onSelect: (index) => setState(() => _tab = index),
           onSearch: _showSearch,
+          onSettings: _openSettings,
           compact: !tv,
         ),
         Expanded(
@@ -247,6 +263,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
         items: _continue,
         onPressed: _play,
       ),
+      4 => _CatalogGrid(
+        api: api,
+        title: 'Min liste',
+        items: _watchlist,
+        onPressed: _open,
+      ),
       _ => _HomeFeed(
         api: api,
         profileName: widget.controller.activeProfile?.name ?? 'dig',
@@ -268,6 +290,7 @@ class _LibraryHeader extends StatelessWidget {
     required this.selected,
     required this.onSelect,
     required this.onSearch,
+    required this.onSettings,
     required this.compact,
   });
 
@@ -275,6 +298,7 @@ class _LibraryHeader extends StatelessWidget {
   final int selected;
   final ValueChanged<int> onSelect;
   final VoidCallback onSearch;
+  final VoidCallback onSettings;
   final bool compact;
 
   @override
@@ -302,6 +326,7 @@ class _LibraryHeader extends StatelessWidget {
               'Film',
               'Serier',
               'Fortsæt',
+              'Min liste',
             ].indexed)
               Padding(
                 padding: const EdgeInsets.only(right: 4),
@@ -338,9 +363,11 @@ class _LibraryHeader extends StatelessWidget {
             tooltip: 'Profil',
             onSelected: (value) {
               if (value == 'profiles') controller.showProfiles();
+              if (value == 'settings') onSettings();
               if (value == 'logout') unawaited(controller.logout());
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'settings', child: Text('Indstillinger')),
               PopupMenuItem(value: 'profiles', child: Text('Skift profil')),
               PopupMenuItem(value: 'logout', child: Text('Log ud')),
             ],
