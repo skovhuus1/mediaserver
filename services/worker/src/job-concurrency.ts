@@ -5,7 +5,8 @@ export type WorkerJobType =
   | 'media.metadata'
   | 'media.playback-assets'
   | 'playback.expire-leases'
-  | 'playback.transcode';
+  | 'playback.transcode'
+  | 'offline.prepare';
 
 export type WorkerConcurrencyLimits = {
   scans: number;
@@ -45,8 +46,9 @@ export function claimableWorkerJobTypes(input: {
   ).length;
 
   if (input.workerMode === 'transcode') {
-    return activeCount('playback.transcode') < input.limits.transcodes
-      ? ['playback.transcode']
+    const activeTranscodes = activeCount('playback.transcode') + activeCount('offline.prepare');
+    return activeTranscodes < input.limits.transcodes
+      ? ['playback.transcode', 'offline.prepare']
       : [];
   }
 

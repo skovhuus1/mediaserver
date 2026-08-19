@@ -14,6 +14,7 @@ import {
   type WorkerMode,
 } from './job-concurrency.js';
 import { generatePlaybackAssets } from './playback-assets.js';
+import { prepareOfflineDownload } from './offline-downloads.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -102,7 +103,7 @@ async function claimNextJob(allowedTypes: readonly WorkerJobType[]): Promise<Cla
       `;
       const running = await tx.systemJob.count({
         where: {
-          type: 'playback.transcode',
+          type: { in: ['playback.transcode', 'offline.prepare'] },
           status: 'running',
           leaseExpiresAt: { gt: new Date() },
         },
@@ -174,6 +175,9 @@ async function processJob(job: ClaimedJob): Promise<void> {
       return;
     case 'playback.transcode':
       await transcodePlayback(job);
+      return;
+    case 'offline.prepare':
+      await prepareOfflineDownload(prisma, job, transcodeRoot, () => renewJobLease(job.id));
       return;
     case 'playback.expire-leases':
       await expirePlaybackLeases();

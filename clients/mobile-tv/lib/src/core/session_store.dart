@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -22,6 +23,7 @@ class DeviceSessionStore implements SessionStorage {
   static const _refreshKey = 'bb_media_refresh_token';
   static const _serverKey = 'bb_media_server_url';
   static const _deviceKey = 'bb_media_device_fingerprint';
+  static const _cachedUserKey = 'bb_media_cached_user';
 
   final FlutterSecureStorage _secure;
   final SharedPreferencesAsync _preferences;
@@ -52,6 +54,16 @@ class DeviceSessionStore implements SessionStorage {
 
   Future<void> writeServerUrl(String value) =>
       _preferences.setString(_serverKey, value);
+
+  Future<void> writeCachedUser(dynamic value) =>
+      _secure.write(key: _cachedUserKey, value: jsonEncode(value));
+
+  Future<dynamic> readCachedUser() async {
+    final value = await _secure.read(key: _cachedUserKey);
+    return value == null ? null : jsonDecode(value);
+  }
+
+  Future<void> clearCachedUser() => _secure.delete(key: _cachedUserKey);
 
   Future<String> deviceFingerprint() async {
     final existing = await _preferences.getString(_deviceKey);

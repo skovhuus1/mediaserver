@@ -12,6 +12,7 @@ import '../widgets/media_card.dart';
 import 'player_screen.dart';
 import 'client_settings_screen.dart';
 import 'title_screen.dart';
+import 'offline_downloads_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({required this.controller, super.key});
@@ -364,10 +365,23 @@ class _LibraryHeader extends StatelessWidget {
             onSelected: (value) {
               if (value == 'profiles') controller.showProfiles();
               if (value == 'settings') onSettings();
+              if (value == 'downloads') {
+                unawaited(
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => OfflineDownloadsScreen(
+                        api: controller.api,
+                        profileId: controller.activeProfile?.id,
+                      ),
+                    ),
+                  ),
+                );
+              }
               if (value == 'logout') unawaited(controller.logout());
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'settings', child: Text('Indstillinger')),
+              PopupMenuItem(value: 'downloads', child: Text('Downloads')),
               PopupMenuItem(value: 'profiles', child: Text('Skift profil')),
               PopupMenuItem(value: 'logout', child: Text('Log ud')),
             ],

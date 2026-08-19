@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'core/app_config.dart';
 import 'screens/auth_screens.dart';
 import 'screens/library_screen.dart';
+import 'screens/offline_downloads_screen.dart';
 import 'screens/profile_screen.dart';
 import 'state/app_controller.dart';
 import 'widgets/brand.dart';
@@ -100,6 +101,12 @@ class BoltBytesApp extends StatelessWidget {
           ),
           AppStage.profiles => ProfileScreen(controller: controller),
           AppStage.library => LibraryScreen(controller: controller),
+          AppStage.offline => OfflineDownloadsScreen(
+            api: controller.api,
+            profileId: controller.activeProfile?.id,
+            offline: true,
+            onReconnect: controller.retryOnline,
+          ),
         },
       ),
     );

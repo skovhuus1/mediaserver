@@ -4,9 +4,10 @@ import '../core/api_client.dart';
 import '../core/app_config.dart';
 import '../core/cast_playback_coordinator.dart';
 import '../core/models.dart';
+import '../core/offline_downloads.dart';
 import '../core/session_store.dart';
 
-enum AppStage { booting, login, passwordChange, profiles, library }
+enum AppStage { booting, login, passwordChange, profiles, library, offline }
 
 class AppController extends ChangeNotifier {
   AppController({required this.api, required this.storage});
@@ -20,6 +21,7 @@ class AppController extends ChangeNotifier {
   String? error;
   String? _passwordChangeToken;
   String serverUrl = AppConfig.defaultApiUrl;
+  bool offlineMode = false;
 
   ProfileSummary? get activeProfile => user?.activeProfile;
   bool get isAdmin => user?.roles.any((role) => role == 'admin') ?? false;
@@ -38,9 +40,15 @@ class AppController extends ChangeNotifier {
     try {
       await api.refresh();
       await _loadUser();
+    } on ApiException catch (failure) {
+      if (failure.statusCode == 401 || failure.statusCode == 403) {
+        await api.clearLocalSession();
+        stage = AppStage.login;
+      } else {
+        await _restoreOffline();
+      }
     } catch (_) {
-      await api.clearLocalSession();
-      stage = AppStage.login;
+      await _restoreOffline();
     }
     notifyListeners();
   }
@@ -54,6 +62,7 @@ class AppController extends ChangeNotifier {
       serverUrl = AppConfig.normalizeApiUrl(requestedServerUrl);
       api.configureBaseUrl(serverUrl);
       await storage.writeServerUrl(serverUrl);
+      offlineMode = false;
       final result = await api.login(
         email: email,
         password: password,
@@ -107,6 +116,7 @@ class AppController extends ChangeNotifier {
       await api.clearLocalSession();
     }
     user = null;
+    await storage.clearCachedUser();
     error = null;
     busy = false;
     stage = AppStage.login;
@@ -114,7 +124,10 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _loadUser({bool forceLibrary = false}) async {
-    user = SessionUser.fromJson(await api.getJson('/auth/me'));
+    final response = await api.getJson('/auth/me');
+    user = SessionUser.fromJson(response);
+    await storage.writeCachedUser(response);
+    offlineMode = false;
     if (!forceLibrary &&
         user!.activeProfileId == null &&
         user!.profiles.isNotEmpty) {
@@ -124,6 +137,36 @@ class AppController extends ChangeNotifier {
     } else {
       stage = AppStage.library;
     }
+  }
+
+  Future<void> retryOnline() async {
+    stage = AppStage.booting;
+    error = null;
+    notifyListeners();
+    try {
+      await api.refresh();
+      await _loadUser(forceLibrary: true);
+    } catch (_) {
+      await _restoreOffline();
+      error = 'Serveren er stadig utilgængelig. Offlinebiblioteket er aktivt.';
+    }
+    notifyListeners();
+  }
+
+  Future<void> _restoreOffline() async {
+    final cached = await storage.readCachedUser();
+    if (cached != null) {
+      final candidate = SessionUser.fromJson(cached);
+      final profileId = candidate.activeProfileId;
+      if (profileId != null &&
+          await OfflineDownloadsManager.hasPlayable(profileId)) {
+        user = candidate;
+        offlineMode = true;
+        stage = AppStage.offline;
+        return;
+      }
+    }
+    stage = AppStage.login;
   }
 
   Future<void> _guard(Future<void> Function() operation) async {

@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app.dart';
 import '../core/api_client.dart';
 import '../core/models.dart';
+import '../core/offline_downloads.dart';
 import 'player_screen.dart';
 
 class TitleScreen extends StatefulWidget {
@@ -26,6 +27,7 @@ class _TitleScreenState extends State<TitleScreen> {
   bool inWatchlist = false;
   bool watched = false;
   bool actionBusy = false;
+  bool downloadBusy = false;
 
   @override
   void initState() {
@@ -129,6 +131,46 @@ class _TitleScreenState extends State<TitleScreen> {
     }
   }
 
+  Future<void> _download() async {
+    if (downloadBusy) return;
+    final quality = await showModalBottomSheet<int>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text('Download til offline'),
+              subtitle: Text('Filen klargøres som kompatibel H.264/AAC MP4.'),
+            ),
+            for (final height in [360, 480, 720, 1080])
+              ListTile(
+                leading: const Icon(Icons.download_outlined),
+                title: Text('${height}p'),
+                onTap: () => Navigator.pop(context, height),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (quality == null || !mounted) return;
+    setState(() => downloadBusy = true);
+    try {
+      final manager = OfflineDownloadsManager.instance;
+      await manager.configure(widget.api);
+      await manager.queue(widget.media.id, quality);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Downloaden er sat i kø.')),
+        );
+      }
+    } on ApiException catch (failure) {
+      if (mounted) setState(() => error = failure.message);
+    } finally {
+      if (mounted) setState(() => downloadBusy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = experience;
@@ -146,6 +188,16 @@ class _TitleScreenState extends State<TitleScreen> {
             pinned: true,
             backgroundColor: const Color(0xFF090D12),
             actions: [
+              IconButton(
+                tooltip: 'Download til offline',
+                onPressed: downloadBusy ? null : _download,
+                icon: downloadBusy
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download_for_offline_outlined),
+              ),
               IconButton(
                 tooltip: inWatchlist
                     ? 'Fjern fra Min liste'

@@ -1,5 +1,25 @@
 # BoltBytes Media Server
 
+## Seneste leverance: Offline-downloads og fysisk Android-certificering
+
+- Mobilklienten kan sætte film og enkelte episoder i kø som 360p, 480p, 720p eller 1080p offlinefiler. Serveren håndhæver fortsat profilens `allowOfflineDownload` og opløsningsloft.
+- En separat `offline.prepare`-jobtype producerer atomisk H.264/AAC MP4 i transcode-volumen. Jobbet deler transcode-kapacitet med almindelig playback og fornyer worker-leasen under lange filer.
+- Android DownloadManager fortsætter selve overførslen i baggrunden og understøtter Range/resume. Manifest, token og lokal sti gemmes krypteret og er bundet til aktiv profil og registreret enhed.
+- Offlinebiblioteket kan åbnes uden serverforbindelse, hvis en gyldig lokal licens og fil findes. Afspilningsposition gemmes lokalt og synkroniseres til normal playback-historik ved næste forbindelse.
+- Licenser gælder 30 dage og kan kun fornyes, hvis entitlement stadig tillader download. Download-URL'er har særskilte kortere tokens og giver ikke en playback-session eller ekstra streamreservation.
+- `node scripts/certify-android.mjs` installerer en valgt APK via ADB, kontrollerer server-health, starter appen og gemmer device-info, screenshot, logcat, activity- og media-session-data samt en manuel mobil/TV/Cast/offline-checkliste.
+
+Eksempel:
+
+```bash
+node scripts/certify-android.mjs \
+  --apk clients/mobile-tv/build/app/outputs/flutter-apk/boltbytes-media-mobile-debug.apk \
+  --server https://media.boltbytes.com \
+  --variant mobile
+```
+
+Offline kræver, at den aktive planversion eller et entitlement-override har `allowOfflineDownload=true`. Fysisk Chromecast-certificering kan ikke erstattes af CI; checklisten skal gennemføres med en rigtig Cast-enhed på samme netværk.
+
 ## Seneste leverance: Playback-analyse, serieoplevelse og lokal discovery
 
 - Adminpanelet har nu en funktionel `Playback-analyse` med søgning, statusfiltre, worker-fejl, trickplay-målinger, første sprite-preview og automatisk polling under behandling.

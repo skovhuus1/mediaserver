@@ -49,10 +49,15 @@ describe('worker job concurrency', () => {
       workerMode: 'transcode',
       activeJobTypes: ['library.scan', 'playback.transcode'],
       limits,
-    })).toEqual(['playback.transcode']);
+    })).toEqual(['playback.transcode', 'offline.prepare']);
     expect(claimableWorkerJobTypes({
       workerMode: 'transcode',
       activeJobTypes: ['playback.transcode', 'playback.transcode'],
+      limits,
+    })).toEqual([]);
+    expect(claimableWorkerJobTypes({
+      workerMode: 'transcode',
+      activeJobTypes: ['offline.prepare', 'playback.transcode'],
       limits,
     })).toEqual([]);
   });
