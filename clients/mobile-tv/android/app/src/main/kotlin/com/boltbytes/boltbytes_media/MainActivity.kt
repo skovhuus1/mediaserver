@@ -7,6 +7,7 @@ class MainActivity : FlutterActivity() {
     private var castBridge: CastBridge? = null
     private var playbackBridge: PlaybackBridge? = null
     private var updateBridge: AppUpdateBridge? = null
+    private var offlineDownloadBridge: OfflineDownloadBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -17,6 +18,7 @@ class MainActivity : FlutterActivity() {
         castBridge = CastBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         playbackBridge = PlaybackBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         updateBridge = AppUpdateBridge(this, flutterEngine.dartExecutor.binaryMessenger)
+        offlineDownloadBridge = OfflineDownloadBridge(this, flutterEngine.dartExecutor.binaryMessenger)
     }
 
     override fun onUserLeaveHint() {
@@ -36,9 +38,11 @@ class MainActivity : FlutterActivity() {
         castBridge?.dispose()
         playbackBridge?.dispose()
         updateBridge?.dispose()
+        offlineDownloadBridge?.dispose()
         castBridge = null
         playbackBridge = null
         updateBridge = null
+        offlineDownloadBridge = null
         super.onDestroy()
     }
 }

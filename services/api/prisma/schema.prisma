@@ -105,6 +105,7 @@ model Account {
   playbackSessions     PlaybackSession[]
   playbackHistory      PlaybackHistory[]
   watchlistEntries     WatchlistEntry[]
+  offlineDownloads     OfflineDownload[]
   mediaPlaybackAssets  MediaPlaybackAsset[]
   mediaTimelineMarkers MediaTimelineMarker[]
   auditLogs            AuditLog[]
@@ -158,6 +159,7 @@ model Profile {
   playbackSessions     PlaybackSession[]
   playbackHistory      PlaybackHistory[]
   watchlistEntries     WatchlistEntry[]
+  offlineDownloads     OfflineDownload[]
   auditLogs            AuditLog[]
 
   @@index([accountId, userId])
@@ -228,6 +230,7 @@ model Device {
   lastSeenAt       DateTime          @default(now()) @map("last_seen_at")
   account          Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
   user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offlineDownloads OfflineDownload[]
   refreshTokens    RefreshToken[]
   playbackSessions PlaybackSession[]
 
@@ -465,6 +468,7 @@ model MediaItem {
   playbackSessions     PlaybackSession[]
   playbackHistory      PlaybackHistory[]
   watchlistEntries     WatchlistEntry[]
+  offlineDownloads     OfflineDownload[]
   playbackAsset        MediaPlaybackAsset?
   timelineMarkers      MediaTimelineMarker[]
 
@@ -691,6 +695,38 @@ model WatchlistEntry {
   @@unique([profileId, mediaId])
   @@index([accountId, profileId, createdAt])
   @@map("watchlist_entries")
+}
+
+model OfflineDownload {
+  id                     String    @id @default(uuid())
+  accountId              String    @map("account_id")
+  profileId              String    @map("profile_id")
+  deviceId               String    @map("device_id")
+  mediaId                String    @map("media_id")
+  qualityHeight          Int       @map("quality_height")
+  status                 String    @default("queued")
+  progress               Int       @default(0)
+  generation             String
+  outputPath             String?   @map("output_path")
+  sizeBytes              BigInt?   @map("size_bytes")
+  downloadTokenHash      String    @map("download_token_hash")
+  downloadTokenExpiresAt DateTime  @map("download_token_expires_at")
+  licenseExpiresAt       DateTime  @map("license_expires_at")
+  error                   String?
+  jobId                   String?   @map("job_id")
+  readyAt                 DateTime? @map("ready_at")
+  downloadedAt            DateTime? @map("downloaded_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+  account                 Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profile                 Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  device                  Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  media                   MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, deviceId, mediaId])
+  @@index([accountId, profileId, deviceId, status])
+  @@index([licenseExpiresAt])
+  @@map("offline_downloads")
 }
 
 model ProfilePreferences {

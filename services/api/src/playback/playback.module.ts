@@ -8,10 +8,12 @@ import { PlaybackHistoryController } from './playback-history.controller';
 import { PlaybackHistoryService } from './playback-history.service';
 import { SubtitleStreamService } from './subtitle-stream.service';
 import { TranscodeStreamService } from './transcode-stream.service';
+import { OfflineDownloadsController } from './offline-downloads.controller';
+import { OfflineDownloadsService } from './offline-downloads.service';
 
 @Module({
   imports: [EntitlementsModule],
-  controllers: [PlaybackController, PlaybackHistoryController],
+  controllers: [PlaybackController, PlaybackHistoryController, OfflineDownloadsController],
   providers: [
     PlaybackService,
     PlaybackHistoryService,
@@ -19,6 +21,7 @@ import { TranscodeStreamService } from './transcode-stream.service';
     DirectStreamService,
     TranscodeStreamService,
     SubtitleStreamService,
+    OfflineDownloadsService,
   ],
 })
 export class PlaybackModule {}
