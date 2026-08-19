@@ -9,6 +9,17 @@ val castReceiverAppId = providers
     .orElse(providers.environmentVariable("BB_MEDIA_CAST_RECEIVER_APP_ID"))
     .getOrElse("CC1AD845")
 
+val releaseStorePath = providers.environmentVariable("BB_MEDIA_ANDROID_KEYSTORE_PATH").orNull
+val releaseStorePassword = providers.environmentVariable("BB_MEDIA_ANDROID_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("BB_MEDIA_ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("BB_MEDIA_ANDROID_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(
+    releaseStorePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.boltbytes.boltbytes_media"
     compileSdk = flutter.compileSdkVersion
@@ -35,11 +46,18 @@ android {
         resValue("string", "cast_receiver_app_id", castReceiverAppId)
     }
 
+    val productionSigning = if (hasReleaseSigning) {
+        signingConfigs.create("production") {
+            storeFile = file(releaseStorePath!!)
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+        }
+    } else null
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = productionSigning ?: signingConfigs.getByName("debug")
         }
     }
 }

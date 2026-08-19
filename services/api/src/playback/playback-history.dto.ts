@@ -19,3 +19,8 @@ export class PlaybackProgressDto {
   @IsBoolean()
   completed?: boolean;
 }
+
+export class SetWatchedDto {
+  @IsBoolean()
+  watched!: boolean;
+}

@@ -70,6 +70,8 @@ class ApiClient {
   Future<dynamic> getJson(String path) => _request('GET', path);
   Future<dynamic> postJson(String path, [Map<String, dynamic>? body]) =>
       _request('POST', path, body: body);
+  Future<dynamic> putJson(String path, [Map<String, dynamic>? body]) =>
+      _request('PUT', path, body: body);
   Future<dynamic> patchJson(String path, [Map<String, dynamic>? body]) =>
       _request('PATCH', path, body: body);
   Future<dynamic> deleteJson(String path) => _request('DELETE', path);
@@ -209,6 +211,7 @@ class ApiClient {
       return switch (method) {
         'POST' => _http.post(uri, headers: headers, body: encoded),
         'PATCH' => _http.patch(uri, headers: headers, body: encoded),
+        'PUT' => _http.put(uri, headers: headers, body: encoded),
         'DELETE' => _http.delete(uri, headers: headers),
         _ => _http.get(uri, headers: headers),
       };

@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Put, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser } from '../common/auth';
-import { PlaybackProgressDto } from './playback-history.dto';
+import { PlaybackProgressDto, SetWatchedDto } from './playback-history.dto';
 import { PlaybackHistoryService } from './playback-history.service';
 
 @ApiTags('playback')
@@ -18,6 +18,44 @@ export class PlaybackHistoryController {
   @Get('history/continue')
   continueWatching(@CurrentUser() actor: AuthenticatedUser) {
     return this.history.continueWatching(actor);
+  }
+
+  @Get('watchlist')
+  watchlist(@CurrentUser() actor: AuthenticatedUser) {
+    return this.history.watchlist(actor);
+  }
+
+  @Put('watchlist/:mediaId')
+  addToWatchlist(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('mediaId') mediaId: string,
+  ) {
+    return this.history.addToWatchlist(actor, mediaId);
+  }
+
+  @Delete('watchlist/:mediaId')
+  removeFromWatchlist(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('mediaId') mediaId: string,
+  ) {
+    return this.history.removeFromWatchlist(actor, mediaId);
+  }
+
+  @Get('history/:mediaId/status')
+  mediaStatus(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('mediaId') mediaId: string,
+  ) {
+    return this.history.mediaStatus(actor, mediaId);
+  }
+
+  @Patch('history/:mediaId/watched')
+  setWatched(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('mediaId') mediaId: string,
+    @Body() dto: SetWatchedDto,
+  ) {
+    return this.history.setWatched(actor, mediaId, dto.watched);
   }
 
   @Get('history/series-next')

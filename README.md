@@ -736,3 +736,21 @@ BB_MEDIA_CAST_RECEIVER_APP_ID=YOUR_REGISTERED_CAST_APP_ID
 Create the repository Actions variable `BB_MEDIA_CAST_RECEIVER_APP_ID` before building the APK. The server's public receiver URL is `https://media.boltbytes.com/cast/receiver`; register that HTTPS URL in the Google Cast SDK Developer Console and register the physical Chromecast as a test device while the receiver is unpublished. If the variable is absent, Android deliberately falls back to Google's Default Media Receiver (`CC1AD845`) and the diagnostic dialog shows that fallback.
 
 Physical acceptance still requires an Android phone and Chromecast on the same Wi-Fi: discovery must list the device, handoff must start media, subtitles must switch, navigation away from the player must leave playback running, the global mini player must control the receiver, and stop/logout must release the server session.
+# Native Android playback, TV controls and signed updates
+
+The Flutter client now shares one server-side playback model across Android mobile, Android TV and Chromecast. Series playback uses `/playback/history/series-next`, profile `autoplayNext`, and real timeline markers for intro, recap and credits actions. A ten-second credits countdown can advance to the next local episode and can be cancelled by the viewer.
+
+Android playback integrates Picture-in-Picture, screen wake-lock, a foreground media notification, lock-screen/transport controls, background-capable `video_player` operation and bounded stream reconnection. Android TV keeps directional/keyboard playback controls and uses the same next-episode queue without enabling mobile PiP.
+
+Profiles now have a server-synchronised **Min liste** through `playback/watchlist`, plus manual set/unset watched state. Client settings edit existing profile and device preferences and expose Cast diagnostics and update checks.
+
+Production Android updates are accepted only from non-prerelease `android-v*` GitHub Releases. Configure these repository secrets before running `android-release`:
+
+```text
+BB_MEDIA_ANDROID_KEYSTORE_BASE64
+BB_MEDIA_ANDROID_STORE_PASSWORD
+BB_MEDIA_ANDROID_KEY_ALIAS
+BB_MEDIA_ANDROID_KEY_PASSWORD
+```
+
+Also configure the repository variable `BB_MEDIA_CAST_RECEIVER_APP_ID`. The release workflow refuses to publish without both a stable signing identity and a registered Cast receiver ID. Android requires every update for an installed package to use the same signing certificate; back up the keystore outside GitHub and never rotate it casually.

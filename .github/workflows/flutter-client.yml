@@ -35,12 +35,14 @@ jobs:
         run: |
           flutter build apk --debug \
             --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 \
+            --dart-define=BB_MEDIA_APP_VERSION=0.1.0 \
             --dart-define=BB_MEDIA_DEVICE_TYPE=mobile
           cp build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/boltbytes-media-mobile-debug.apk
       - name: Build Android TV debug APK
         run: |
           flutter build apk --debug \
             --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 \
+            --dart-define=BB_MEDIA_APP_VERSION=0.1.0 \
             --dart-define=BB_MEDIA_DEVICE_TYPE=tv
           cp build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/boltbytes-media-tv-debug.apk
       - uses: actions/upload-artifact@v4
