@@ -8,6 +8,7 @@ import 'screens/offline_downloads_screen.dart';
 import 'screens/profile_screen.dart';
 import 'state/app_controller.dart';
 import 'widgets/brand.dart';
+import 'widgets/push_message_banner.dart';
 import 'widgets/cast_miniplayer.dart';
 
 class BoltBytesApp extends StatelessWidget {
@@ -88,7 +89,11 @@ class BoltBytesApp extends StatelessWidget {
         ),
         child: Stack(
           fit: StackFit.expand,
-          children: [child ?? const SizedBox.shrink(), const CastMiniPlayer()],
+          children: [
+            child ?? const SizedBox.shrink(),
+            const CastMiniPlayer(),
+            const PushMessageBanner(),
+          ],
         ),
       ),
       home: AnimatedBuilder(

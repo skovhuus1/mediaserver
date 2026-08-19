@@ -729,6 +729,69 @@ model OfflineDownload {
   @@map("offline_downloads")
 }
 
+model ClientPushRegistration {
+  id          String   @id @default(uuid())
+  accountId   String   @map("account_id")
+  userId      String   @map("user_id")
+  profileId   String?  @map("profile_id")
+  deviceId    String   @map("device_id")
+  token       String   @unique
+  platform    String
+  appVersion  String?  @map("app_version")
+  enabled     Boolean  @default(true)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([accountId, userId, profileId])
+  @@index([deviceId, enabled])
+  @@map("client_push_registrations")
+}
+
+model UserNotification {
+  id             String    @id @default(uuid())
+  accountId      String    @map("account_id")
+  userId         String    @map("user_id")
+  profileId      String?   @map("profile_id")
+  type           String
+  title          String
+  body           String
+  data           Json
+  deliveryStatus String    @default("queued") @map("delivery_status")
+  deliveryError  String?   @map("delivery_error")
+  sentAt         DateTime? @map("sent_at")
+  readAt         DateTime? @map("read_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([accountId, userId, profileId, createdAt])
+  @@index([deliveryStatus, createdAt])
+  @@map("user_notifications")
+}
+
+model ClientCrashReport {
+  id             String   @id @default(uuid())
+  accountId      String   @map("account_id")
+  userId         String   @map("user_id")
+  profileId      String?  @map("profile_id")
+  deviceId       String   @map("device_id")
+  platform       String
+  appVersion     String?  @map("app_version")
+  kind           String
+  message        String
+  stack          String?
+  context        Json
+  fingerprint    String
+  occurrences    Int      @default(1)
+  occurredAt     DateTime @map("occurred_at")
+  lastOccurredAt DateTime @map("last_occurred_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([accountId, lastOccurredAt])
+  @@index([deviceId, fingerprint, lastOccurredAt])
+  @@map("client_crash_reports")
+}
+
 model ProfilePreferences {
   profileId                  String    @id @map("profile_id")
   accountId                  String    @map("account_id")

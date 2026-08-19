@@ -10,6 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_secure_storage: 10.0.0
+  firebase_core: 4.13.0
+  firebase_messaging: 16.5.0
   http: ^1.6.0
   shared_preferences: ^2.5.5
   url_launcher: ^6.3.2

@@ -18,6 +18,7 @@ import { RecommendationsModule } from './recommendations/recommendations.module'
 import { PrismaModule } from './prisma/prisma.module';
 import { SetupModule } from './setup/setup.module';
 import { SystemModule } from './system/system.module';
+import { ClientServicesModule } from './client-services/client-services.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { SystemModule } from './system/system.module';
     PlaybackModule,
     PreferencesModule,
     SystemModule,
+    ClientServicesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

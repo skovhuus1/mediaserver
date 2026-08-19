@@ -10,6 +10,21 @@ on:
         description: Version without android-v prefix
         required: true
         type: string
+      publish_play:
+        description: Publish the signed AAB to Google Play
+        required: true
+        default: false
+        type: boolean
+      play_track:
+        description: Google Play release track
+        required: true
+        default: internal
+        type: choice
+        options:
+          - internal
+          - alpha
+          - beta
+          - production
 
 permissions:
   contents: write
@@ -23,6 +38,11 @@ jobs:
       BB_MEDIA_ANDROID_STORE_PASSWORD: ${{ secrets.BB_MEDIA_ANDROID_STORE_PASSWORD }}
       BB_MEDIA_ANDROID_KEY_ALIAS: ${{ secrets.BB_MEDIA_ANDROID_KEY_ALIAS }}
       BB_MEDIA_ANDROID_KEY_PASSWORD: ${{ secrets.BB_MEDIA_ANDROID_KEY_PASSWORD }}
+      BB_MEDIA_REQUIRE_PRODUCTION_SIGNING: "true"
+      BB_MEDIA_FIREBASE_API_KEY: ${{ secrets.BB_MEDIA_FIREBASE_API_KEY }}
+      BB_MEDIA_FIREBASE_APP_ID: ${{ vars.BB_MEDIA_FIREBASE_APP_ID }}
+      BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID }}
+      BB_MEDIA_FIREBASE_PROJECT_ID: ${{ vars.BB_MEDIA_FIREBASE_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
@@ -40,6 +60,13 @@ jobs:
           test -n "$BB_MEDIA_ANDROID_KEY_ALIAS"
           test -n "$BB_MEDIA_ANDROID_KEY_PASSWORD"
           test -n "$BB_MEDIA_CAST_RECEIVER_APP_ID"
+          if [[ "${{ inputs.publish_play || false }}" == "true" ]]; then
+            test -n "${{ secrets.BB_MEDIA_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}"
+            test -n "$BB_MEDIA_FIREBASE_API_KEY"
+            test -n "$BB_MEDIA_FIREBASE_APP_ID"
+            test -n "$BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID"
+            test -n "$BB_MEDIA_FIREBASE_PROJECT_ID"
+          fi
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             VERSION="${GITHUB_REF_NAME#android-v}"
           else
@@ -65,7 +92,11 @@ jobs:
             --build-name="$VERSION" --build-number="$GITHUB_RUN_NUMBER" \
             --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 \
             --dart-define=BB_MEDIA_APP_VERSION="$VERSION" \
-            --dart-define=BB_MEDIA_DEVICE_TYPE=mobile
+            --dart-define=BB_MEDIA_DEVICE_TYPE=mobile \
+            --dart-define=BB_MEDIA_FIREBASE_API_KEY="$BB_MEDIA_FIREBASE_API_KEY" \
+            --dart-define=BB_MEDIA_FIREBASE_APP_ID="$BB_MEDIA_FIREBASE_APP_ID" \
+            --dart-define=BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID="$BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=BB_MEDIA_FIREBASE_PROJECT_ID="$BB_MEDIA_FIREBASE_PROJECT_ID"
           cp build/app/outputs/flutter-apk/app-release.apk boltbytes-media-mobile-release.apk
       - name: Build signed Android TV APK
         working-directory: clients/mobile-tv
@@ -74,9 +105,36 @@ jobs:
             --build-name="$VERSION" --build-number="$GITHUB_RUN_NUMBER" \
             --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 \
             --dart-define=BB_MEDIA_APP_VERSION="$VERSION" \
-            --dart-define=BB_MEDIA_DEVICE_TYPE=tv
+            --dart-define=BB_MEDIA_DEVICE_TYPE=tv \
+            --dart-define=BB_MEDIA_FIREBASE_API_KEY="$BB_MEDIA_FIREBASE_API_KEY" \
+            --dart-define=BB_MEDIA_FIREBASE_APP_ID="$BB_MEDIA_FIREBASE_APP_ID" \
+            --dart-define=BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID="$BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=BB_MEDIA_FIREBASE_PROJECT_ID="$BB_MEDIA_FIREBASE_PROJECT_ID"
           cp build/app/outputs/flutter-apk/app-release.apk boltbytes-media-tv-release.apk
-          sha256sum boltbytes-media-*-release.apk > SHA256SUMS.txt
+      - name: Build signed Google Play bundle
+        working-directory: clients/mobile-tv
+        run: |
+          flutter build appbundle --release \
+            --build-name="$VERSION" --build-number="$GITHUB_RUN_NUMBER" \
+            --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 \
+            --dart-define=BB_MEDIA_APP_VERSION="$VERSION" \
+            --dart-define=BB_MEDIA_DEVICE_TYPE=mobile \
+            --dart-define=BB_MEDIA_FIREBASE_API_KEY="$BB_MEDIA_FIREBASE_API_KEY" \
+            --dart-define=BB_MEDIA_FIREBASE_APP_ID="$BB_MEDIA_FIREBASE_APP_ID" \
+            --dart-define=BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID="$BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID" \
+            --dart-define=BB_MEDIA_FIREBASE_PROJECT_ID="$BB_MEDIA_FIREBASE_PROJECT_ID"
+          cp build/app/outputs/bundle/release/app-release.aab boltbytes-media-google-play-release.aab
+          sha256sum boltbytes-media-*-release.apk boltbytes-media-google-play-release.aab > SHA256SUMS.txt
+      - name: Publish Google Play track
+        if: ${{ inputs.publish_play == true }}
+        env:
+          BB_MEDIA_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.BB_MEDIA_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
+        run: |
+          node scripts/publish-google-play.mjs \
+            clients/mobile-tv/boltbytes-media-google-play-release.aab \
+            com.boltbytes.boltbytes_media \
+            "${{ inputs.play_track }}" \
+            "BoltBytes Media $VERSION"
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -89,4 +147,5 @@ jobs:
             --generate-notes \
             boltbytes-media-mobile-release.apk \
             boltbytes-media-tv-release.apk \
+            boltbytes-media-google-play-release.aab \
             SHA256SUMS.txt

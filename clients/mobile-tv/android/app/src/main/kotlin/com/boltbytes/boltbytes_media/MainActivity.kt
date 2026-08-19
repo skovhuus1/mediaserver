@@ -8,9 +8,11 @@ class MainActivity : FlutterActivity() {
     private var playbackBridge: PlaybackBridge? = null
     private var updateBridge: AppUpdateBridge? = null
     private var offlineDownloadBridge: OfflineDownloadBridge? = null
+    private var crashBridge: CrashBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        PushNotificationChannels.ensure(this)
         flutterEngine
             .platformViewsController
             .registry
@@ -19,6 +21,7 @@ class MainActivity : FlutterActivity() {
         playbackBridge = PlaybackBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         updateBridge = AppUpdateBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         offlineDownloadBridge = OfflineDownloadBridge(this, flutterEngine.dartExecutor.binaryMessenger)
+        crashBridge = CrashBridge(this, flutterEngine.dartExecutor.binaryMessenger)
     }
 
     override fun onUserLeaveHint() {
@@ -39,10 +42,12 @@ class MainActivity : FlutterActivity() {
         playbackBridge?.dispose()
         updateBridge?.dispose()
         offlineDownloadBridge?.dispose()
+        crashBridge?.dispose()
         castBridge = null
         playbackBridge = null
         updateBridge = null
         offlineDownloadBridge = null
+        crashBridge = null
         super.onDestroy()
     }
 }
