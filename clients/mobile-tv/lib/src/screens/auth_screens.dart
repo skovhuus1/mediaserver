@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app.dart';
 import '../state/app_controller.dart';
@@ -18,6 +19,10 @@ class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _form = GlobalKey<FormState>();
+  final _serverFocus = FocusNode();
+  final _emailFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+  final _loginButtonFocus = FocusNode();
   bool _showPassword = false;
 
   @override
@@ -31,16 +36,68 @@ class _LoginScreenState extends State<LoginScreen> {
     _server.dispose();
     _email.dispose();
     _password.dispose();
+    _serverFocus.dispose();
+    _emailFocus.dispose();
+    _passwordFocus.dispose();
+    _loginButtonFocus.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!(_form.currentState?.validate() ?? false)) return;
+    _server.text = _normalizeServerInput(_server.text);
     await widget.controller.login(
       email: _email.text.trim(),
       password: _password.text,
       requestedServerUrl: _server.text,
     );
+  }
+
+  String _normalizeServerInput(String value) {
+    var normalized = value.trim();
+    if (normalized.isEmpty) return normalized;
+    normalized = normalized.replaceFirst(
+      RegExp(r'^(https?:\/\/)', caseSensitive: false),
+      '',
+    );
+    normalized = normalized.split('/').first.trim();
+    return normalized;
+  }
+
+  bool _isLikelyUrl(String value) {
+    final lower = value.toLowerCase();
+    return lower.contains('://') ||
+        value.contains('/') ||
+        value.contains('?') ||
+        value.contains('#');
+  }
+
+  String? _validateServerInput(String? value) {
+    final server = value?.trim() ?? '';
+    if (server.isEmpty) return 'Indtast serveradressen.';
+    if (_isLikelyUrl(server)) {
+      return 'Brug kun serverhost (fx media.boltbytes.com:6555). Vi tilføjer https og /api/v1 automatisk.';
+    }
+    return _normalizeServerInput(server).isNotEmpty
+        ? null
+        : 'Indtast serveradressen.';
+  }
+
+  KeyEventResult _handleUpDown(
+    KeyEvent event,
+    FocusNode next,
+    FocusNode? previous,
+  ) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      next.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp && previous != null) {
+      previous.requestFocus();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -69,54 +126,82 @@ class _LoginScreenState extends State<LoginScreen> {
               style: TextStyle(color: Colors.white60, height: 1.5),
             ),
             const SizedBox(height: 28),
-            TextFormField(
-              controller: _server,
-              autofocus: tv,
-              keyboardType: TextInputType.url,
-              textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                labelText: 'Serveradresse',
-                hintText: 'https://media.boltbytes.com',
-                prefixIcon: Icon(Icons.dns_outlined),
-              ),
-              validator: (value) => value == null || value.trim().isEmpty
-                  ? 'Indtast serveradressen.'
+            Focus(
+              onKeyEvent: tv
+                  ? (node, event) => _handleUpDown(event, _emailFocus, null)
                   : null,
-            ),
-            const SizedBox(height: 14),
-            TextFormField(
-              controller: _email,
-              keyboardType: TextInputType.emailAddress,
-              textInputAction: TextInputAction.next,
-              autofillHints: const [AutofillHints.email],
-              decoration: const InputDecoration(
-                labelText: 'E-mail',
-                prefixIcon: Icon(Icons.alternate_email),
+              child: TextFormField(
+                controller: _server,
+                focusNode: _serverFocus,
+                autofocus: tv,
+                textInputAction: TextInputAction.next,
+                keyboardType: TextInputType.text,
+                autocorrect: false,
+                textCapitalization: TextCapitalization.none,
+                inputFormatters: [
+                  FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Servernavn',
+                  hintText: 'fx media.boltbytes.com:6555',
+                  prefixIcon: Icon(Icons.dns_outlined),
+                ),
+                validator: _validateServerInput,
+                onFieldSubmitted: (_) => _emailFocus.requestFocus(),
               ),
-              validator: (value) => value != null && value.contains('@')
-                  ? null
-                  : 'Indtast en gyldig e-mail.',
             ),
             const SizedBox(height: 14),
-            TextFormField(
-              controller: _password,
-              obscureText: !_showPassword,
-              onFieldSubmitted: (_) => _submit(),
-              autofillHints: const [AutofillHints.password],
-              decoration: InputDecoration(
-                labelText: 'Adgangskode',
-                prefixIcon: const Icon(Icons.lock_outline),
-                suffixIcon: IconButton(
-                  onPressed: () =>
-                      setState(() => _showPassword = !_showPassword),
-                  icon: Icon(
-                    _showPassword ? Icons.visibility_off : Icons.visibility,
+            Focus(
+              onKeyEvent: tv
+                  ? (node, event) => _handleUpDown(event, _passwordFocus, _serverFocus)
+                  : null,
+              child: TextFormField(
+                controller: _email,
+                focusNode: _emailFocus,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
+                autofillHints: const [AutofillHints.email],
+                decoration: const InputDecoration(
+                  labelText: 'E-mail',
+                  prefixIcon: Icon(Icons.alternate_email),
+                ),
+                validator: (value) => value != null && value.contains('@')
+                    ? null
+                    : 'Indtast en gyldig e-mail.',
+              ),
+            ),
+            const SizedBox(height: 14),
+            Focus(
+              onKeyEvent: tv
+                  ? (node, event) => _handleUpDown(
+                      event,
+                      _loginButtonFocus,
+                      _emailFocus,
+                    )
+                  : null,
+              child: TextFormField(
+                controller: _password,
+                focusNode: _passwordFocus,
+                obscureText: !_showPassword,
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _submit(),
+                autofillHints: const [AutofillHints.password],
+                decoration: InputDecoration(
+                  labelText: 'Adgangskode',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    onPressed: () =>
+                        setState(() => _showPassword = !_showPassword),
+                    icon: Icon(
+                      _showPassword ? Icons.visibility_off : Icons.visibility,
+                    ),
                   ),
                 ),
+                validator: (value) => value == null || value.isEmpty
+                    ? 'Indtast adgangskoden.'
+                    : null,
               ),
-              validator: (value) => value == null || value.isEmpty
-                  ? 'Indtast adgangskoden.'
-                  : null,
             ),
             if (widget.controller.error != null) ...[
               const SizedBox(height: 14),
@@ -124,6 +209,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ],
             const SizedBox(height: 20),
             FilledButton.icon(
+              focusNode: _loginButtonFocus,
               onPressed: widget.controller.busy ? null : _submit,
               icon: widget.controller.busy
                   ? const SizedBox.square(
