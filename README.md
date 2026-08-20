@@ -1,5 +1,23 @@
 # BoltBytes Media Server
 
+## Leverance 2026-08-20: Mobile TV UI polish (TV-actions og mediekort)
+
+- TV-titelskærmen har fået en samlet action-række med:
+  - `Fortsæt`/`Afspil`
+  - `Afspil fra start`
+  - Download
+  - Gem/fjern fra liste
+  - Markér set/uselset
+- Serielogikken i TV-handlingen bruger nu tydeligere branch: hvis serien er startbar vælges afsnit korrekt, ellers bruges normal medie-start (inkl. gemt position).
+- Mediekort-komponenten er opdateret med stærkere fokus-state, renere skygge, tydeligere overlay med titel/ikoner og bedre badge/prøgressionsindikator på TV.
+- Disse ændringer er formatteret (`dart format`) og har ingen `flutter analyze`-issues på de redigerede filer.
+- GitHub-push: `agent/encrypted-offline-mobile-release` med commit `d769357`.
+
+Manglende efter denne leverance:
+- Finere UI-polish af login- og anbefalingsflowet på TV.
+- Bedre global topmenu-oplevelse for hurtig genre/sektion-navigering i TV- og mobilvisning.
+- Endelig tuning af knapstørrelser/afstande på meget store TV-skærme.
+
 ## Leverance 2026-08-19: krypteret offline, push, crash-ledger og Android-release
 
 Denne leverance gør Android- og Android TV-klienten klar til en kontrolleret produktionsudgivelse på fire områder:
