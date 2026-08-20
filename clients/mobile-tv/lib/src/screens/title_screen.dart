@@ -221,9 +221,7 @@ class _TitleScreenState extends State<TitleScreen> {
                 )
               else
                 _TvActionButton(
-                  icon: inWatchlist
-                      ? Icons.bookmark
-                      : Icons.bookmark_outline,
+                  icon: inWatchlist ? Icons.bookmark : Icons.bookmark_outline,
                   label: inWatchlist ? 'Fjern liste' : 'Gem i liste',
                   onTap: actionBusy ? null : _toggleWatchlist,
                 ),
@@ -232,9 +230,7 @@ class _TitleScreenState extends State<TitleScreen> {
                   tooltip: watched ? 'Markér som ikke set' : 'Markér som set',
                   onPressed: actionBusy ? null : _toggleWatched,
                   icon: Icon(
-                    watched
-                        ? Icons.check_circle
-                        : Icons.check_circle_outline,
+                    watched ? Icons.check_circle : Icons.check_circle_outline,
                   ),
                 )
               else
@@ -330,95 +326,99 @@ class _TitleScreenState extends State<TitleScreen> {
                             ),
                             const SizedBox(height: 20),
                             if (tv)
-                              Wrap(
-                                spacing: 12,
-                                runSpacing: 12,
-                                crossAxisAlignment:
-                                    WrapCrossAlignment.center,
-                                children: [
-                                  FilledButton.icon(
-                                    onPressed: loading
-                                        ? null
-                                        : () {
-                                            final episode =
-                                                data?.resumeEpisode ??
-                                                data?.nextEpisode;
-                                            if (data?.mode == 'series' &&
-                                                episode != null) {
-                                              _play(
-                                                episode.media,
-                                                episode.positionMs,
-                                              );
-                                            } else {
-                                              _play(
-                                                media,
-                                                widget.media.progress
-                                                        ?.positionMs ??
-                                                    0,
-                                              );
-                                            }
-                                          },
-                                    icon: const Icon(Icons.play_arrow),
-                                    label: Text(
-                                      data?.resumeEpisode != null ||
-                                              widget.media.progress != null
-                                          ? 'Fortsæt'
-                                          : 'Afspil',
-                                    ),
-                                  ),
-                                  OutlinedButton.icon(
-                                    onPressed: () {
-                                       if (data == null || data.seasons.isEmpty) {
-                                        _play(
-                                          media,
-                                          widget.media.progress?.positionMs ?? 0,
-                                        );
-                                        return;
-                                      }
-                                      final first =
-                                           data.seasons.firstOrNull?.episodes.firstOrNull;
-                                      if (first == null) {
-                                        _play(media, 0);
-                                        return;
-                                      }
-                                      _play(first.media, first.positionMs);
-                                    },
-                                    icon: const Icon(Icons.playlist_play),
-                                    label: const Text('Afspil fra start'),
-                                  ),
-                                ],
-                              )
-                            else
-                            FilledButton.icon(
-                              autofocus: tv,
-                              onPressed: loading
-                                  ? null
-                                  : () {
-                                      final episode =
-                                          data?.resumeEpisode ??
-                                          data?.nextEpisode;
-                                      if (data?.mode == 'series' &&
-                                          episode != null) {
-                                        _play(
-                                          episode.media,
-                                          episode.positionMs,
-                                        );
-                                      } else {
-                                        _play(
-                                          media,
-                                          widget.media.progress?.positionMs ??
-                                              0,
-                                        );
+                              _TitleActionRow(
+                                media: media,
+                                experience: data,
+                                loading: loading,
+                                inWatchlist: inWatchlist,
+                                watched: watched,
+                                actionBusy: actionBusy,
+                                onPlay: (resumeFromStart) {
+                                  final current = data;
+                                  if (current == null ||
+                                      current.seasons.isEmpty) {
+                                    _play(
+                                      media,
+                                      resumeFromStart
+                                          ? 0
+                                          : widget.media.progress?.positionMs ??
+                                                0,
+                                    );
+                                    return;
+                                  }
+                                  if (resumeFromStart) {
+                                    final first = current
+                                        .seasons
+                                        .firstOrNull
+                                        ?.episodes
+                                        .firstOrNull;
+                                    if (first == null) {
+                                      _play(media, 0);
+                                      return;
+                                    }
+                                    _play(first.media, first.positionMs);
+                                    return;
+                                  }
+                                  final episode =
+                                      current.resumeEpisode ??
+                                      current.nextEpisode;
+                                  if (current.mode == 'series' &&
+                                      episode != null) {
+                                    _play(episode.media, episode.positionMs);
+                                  } else {
+                                    _play(
+                                      media,
+                                      widget.media.progress?.positionMs ?? 0,
+                                    );
                                   }
                                 },
-                              icon: const Icon(Icons.play_arrow),
-                              label: Text(
-                                data?.resumeEpisode != null ||
-                                        widget.media.progress != null
-                                    ? 'Fortsæt'
-                                    : 'Afspil',
+                                onToggleWatchlist: actionBusy
+                                    ? null
+                                    : () {
+                                        unawaited(_toggleWatchlist());
+                                      },
+                                onToggleWatched: actionBusy
+                                    ? null
+                                    : () {
+                                        unawaited(_toggleWatched());
+                                      },
+                                onDownload: downloadBusy
+                                    ? null
+                                    : () {
+                                        unawaited(_download());
+                                      },
+                              )
+                            else
+                              FilledButton.icon(
+                                autofocus: tv,
+                                onPressed: loading
+                                    ? null
+                                    : () {
+                                        final episode =
+                                            data?.resumeEpisode ??
+                                            data?.nextEpisode;
+                                        if (data?.mode == 'series' &&
+                                            episode != null) {
+                                          _play(
+                                            episode.media,
+                                            episode.positionMs,
+                                          );
+                                        } else {
+                                          _play(
+                                            media,
+                                            widget.media.progress?.positionMs ??
+                                                0,
+                                          );
+                                        }
+                                      },
+                                icon: const Icon(Icons.play_arrow),
+                                label: Text(
+                                  data?.resumeEpisode != null ||
+                                          widget.media.progress != null
+                                      ? 'Fortsæt'
+                                      : 'Afspil',
+                                ),
                               ),
-                            ),
                           ],
                         ),
                       ),
@@ -539,6 +539,99 @@ class _TitleScreenState extends State<TitleScreen> {
   }
 }
 
+class _TitleActionRow extends StatelessWidget {
+  const _TitleActionRow({
+    required this.media,
+    required this.experience,
+    required this.loading,
+    required this.inWatchlist,
+    required this.watched,
+    required this.actionBusy,
+    required this.onPlay,
+    required this.onToggleWatchlist,
+    required this.onToggleWatched,
+    required this.onDownload,
+  });
+
+  final MediaItem media;
+  final TitleExperience? experience;
+  final bool loading;
+  final bool inWatchlist;
+  final bool watched;
+  final bool actionBusy;
+  final void Function(bool resumeFromStart) onPlay;
+  final VoidCallback? onToggleWatchlist;
+  final VoidCallback? onToggleWatched;
+  final VoidCallback? onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasResume =
+        (experience?.resumeEpisode != null) || media.progress != null;
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        FilledButton.icon(
+          onPressed: loading ? null : () => onPlay(false),
+          icon: const Icon(Icons.play_arrow),
+          label: Text(hasResume ? 'Fortsæt' : 'Afspil'),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(170, 48),
+            textStyle: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: loading ? null : () => onPlay(true),
+          icon: const Icon(Icons.playlist_play),
+          label: const Text('Afspil fra start'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(170, 48),
+            textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        if (onDownload != null)
+          OutlinedButton.icon(
+            onPressed: onDownload,
+            icon: const Icon(Icons.download_for_offline_outlined),
+            label: const Text('Download'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(160, 48),
+              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        if (onToggleWatchlist != null)
+          TextButton.icon(
+            onPressed: actionBusy ? null : onToggleWatchlist,
+            icon: Icon(inWatchlist ? Icons.bookmark : Icons.bookmark_outline),
+            label: Text(inWatchlist ? 'Fjern fra liste' : 'Gem i liste'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: Colors.white.withValues(alpha: 0.06),
+              minimumSize: const Size(148, 48),
+              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        if (onToggleWatched != null)
+          TextButton.icon(
+            onPressed: actionBusy ? null : onToggleWatched,
+            icon: Icon(
+              watched ? Icons.check_circle : Icons.check_circle_outline,
+            ),
+            label: Text(watched ? 'Marker uset' : 'Marker set'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: Colors.white.withValues(alpha: 0.06),
+              minimumSize: const Size(148, 48),
+              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _EpisodeTile extends StatefulWidget {
   const _EpisodeTile({
     required this.api,
@@ -603,9 +696,9 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                       ),
               ),
             ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
@@ -645,11 +738,7 @@ class _EpisodeTileState extends State<_EpisodeTile> {
             ),
             const SizedBox(width: 12),
             widget.tv
-                ? Icon(
-                    Icons.play_arrow,
-                    size: 30,
-                    color: Colors.white70,
-                  )
+                ? Icon(Icons.play_arrow, size: 30, color: Colors.white70)
                 : const Icon(Icons.play_arrow),
           ],
         ),
@@ -673,18 +762,18 @@ class _TvActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => OutlinedButton.icon(
-        onPressed: onTap,
-        icon: busy
-            ? const SizedBox.square(
-                dimension: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Icon(icon, size: 18),
-        label: Text(label),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.white,
-          visualDensity: VisualDensity.compact,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        ),
-      );
+    onPressed: onTap,
+    icon: busy
+        ? const SizedBox.square(
+            dimension: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : Icon(icon, size: 18),
+    label: Text(label),
+    style: OutlinedButton.styleFrom(
+      foregroundColor: Colors.white,
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    ),
+  );
 }

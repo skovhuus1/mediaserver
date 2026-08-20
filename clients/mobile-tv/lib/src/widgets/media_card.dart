@@ -41,260 +41,283 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
   @override
   Widget build(BuildContext context) {
     final media = widget.media;
-    final image = widget.api.absoluteMediaUrl(media.posterPath, imageSize: 'w500');
+    final image = widget.api.absoluteMediaUrl(
+      media.posterPath,
+      imageSize: 'w500',
+    );
     final progress = media.progress?.percent.clamp(0, 100) ?? 0;
     final posterHeight = widget.width * (widget.isTv ? 1.47 : 1.48);
-    final focusScale = _focused ? 1.08 : 1.0;
+    final focusScale = _focused ? 1.07 : 1.0;
     final titleStyle = _focused ? FontWeight.w800 : FontWeight.w700;
+    final focusRing = _focused
+        ? <BoxShadow>[
+            BoxShadow(
+              color: const Color(0x9963F2D7),
+              blurRadius: 22,
+              spreadRadius: 1,
+              offset: const Offset(0, 8),
+            ),
+          ]
+        : const <BoxShadow>[
+            BoxShadow(
+              color: Color(0x22000000),
+              blurRadius: 18,
+              spreadRadius: 0.3,
+              offset: Offset(0, 4),
+            ),
+          ];
 
-    return AnimatedScale(
-      scale: focusScale,
-      duration: const Duration(milliseconds: 170),
-      curve: Curves.easeOutCubic,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: widget.width,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: const Color(0xFF111A24),
-          border: Border.all(
-            width: _focused ? 2.5 : 1,
-            color: _focused
-                ? Theme.of(context).colorScheme.secondary
-                : const Color(0xFF2B3540),
-          ),
-          boxShadow: [
-            if (_focused)
-              BoxShadow(
-                color: const Color(0x7745E7C4).withValues(alpha: 0.85),
-                blurRadius: 26,
-                spreadRadius: 1,
-                offset: const Offset(0, 8),
-              )
-            else
-              const BoxShadow(
-                color: Color(0x22000000),
-                blurRadius: 18,
-                spreadRadius: 0.5,
-              ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: FocusableActionDetector(
-          onFocusChange: _setFocus,
-          child: InkWell(
-            onTap: widget.onPressed,
-            autofocus: widget.isTv,
+    return Hero(
+      tag: 'media-card-${media.id}-${widget.width}',
+      child: AnimatedScale(
+        scale: focusScale,
+        duration: const Duration(milliseconds: 170),
+        curve: Curves.easeOutCubic,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: widget.width,
+          decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            focusColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-            splashColor: Colors.transparent,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  height: posterHeight,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (image.isNotEmpty)
-                        Image.network(
-                          image,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const _PosterFallback(),
-                        )
-                      else
-                        const _PosterFallback(),
-                      if (media.is4k || media.isHdr || media.isEpisode)
-                        Positioned(
-                          left: 10,
-                          top: 10,
-                          child: Wrap(
-                            spacing: 6,
-                            children: [
-                              if (media.is4k) const _Badge('4K'),
-                              if (media.isHdr) const _Badge('HDR'),
-                              if (media.isEpisode)
-                                const _Badge('Sæson'),
-                            ],
-                          ),
-                        ),
-                      if (media.progress != null)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: SizedBox(
-                            height: 4.5,
-                            child: LinearProgressIndicator(
-                              value: progress / 100,
-                              backgroundColor: Colors.white10,
-                              valueColor: AlwaysStoppedAnimation(
-                                Theme.of(context).colorScheme.secondary,
-                              ),
+            color: const Color(0xFF111A24),
+            border: Border.all(
+              width: _focused ? 2.5 : 1,
+              color: _focused
+                  ? Theme.of(context).colorScheme.secondary
+                  : const Color(0xFF2B3540),
+            ),
+            boxShadow: focusRing,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: FocusableActionDetector(
+            onFocusChange: _setFocus,
+            child: InkWell(
+              onTap: widget.onPressed,
+              autofocus: widget.isTv,
+              borderRadius: BorderRadius.circular(18),
+              focusColor: Colors.transparent,
+              highlightColor: Colors.transparent,
+              splashColor: Colors.transparent,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    height: posterHeight,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (image.isNotEmpty)
+                          Image.network(
+                            image,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => const _PosterFallback(),
+                          )
+                        else
+                          const _PosterFallback(),
+                        if (media.is4k || media.isHdr || media.isEpisode)
+                          Positioned(
+                            left: 10,
+                            top: 10,
+                            child: Wrap(
+                              spacing: 6,
+                              children: [
+                                if (media.is4k) const _Badge('4K'),
+                                if (media.isHdr) const _Badge('HDR'),
+                                if (media.isEpisode) const _Badge('Sæson'),
+                              ],
                             ),
                           ),
-                        ),
-                      if (_focused)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          top: 0,
-                          bottom: 0,
-                          child: Stack(
-                            children: [
-                              Container(
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Color(0x00090D12),
-                                      Color(0xCC090D12),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              Center(
-                                child: Container(
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.black.withValues(alpha: 0.55),
-                                  ),
-                                  child: const Icon(
-                                    Icons.play_circle_filled_rounded,
-                                    size: 40,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                left: 0,
-                                right: 0,
-                                bottom: 10,
-                                child: BackdropFilter(
-                                  filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
+                        if (_focused)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: Stack(
+                              children: [
+                                Container(
+                                  decoration: const BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Color(0x00090D12),
+                                        Color(0xCC090D12),
+                                      ],
                                     ),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            media.displayTitle,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                        ),
-                                        const Icon(
-                                          Icons.info_outline,
-                                          size: 16,
-                                          color: Colors.white70,
+                                  ),
+                                ),
+                                Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.black.withValues(
+                                        alpha: 0.55,
+                                      ),
+                                    ),
+                                    child: const Icon(
+                                      Icons.play_circle_filled_rounded,
+                                      size: 40,
+                                      color: Colors.white,
+                                      shadows: [
+                                        Shadow(
+                                          color: Color(0x88000000),
+                                          blurRadius: 16,
                                         ),
                                       ],
                                     ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                if (widget.showMeta)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            media.displayTitle,
-                            maxLines: widget.isTv ? 2 : 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: titleStyle,
-                              fontSize: widget.isTv ? 16 : 14,
-                              height: 1.12,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            [
-                              if (media.releaseYear != null)
-                                media.releaseYear.toString(),
-                              if (media.durationMs != null)
-                                _formatDuration(media.durationMs!),
-                              if (media.isEpisode && media.episodeLabel.isNotEmpty)
-                                media.episodeLabel,
-                            ].join(' · '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white60,
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const Spacer(),
-                          if (media.progress != null)
-                            AnimatedOpacity(
-                              opacity: _focused ? 1 : 0,
-                              duration: const Duration(milliseconds: 140),
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 7),
-                                child: Row(
-                                  children: [
-                                    Text(
-                                      '${media.progress!.percent.round()}% set',
-                                      style: const TextStyle(
-                                        color: Colors.white60,
-                                        fontSize: 10,
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 10,
+                                  child: BackdropFilter(
+                                    filter: ImageFilter.blur(
+                                      sigmaX: 8,
+                                      sigmaY: 8,
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              media.displayTitle,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w800,
+                                                height: 1.05,
+                                              ),
+                                            ),
+                                          ),
+                                          const Icon(
+                                            Icons.info_outline_rounded,
+                                            size: 16,
+                                            color: Colors.white70,
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Container(
-                                        height: 3,
-                                        decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(99),
-                                          color: Colors.white12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (media.progress != null)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: SizedBox(
+                              height: 4.5,
+                              child: LinearProgressIndicator(
+                                value: progress / 100,
+                                backgroundColor: Colors.white10,
+                                valueColor: AlwaysStoppedAnimation(
+                                  Theme.of(context).colorScheme.secondary,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (widget.showMeta)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              media.displayTitle,
+                              maxLines: widget.isTv ? 2 : 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: titleStyle,
+                                fontSize: widget.isTv ? 16 : 14,
+                                height: 1.12,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              [
+                                if (media.releaseYear != null)
+                                  media.releaseYear.toString(),
+                                if (media.durationMs != null)
+                                  _formatDuration(media.durationMs!),
+                                if (media.isEpisode &&
+                                    media.episodeLabel.isNotEmpty)
+                                  media.episodeLabel,
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (media.progress != null)
+                              AnimatedOpacity(
+                                opacity: _focused ? 1 : 0.8,
+                                duration: const Duration(milliseconds: 140),
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 7),
+                                  child: Row(
+                                    children: [
+                                      Text(
+                                        '${media.progress!.percent.round()}% set',
+                                        style: const TextStyle(
+                                          color: Colors.white60,
+                                          fontSize: 10,
                                         ),
-                                        child: Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: FractionallySizedBox(
-                                            widthFactor: media.progress!.percent / 100,
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                borderRadius: BorderRadius.circular(
-                                                  99,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Container(
+                                          height: 3,
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(
+                                              99,
+                                            ),
+                                            color: Colors.white12,
+                                          ),
+                                          child: Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: FractionallySizedBox(
+                                              widthFactor:
+                                                  media.progress!.percent / 100,
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(99),
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).colorScheme.secondary,
                                                 ),
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .secondary,
                                               ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -325,11 +348,7 @@ class _Badge extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       border: Border.all(color: Colors.white24),
       boxShadow: const [
-        BoxShadow(
-          color: Color(0x441F2B36),
-          blurRadius: 8,
-          spreadRadius: 1,
-        ),
+        BoxShadow(color: Color(0x441F2B36), blurRadius: 8, spreadRadius: 1),
       ],
     ),
     child: Padding(
@@ -353,11 +372,7 @@ class _PosterFallback extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     color: const Color(0xFF151D25),
     child: const Center(
-      child: Icon(
-        Icons.movie_outlined,
-        size: 42,
-        color: Colors.white24,
-      ),
+      child: Icon(Icons.movie_outlined, size: 42, color: Colors.white24),
     ),
   );
 }
