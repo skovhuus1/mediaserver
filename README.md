@@ -789,6 +789,7 @@ Implementeret:
 
 - Android mobil/tablet og Android TV fra samme Flutter-kodebase med separat `BB_MEDIA_DEVICE_TYPE`, Leanback-launcher og retningsbestemt fjernbetjeningsfokus.
 - Login med konfigurerbar serveradresse, krypteret access/refresh-tokenlagring, automatisk tokenrotation, engangs-passwordskifte og profilvalg med valgfri PIN.
+- Login-UI i TV/Android forbedret: serverfeltet validerer hostformat (ingen fulde URL'er), filtrerer whitespace, og form-felterne har forbedret fjernbetjeningsfokus (op/ned + Enter/Done-flow).
 - Personlig forside fra recommendations, katalog og profilscopet `Fortsæt med at se`; Hjem, Film, Serier, Fortsæt, søgning, profilskifte og logout udfører alle rigtig navigation.
 - Samlet serieside med sæsonvalg, episoder, set-status, progression, resumeepisode og TheTVDB-attribution.
 - Native Android-video via den officielle Flutter `video_player`/ExoPlayer-backend. Klienten autoriserer server-side, understøtter Direct Play og adaptiv HLS, venter på Direct Stream/transcode readiness og genbruger logical session ved HLS-seek/reconfiguration.
