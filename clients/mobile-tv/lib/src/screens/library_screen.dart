@@ -55,9 +55,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         api.getJson('/media/catalog?type=series&pageSize=36&sort=newest'),
         api.getJson('/playback/history/continue'),
         api.getJson('/playback/watchlist'),
-        api
-            .getJson('/media/recommendations')
-            .catchError((_) => <String, dynamic>{}),
+        api.getJson('/media/recommendations').catchError((_) => <String, dynamic>{}),
       ]);
       if (!mounted) return;
       setState(() {
@@ -123,8 +121,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _load();
   }
 
-  void _showSearch() {
-    showSearch<void>(
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => ClientSettingsScreen(api: api)),
+    );
+    await _load();
+  }
+
+  Future<void> _showSearch() async {
+    await showSearch<void>(
       context: context,
       delegate: _MediaSearchDelegate(
         api: api,
@@ -132,13 +137,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
         onSelected: _open,
       ),
     );
-  }
-
-  Future<void> _openSettings() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => ClientSettingsScreen(api: api)),
-    );
-    await _load();
   }
 
   @override
@@ -152,7 +150,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
       Icons.play_circle_outline,
       Icons.bookmark_outline,
     ];
-    final content = Column(
+
+    final body = _body(tv);
+
+    if (tv) {
+      return Scaffold(
+        body: Row(
+          children: [
+            _TvSideRail(
+              labels: labels,
+              icons: icons,
+              selected: _tab,
+              onSelect: (index) => setState(() => _tab = index),
+              controller: widget.controller,
+              onSearch: _showSearch,
+              onSettings: _openSettings,
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: _TvScrollContainer(child: body),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final mobileContent = Column(
       children: [
         _LibraryHeader(
           controller: widget.controller,
@@ -160,46 +186,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
           onSelect: (index) => setState(() => _tab = index),
           onSearch: _showSearch,
           onSettings: _openSettings,
-          compact: !tv,
+          compact: true,
+          showTabs: false,
         ),
         Expanded(
-          child: RefreshIndicator(onRefresh: _load, child: _body(tv)),
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: _TvScrollContainer(child: body),
+          ),
         ),
       ],
     );
-    if (tv) {
-      return Scaffold(
-        body: Row(
-          children: [
-            NavigationRail(
-              selectedIndex: _tab,
-              onDestinationSelected: (value) => setState(() => _tab = value),
-              extended: MediaQuery.sizeOf(context).width >= 1500,
-              backgroundColor: const Color(0xFF080C11),
-              leading: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
-                child: BrandMark(size: 42),
-              ),
-              destinations: List.generate(
-                labels.length,
-                (index) => NavigationRailDestination(
-                  icon: Icon(icons[index]),
-                  selectedIcon: Icon(
-                    icons[index],
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
-                  label: Text(labels[index]),
-                ),
-              ),
-            ),
-            const VerticalDivider(width: 1),
-            Expanded(child: content),
-          ],
-        ),
-      );
-    }
+
     return Scaffold(
-      body: content,
+      body: mobileContent,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (value) => setState(() => _tab = value),
@@ -217,14 +217,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget _body(bool tv) {
     if (_loading && _movies.isEmpty) {
       return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         children: const [
           SizedBox(height: 220),
           Center(child: CircularProgressIndicator()),
         ],
       );
     }
+
     if (_error != null && _movies.isEmpty) {
       return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(32),
         children: [
           const SizedBox(height: 120),
@@ -246,30 +249,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ],
       );
     }
+
     return switch (_tab) {
       1 => _CatalogGrid(
         api: api,
         title: 'Film',
         items: _movies,
         onPressed: _open,
+        tv: tv,
       ),
       2 => _CatalogGrid(
         api: api,
         title: 'Serier',
         items: _series,
         onPressed: _open,
+        tv: tv,
       ),
       3 => _CatalogGrid(
         api: api,
         title: 'Fortsæt med at se',
         items: _continue,
         onPressed: _play,
+        tv: tv,
       ),
       4 => _CatalogGrid(
         api: api,
         title: 'Min liste',
         items: _watchlist,
         onPressed: _open,
+        tv: tv,
       ),
       _ => _HomeFeed(
         api: api,
@@ -293,7 +301,8 @@ class _LibraryHeader extends StatelessWidget {
     required this.onSelect,
     required this.onSearch,
     required this.onSettings,
-    required this.compact,
+    this.compact = false,
+    this.showTabs = true,
   });
 
   final AppController controller;
@@ -302,47 +311,46 @@ class _LibraryHeader extends StatelessWidget {
   final VoidCallback onSearch;
   final VoidCallback onSettings;
   final bool compact;
+  final bool showTabs;
 
   @override
   Widget build(BuildContext context) => SafeArea(
     bottom: false,
     child: Container(
       padding: EdgeInsets.symmetric(
-        horizontal: compact ? 16 : 30,
+        horizontal: compact ? 16 : 28,
         vertical: 12,
       ),
       decoration: const BoxDecoration(
-        color: Color(0xEE090D12),
+        color: Color(0xF2090D12),
         border: Border(bottom: BorderSide(color: Color(0xFF202831))),
       ),
       child: Row(
         children: [
           InkWell(
+            borderRadius: BorderRadius.circular(999),
             onTap: () => onSelect(0),
             child: BrandLockup(compact: compact),
           ),
-          if (!compact) ...[
+          if (showTabs) ...[
             const SizedBox(width: 28),
-            for (final entry in const [
-              'Hjem',
-              'Film',
-              'Serier',
-              'Fortsæt',
-              'Min liste',
-            ].indexed)
+            for (final entry in const ['Hjem', 'Film', 'Serier', 'Fortsæt', 'Min liste'].indexed)
               Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: TextButton(
-                  onPressed: () => onSelect(entry.$1),
-                  style: TextButton.styleFrom(
-                    foregroundColor: selected == entry.$1
+                padding: const EdgeInsets.only(right: 6),
+                child: ChoiceChip(
+                  label: Text(entry.$2),
+                  selected: selected == entry.$1,
+                  onSelected: (_) => onSelect(entry.$1),
+                  visualDensity:
+                      compact ? VisualDensity.compact : VisualDensity.standard,
+                  labelStyle: TextStyle(
+                    fontWeight: selected == entry.$1
+                        ? FontWeight.w800
+                        : FontWeight.w600,
+                    color: selected == entry.$1
                         ? Colors.white
-                        : Colors.white54,
-                    backgroundColor: selected == entry.$1
-                        ? const Color(0xFF1C242C)
-                        : null,
+                        : Colors.white70,
                   ),
-                  child: Text(entry.$2),
                 ),
               ),
           ],
@@ -382,8 +390,7 @@ class _LibraryHeader extends StatelessWidget {
                 unawaited(
                   Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) =>
-                          NotificationInboxScreen(api: controller.api),
+                      builder: (_) => NotificationInboxScreen(api: controller.api),
                     ),
                   ),
                 );
@@ -401,16 +408,17 @@ class _LibraryHeader extends StatelessWidget {
               PopupMenuItem(value: 'logout', child: Text('Log ud')),
             ],
             child: Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(6),
               child: CircleAvatar(
-                radius: 18,
+                radius: compact ? 18 : 20,
                 backgroundColor: const Color(0xFFB67AFF),
                 child: Text(
                   (controller.activeProfile?.name ?? 'B').characters.first
                       .toUpperCase(),
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.black,
                     fontWeight: FontWeight.w900,
+                    fontSize: compact ? 14 : 16,
                   ),
                 ),
               ),
@@ -419,6 +427,200 @@ class _LibraryHeader extends StatelessWidget {
         ],
       ),
     ),
+  );
+}
+
+class _TvSideRail extends StatelessWidget {
+  const _TvSideRail({
+    required this.labels,
+    required this.icons,
+    required this.selected,
+    required this.onSelect,
+    required this.controller,
+    required this.onSearch,
+    required this.onSettings,
+  });
+
+  final List<String> labels;
+  final List<IconData> icons;
+  final int selected;
+  final ValueChanged<int> onSelect;
+  final AppController controller;
+  final VoidCallback onSearch;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: SizedBox(
+      width: 286,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(right: BorderSide(color: Color(0xFF1E2730))),
+          color: Color(0xF2090E15),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 14,
+              offset: Offset(8, 0),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  color: Colors.white.withValues(alpha: 0.06),
+                ),
+                child: InkWell(
+                  onTap: () => onSelect(0),
+                  borderRadius: BorderRadius.circular(999),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: BrandLockup(compact: false),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: NavigationRail(
+                selectedIndex: selected,
+                onDestinationSelected: onSelect,
+                labelType: NavigationRailLabelType.all,
+                groupAlignment: -0.95,
+                backgroundColor: Colors.transparent,
+                selectedIconTheme: const IconThemeData(size: 24),
+                destinations: [
+                  for (final entry in labels.indexed)
+                    NavigationRailDestination(
+                      icon: Icon(icons[entry.$1]),
+                      label: Text(entry.$2),
+                    ),
+                ],
+                trailing: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Divider(height: 16),
+                    _TvRailAction(
+                      icon: Icons.search,
+                      label: 'Søg',
+                      onTap: onSearch,
+                    ),
+                    if (controller.isAdmin)
+                      _TvRailAction(
+                        icon: Icons.admin_panel_settings_outlined,
+                        label: 'Admin',
+                        onTap: () => launchUrl(
+                          Uri.parse(
+                            controller.api.baseUrl.replaceFirst('/api/v1', ''),
+                          ),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                      ),
+                    _TvRailAction(
+                      icon: Icons.settings,
+                      label: 'Indstillinger',
+                      onTap: onSettings,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    color: Colors.white.withValues(alpha: 0.04),
+                  ),
+                  child: Text(
+                    controller.activeProfile?.name ?? 'Bruger',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _TvRailAction extends StatelessWidget {
+  const _TvRailAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return FocusableActionDetector(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              height: 46,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: Colors.white.withValues(alpha: 0.05),
+              ),
+              child: Row(
+                children: [
+                  Icon(icon, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.1,
+                      ),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, size: 17),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TvScrollContainer extends StatelessWidget {
+  const _TvScrollContainer({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ScrollConfiguration(
+    behavior: const ScrollBehavior().copyWith(scrollbars: false),
+    child: child,
   );
 }
 
@@ -447,8 +649,7 @@ class _HomeFeed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hero =
-        recommendations.hero ??
+    final hero = recommendations.hero ??
         (continueItems.isNotEmpty
             ? continueItems.first
             : (movies.isNotEmpty ? movies.first : null));
@@ -460,11 +661,18 @@ class _HomeFeed extends StatelessWidget {
       if (series.isNotEmpty)
         MediaSection(title: 'Serier på din server', items: series),
     ];
+
     return ListView(
       padding: EdgeInsets.only(bottom: tv ? 56 : 28),
       children: [
         if (hero != null)
-          _Hero(api: api, media: hero, onOpen: onOpen, onPlay: onPlay, tv: tv),
+          _Hero(
+            api: api,
+            media: hero,
+            onOpen: onOpen,
+            onPlay: onPlay,
+            tv: tv,
+          ),
         if (hero == null)
           const Padding(
             padding: EdgeInsets.all(40),
@@ -473,14 +681,20 @@ class _HomeFeed extends StatelessWidget {
             ),
           ),
         for (final section in sections)
-          _MediaRail(api: api, section: section, onPressed: onOpen, tv: tv),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-          child: Text(
-            'Udvalgt til $profileName beregnes kun fra medier, der findes på din egen server.',
-            style: const TextStyle(color: Colors.white38, fontSize: 12),
+          _MediaRail(
+            api: api,
+            section: section,
+            onPressed: onOpen,
+            tv: tv,
           ),
-        ),
+        if (tv)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+            child: Text(
+              'Udvalgt til $profileName.',
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
+            ),
+          ),
       ],
     );
   }
@@ -503,12 +717,10 @@ class _Hero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final image = api.absoluteMediaUrl(
-      media.backdropPath ?? media.posterPath,
-      imageSize: 'original',
-    );
+    final image = api.absoluteMediaUrl(media.backdropPath ?? media.posterPath, imageSize: 'original');
+
     return Container(
-      height: tv ? 500 : 420,
+      height: tv ? 520 : 420,
       margin: EdgeInsets.fromLTRB(tv ? 28 : 12, 18, tv ? 28 : 12, 18),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
@@ -534,64 +746,75 @@ class _Hero extends StatelessWidget {
                   Color(0xB8090D12),
                   Color(0x18090D12),
                 ],
-                stops: [0, 0.5, 1],
+                stops: [0, 0.55, 1],
               ),
             ),
           ),
           Align(
-            alignment: Alignment.centerLeft,
+            alignment: Alignment.bottomLeft,
             child: Padding(
-              padding: EdgeInsets.all(tv ? 58 : 28),
+              padding: EdgeInsets.all(tv ? 56 : 28),
               child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: tv ? 660 : 520),
+                constraints: BoxConstraints(maxWidth: tv ? 780 : 520),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      (media.reason ?? 'UDVALGT FRA DIT BIBLIOTEK')
-                          .toUpperCase(),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Theme.of(context).colorScheme.secondary,
-                      ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (media.releaseYear != null)
+                          _ChipPill(label: '${media.releaseYear}'),
+                        if (media.is4k) const _ChipPill(label: '4K'),
+                        if (media.isHdr) _ChipPill(label: media.hdr!.toUpperCase()),
+                        if (!tv && media.episodeLabel.isNotEmpty)
+                          _ChipPill(label: media.episodeLabel),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     Text(
                       media.displayTitle,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                        fontSize: tv ? 66 : 44,
-                        height: 0.95,
+                        fontSize: tv ? 58 : 44,
+                        height: 0.98,
+                        shadows: const [
+                          Shadow(color: Colors.black, blurRadius: 12),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    Text(
-                      media.overview ?? media.episodeLabel,
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        height: 1.45,
+                    if (!tv) ...[
+                      const SizedBox(height: 14),
+                      Text(
+                        media.overview ?? media.episodeLabel,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          height: 1.45,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 22),
+                    ],
+                    const SizedBox(height: 20),
                     Wrap(
                       spacing: 12,
-                      runSpacing: 10,
                       children: [
                         FilledButton.icon(
                           onPressed: () => onPlay(media),
                           icon: const Icon(Icons.play_arrow),
-                          label: Text(
-                            media.progress == null ? 'Afspil' : 'Fortsæt',
-                          ),
+                          label: const Text('Afspil'),
                         ),
                         OutlinedButton.icon(
                           onPressed: () => onOpen(media),
                           icon: const Icon(Icons.info_outline),
                           label: const Text('Info'),
                         ),
+                        if (tv)
+                          TextButton.icon(
+                            onPressed: () => onPlay(media),
+                            icon: const Icon(Icons.play_circle_outline),
+                            label: const Text('Genoptag'),
+                          ),
                       ],
                     ),
                   ],
@@ -620,9 +843,9 @@ class _MediaRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = tv ? 184.0 : 146.0;
+    final width = tv ? 214.0 : 146.0;
     return Padding(
-      padding: EdgeInsets.only(top: tv ? 24 : 16),
+      padding: EdgeInsets.only(top: tv ? 22 : 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -630,25 +853,32 @@ class _MediaRail extends StatelessWidget {
             padding: EdgeInsets.symmetric(horizontal: tv ? 30 : 16),
             child: Text(
               section.title,
-              style: Theme.of(context).textTheme.titleLarge,
+              style: tv
+                  ? Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 28)
+                  : Theme.of(context).textTheme.titleLarge,
             ),
           ),
           const SizedBox(height: 12),
           SizedBox(
-            height: width * 1.48 + 64,
-            child: ListView.separated(
-              padding: EdgeInsets.symmetric(
-                horizontal: tv ? 30 : 16,
-                vertical: 4,
-              ),
-              scrollDirection: Axis.horizontal,
-              itemCount: section.items.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 14),
-              itemBuilder: (_, index) => MediaPosterCard(
-                api: api,
-                media: section.items[index],
-                width: width,
-                onPressed: () => onPressed(section.items[index]),
+            height: width * 1.5 + (tv ? 78 : 72),
+            child: ScrollConfiguration(
+              behavior: const ScrollBehavior().copyWith(scrollbars: false),
+              child: ListView.separated(
+                padding: EdgeInsets.symmetric(
+                  horizontal: tv ? 30 : 16,
+                  vertical: 4,
+                ),
+                scrollDirection: Axis.horizontal,
+                itemCount: section.items.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 14),
+                itemBuilder: (_, index) => MediaPosterCard(
+                  api: api,
+                  media: section.items[index],
+                  width: width,
+                  isTv: tv,
+                  showMeta: true,
+                  onPressed: () => onPressed(section.items[index]),
+                ),
               ),
             ),
           ),
@@ -664,34 +894,44 @@ class _CatalogGrid extends StatelessWidget {
     required this.title,
     required this.items,
     required this.onPressed,
+    required this.tv,
   });
 
   final ApiClient api;
   final String title;
   final List<MediaItem> items;
   final ValueChanged<MediaItem> onPressed;
+  final bool tv;
 
   @override
   Widget build(BuildContext context) => CustomScrollView(
     slivers: [
       SliverPadding(
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
+        padding: EdgeInsets.fromLTRB(tv ? 34 : 24, 24, tv ? 34 : 24, 10),
         sliver: SliverToBoxAdapter(
-          child: Text(title, style: Theme.of(context).textTheme.headlineMedium),
+          child: Text(
+            title,
+            style: tv
+                ? Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontSize: tv ? 34 : 24,
+                    fontWeight: FontWeight.w800,
+                  )
+                : Theme.of(context).textTheme.headlineMedium,
+          ),
         ),
       ),
       if (items.isEmpty)
-        const SliverFillRemaining(
+        SliverFillRemaining(
           hasScrollBody: false,
           child: Center(child: Text('Ingen titler fundet.')),
         )
       else
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 48),
+          padding: EdgeInsets.fromLTRB(tv ? 34 : 20, 8, tv ? 34 : 20, 48),
           sliver: SliverGrid.builder(
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 230,
-              mainAxisExtent: 330,
+            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: tv ? 250 : 230,
+              mainAxisExtent: tv ? 390 : 330,
               crossAxisSpacing: 16,
               mainAxisSpacing: 18,
             ),
@@ -699,12 +939,32 @@ class _CatalogGrid extends StatelessWidget {
             itemBuilder: (_, index) => MediaPosterCard(
               api: api,
               media: items[index],
-              width: 190,
+              width: tv ? 238 : 190,
+              isTv: tv,
               onPressed: () => onPressed(items[index]),
             ),
           ),
         ),
     ],
+  );
+}
+
+class _ChipPill extends StatelessWidget {
+  const _ChipPill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: const Color(0xE20A0E13),
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: Colors.white24),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+    ),
   );
 }
 
@@ -746,8 +1006,9 @@ class _MediaSearchDelegate extends SearchDelegate<void> {
         .where((item) => item.displayTitle.toLowerCase().contains(needle))
         .take(60)
         .toList();
+    final tv = useTvLayout(context);
     return GridView.builder(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(tv ? 28 : 20),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 220,
         mainAxisExtent: 320,
@@ -758,6 +1019,8 @@ class _MediaSearchDelegate extends SearchDelegate<void> {
       itemBuilder: (_, index) => MediaPosterCard(
         api: api,
         media: matches[index],
+        width: 180,
+        isTv: tv,
         onPressed: () {
           close(context, null);
           onSelected(matches[index]);

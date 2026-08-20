@@ -188,32 +188,63 @@ class _TitleScreenState extends State<TitleScreen> {
             pinned: true,
             backgroundColor: const Color(0xFF090D12),
             actions: [
-              IconButton(
-                tooltip: 'Download til offline',
-                onPressed: downloadBusy ? null : _download,
-                icon: downloadBusy
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.download_for_offline_outlined),
-              ),
-              IconButton(
-                tooltip: inWatchlist
-                    ? 'Fjern fra Min liste'
-                    : 'Føj til Min liste',
-                onPressed: actionBusy ? null : _toggleWatchlist,
-                icon: Icon(
-                  inWatchlist ? Icons.bookmark : Icons.bookmark_outline,
+              if (tv)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _TvActionButton(
+                    icon: Icons.download_for_offline_outlined,
+                    label: 'Download',
+                    busy: downloadBusy,
+                    onTap: downloadBusy ? null : _download,
+                  ),
+                )
+              else
+                IconButton(
+                  tooltip: 'Download til offline',
+                  onPressed: downloadBusy ? null : _download,
+                  icon: downloadBusy
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download_for_offline_outlined),
                 ),
-              ),
-              IconButton(
-                tooltip: watched ? 'Markér som ikke set' : 'Markér som set',
-                onPressed: actionBusy ? null : _toggleWatched,
-                icon: Icon(
-                  watched ? Icons.check_circle : Icons.check_circle_outline,
+              if (!tv)
+                IconButton(
+                  tooltip: inWatchlist
+                      ? 'Fjern fra Min liste'
+                      : 'Føj til Min liste',
+                  onPressed: actionBusy ? null : _toggleWatchlist,
+                  icon: Icon(
+                    inWatchlist ? Icons.bookmark : Icons.bookmark_outline,
+                  ),
+                )
+              else
+                _TvActionButton(
+                  icon: inWatchlist
+                      ? Icons.bookmark
+                      : Icons.bookmark_outline,
+                  label: inWatchlist ? 'Fjern liste' : 'Gem i liste',
+                  onTap: actionBusy ? null : _toggleWatchlist,
                 ),
-              ),
+              if (!tv)
+                IconButton(
+                  tooltip: watched ? 'Markér som ikke set' : 'Markér som set',
+                  onPressed: actionBusy ? null : _toggleWatched,
+                  icon: Icon(
+                    watched
+                        ? Icons.check_circle
+                        : Icons.check_circle_outline,
+                  ),
+                )
+              else
+                _TvActionButton(
+                  icon: watched
+                      ? Icons.check_circle
+                      : Icons.check_circle_outline,
+                  label: watched ? 'Marker uset' : 'Marker set',
+                  onTap: actionBusy ? null : _toggleWatched,
+                ),
             ],
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(
@@ -298,6 +329,66 @@ class _TitleScreenState extends State<TitleScreen> {
                               ),
                             ),
                             const SizedBox(height: 20),
+                            if (tv)
+                              Wrap(
+                                spacing: 12,
+                                runSpacing: 12,
+                                crossAxisAlignment:
+                                    WrapCrossAlignment.center,
+                                children: [
+                                  FilledButton.icon(
+                                    onPressed: loading
+                                        ? null
+                                        : () {
+                                            final episode =
+                                                data?.resumeEpisode ??
+                                                data?.nextEpisode;
+                                            if (data?.mode == 'series' &&
+                                                episode != null) {
+                                              _play(
+                                                episode.media,
+                                                episode.positionMs,
+                                              );
+                                            } else {
+                                              _play(
+                                                media,
+                                                widget.media.progress
+                                                        ?.positionMs ??
+                                                    0,
+                                              );
+                                            }
+                                          },
+                                    icon: const Icon(Icons.play_arrow),
+                                    label: Text(
+                                      data?.resumeEpisode != null ||
+                                              widget.media.progress != null
+                                          ? 'Fortsæt'
+                                          : 'Afspil',
+                                    ),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () {
+                                       if (data == null || data.seasons.isEmpty) {
+                                        _play(
+                                          media,
+                                          widget.media.progress?.positionMs ?? 0,
+                                        );
+                                        return;
+                                      }
+                                      final first =
+                                           data.seasons.firstOrNull?.episodes.firstOrNull;
+                                      if (first == null) {
+                                        _play(media, 0);
+                                        return;
+                                      }
+                                      _play(first.media, first.positionMs);
+                                    },
+                                    icon: const Icon(Icons.playlist_play),
+                                    label: const Text('Afspil fra start'),
+                                  ),
+                                ],
+                              )
+                            else
                             FilledButton.icon(
                               autofocus: tv,
                               onPressed: loading
@@ -318,8 +409,8 @@ class _TitleScreenState extends State<TitleScreen> {
                                           widget.media.progress?.positionMs ??
                                               0,
                                         );
-                                      }
-                                    },
+                                  }
+                                },
                               icon: const Icon(Icons.play_arrow),
                               label: Text(
                                 data?.resumeEpisode != null ||
@@ -361,7 +452,7 @@ class _TitleScreenState extends State<TitleScreen> {
               ),
             )
           else if (data?.mode == 'series') ...[
-            SliverToBoxAdapter(child: _seasonSelector(data!)),
+            SliverToBoxAdapter(child: _seasonSelector(data!, tv)),
             SliverPadding(
               padding: EdgeInsets.fromLTRB(tv ? 54 : 18, 10, tv ? 54 : 18, 44),
               sliver: SliverList.separated(
@@ -370,6 +461,7 @@ class _TitleScreenState extends State<TitleScreen> {
                 itemBuilder: (_, index) => _EpisodeTile(
                   api: widget.api,
                   episode: _selectedEpisodes(data)[index],
+                  tv: tv,
                   onPressed: () => _play(
                     _selectedEpisodes(data)[index].media,
                     _selectedEpisodes(data)[index].positionMs,
@@ -397,22 +489,40 @@ class _TitleScreenState extends State<TitleScreen> {
     );
   }
 
-  Widget _seasonSelector(TitleExperience data) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 20, 24, 14),
+  Widget _seasonSelector(TitleExperience data, bool tv) => Padding(
+    padding: EdgeInsets.fromLTRB(tv ? 28 : 24, 20, tv ? 28 : 24, 14),
     child: SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: data.seasons
             .map(
               (season) => Padding(
-                padding: const EdgeInsets.only(right: 10),
-                child: ChoiceChip(
-                  label: Text('${season.label} · ${season.episodeCount}'),
-                  selected: selectedSeason == season.number,
-                  onSelected: (_) {
+                padding: EdgeInsets.only(right: tv ? 12 : 10),
+                child: FilledButton.tonal(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: selectedSeason == season.number
+                        ? Theme.of(context).colorScheme.secondary
+                        : const Color(0xFF141C24),
+                    foregroundColor: selectedSeason == season.number
+                        ? Colors.black
+                        : Colors.white,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: tv ? 14 : 10,
+                      vertical: 10,
+                    ),
+                  ),
+                  onPressed: () {
                     selectedSeason = season.number;
                     _load(season.number);
                   },
+                  child: Text(
+                    '${season.label} · ${season.episodeCount}',
+                    style: TextStyle(
+                      fontWeight: selectedSeason == season.number
+                          ? FontWeight.w800
+                          : FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
             )
@@ -433,11 +543,13 @@ class _EpisodeTile extends StatefulWidget {
   const _EpisodeTile({
     required this.api,
     required this.episode,
+    required this.tv,
     required this.onPressed,
   });
 
   final ApiClient api;
   final EpisodeItem episode;
+  final bool tv;
   final VoidCallback onPressed;
 
   @override
@@ -457,12 +569,12 @@ class _EpisodeTileState extends State<_EpisodeTile> {
     return InkWell(
       onTap: widget.onPressed,
       onFocusChange: (value) => setState(() => focused = value),
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(widget.tv ? 18 : 16),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.all(10),
+        padding: EdgeInsets.all(widget.tv ? 14 : 10),
         decoration: BoxDecoration(
-          color: focused ? const Color(0xFF18232B) : const Color(0xFF10161D),
+          color: focused ? const Color(0xFF1C2732) : const Color(0xFF10161D),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: focused
@@ -476,8 +588,8 @@ class _EpisodeTileState extends State<_EpisodeTile> {
             ClipRRect(
               borderRadius: BorderRadius.circular(11),
               child: SizedBox(
-                width: 180,
-                height: 102,
+                width: widget.tv ? 220 : 180,
+                height: widget.tv ? 124 : 102,
                 child: image.isEmpty
                     ? const ColoredBox(
                         color: Color(0xFF1A222A),
@@ -491,9 +603,9 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                       ),
               ),
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
@@ -501,9 +613,9 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                       Expanded(
                         child: Text(
                           episode.media.episodeLabel,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w800,
-                            fontSize: 16,
+                            fontSize: widget.tv ? 18 : 16,
                           ),
                         ),
                       ),
@@ -517,7 +629,7 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                   const SizedBox(height: 8),
                   Text(
                     episode.media.overview ?? 'Ingen episodebeskrivelse.',
-                    maxLines: 2,
+                    maxLines: widget.tv ? 3 : 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white60, height: 1.35),
                   ),
@@ -525,17 +637,54 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                     const SizedBox(height: 10),
                     LinearProgressIndicator(
                       value: (episode.progressPercent / 100).clamp(0, 1),
-                      minHeight: 3,
+                      minHeight: widget.tv ? 4 : 3,
                     ),
                   ],
                 ],
               ),
             ),
             const SizedBox(width: 12),
-            const Icon(Icons.play_arrow),
+            widget.tv
+                ? Icon(
+                    Icons.play_arrow,
+                    size: 30,
+                    color: Colors.white70,
+                  )
+                : const Icon(Icons.play_arrow),
           ],
         ),
       ),
     );
   }
+}
+
+class _TvActionButton extends StatelessWidget {
+  const _TvActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.busy = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) => OutlinedButton.icon(
+        onPressed: onTap,
+        icon: busy
+            ? const SizedBox.square(
+                dimension: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(icon, size: 18),
+        label: Text(label),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.white,
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+      );
 }
