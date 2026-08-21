@@ -1,5 +1,32 @@
 # BoltBytes Media Server
 
+## Mediekompatibilitets-certificering
+
+Worker-image'et indeholder en read-only certificeringskommando til rigtige biblioteksfiler. Den læser de eksisterende scannerdata fra PostgreSQL, bygger en matrix over container, video, opløsning, HDR, lyd og indlejrede undertekster og vælger repræsentative filer med størst mulig codec-dækning.
+
+For hver valgt fil kontrolleres:
+
+- at den scannede fil stadig findes inden for det konfigurerede storage-root;
+- frisk FFprobe-læsning og kort video-/lyddecode;
+- Direct Stream-lignende video-copy med AAC-remux til MPEG-TS;
+- embedded tekstundertekst til WebVTT;
+- billedbaseret subtitle-overlay, når PGS/VobSub findes;
+- sidecar SRT/WebVTT-konvertering, når et matchende spor findes;
+- kort softwaretranscoding til H.264/AAC.
+
+Kør efter opdatering af worker-containeren:
+
+```bash
+sudo docker compose exec -T worker \
+  node services/worker/dist/media-certification-cli.js \
+  --max-samples 24 \
+  --seconds 3
+```
+
+Rapporterne gemmes som JSON og Markdown i `/app/data/certification` i containeren og dermed i det persistente `application_data`-volume. Kommandoen viser de konkrete rapportstier og returnerer exitkode `1`, hvis en repræsentativ fil eller runtime-test fejler. Absolutte storage-stier skrives ikke i rapporten, og midlertidige remux-filer slettes efter hver prøve.
+
+Brug `--concurrency 1` på en aktiv server. `--no-transcode` kan bruges til en let inventory/decode/remux-kørsel, og `--account-id <uuid>` kan afgrænse fler-account installationer. Certificeringen erstatter ikke fysisk browser-, Android TV- eller Chromecast-acceptance, men identificerer præcist hvilke lokale codec-kombinationer der kræver efterfølgende klienttest.
+
 ## Leverance 2026-08-21: mobil/TV-polish og deterministiske undertekster
 
 - Flutter-playeren respekterer nu profilens fire underteksttilstande: `Fra`, `Automatisk`, `Kun tvungne` og `Altid`.
