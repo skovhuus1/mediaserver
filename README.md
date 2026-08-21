@@ -258,6 +258,20 @@ MEDIA_PATH=/home/seeds/Media/Films/user/google/google/external/Media
 http://SERVERENS-IP:6555
 ```
 
+## Download af Android-apps
+
+Seneste signed builds ligger som GitHub release assets på disse links:
+
+- Mobil (APK): `https://github.com/skovhuus1/mediaserver/releases/latest/download/boltbytes-media-mobile-release.apk`
+- Android TV (APK): `https://github.com/skovhuus1/mediaserver/releases/latest/download/boltbytes-media-tv-release.apk`
+- Google Play AAB: `https://github.com/skovhuus1/mediaserver/releases/latest/download/boltbytes-media-google-play-release.aab`
+
+Bemærk:
+
+- Linksene peger på det seneste release-artefakt med det tilsvarende navn i workflowen.
+- TV-app er optimeret til fjerne controllere og stor skærm (D-pad/fokus).
+- Brug Wi-Fi ved upload/download af større APK-filer.
+
 `JWT_SECRET` og `ENCRYPTION_KEY` genereres automatisk af `scripts/bootstrap-env.mjs`. Eksisterende secrets overskrives ikke, og værdierne skrives aldrig til terminalen.
 
 Valgfri film-/seriemetadata kan aktiveres direkte under `Indstillinger > Metadata` med en TMDB API Read Access Token. Nøglen testes før lagring, krypteres med serverens `ENCRYPTION_KEY` og sendes aldrig tilbage til browseren. Miljøvariablen bevares som fallback:
