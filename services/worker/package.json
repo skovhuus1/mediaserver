@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "certify:media": "node dist/media-certification-cli.js",
     "start": "node dist/main.js",
     "start:dev": "ts-node src/main.ts",
     "test": "vitest run",
