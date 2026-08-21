@@ -1,5 +1,45 @@
 # BoltBytes Media Server
 
+## Leverance 2026-08-21: mobil/TV-polish og deterministiske undertekster
+
+- Flutter-playeren respekterer nu profilens fire underteksttilstande: `Fra`, `Automatisk`, `Kun tvungne` og `Altid`.
+- `Automatisk` aktiverer kun et markeret forced-spor. Normale danske eller engelske spor bliver ikke længere slået til ved hver film eller episode.
+- Et manuelt sporvalg eller `Fra` bevares gennem seek, stream-rekonfiguration, kvalitetsændring og Cast-genindlæsning i den aktuelle player-session.
+- Sidecar-, embedded- og billedbaserede undertekster eksponerer nu et eksplicit `forced`-flag fra filnavn eller FFprobe-disposition i stedet for at klienten skal gætte ud fra visningsteksten.
+- Skift væk fra burn-in genautoriserer streamen ved den aktuelle position, så billedteksten ikke bliver siddende i videobilledet.
+- Kvalitetsmenuen viser den valgte faste rendition, og startside-/logo-navigationens fejl fra den igangværende UI-runde er rettet.
+
+Valideret lokalt i denne leverance:
+
+- `npm run lint`: bestået.
+- `npm run typecheck`: bestået for contracts, API, worker og admin.
+- `npm run test`: 45 API-testfiler med 149 tests og 5 worker-testfiler med 9 tests bestået.
+- `npm run build`: contracts, NestJS API, worker og Next.js admin bestået.
+- `flutter analyze`: ingen findings.
+- `flutter test`: 19 tests bestået.
+- Android mobile debug-APK: bygget med produktions-API-URL.
+- Android TV debug-APK: bygget med produktions-API-URL.
+
+Fysisk afspilning, fjernbetjeningsfokus og Chromecast discovery kræver fortsat rigtig Android-/TV-/Cast-hardware og er derfor en separat staging-gate. På feature-branchen bestod både push- og PR-varianterne af serverens `validate`-job og Flutter-klientens `validate`-job.
+
+## Leverance 2026-08-20: Mobile TV UI polish (TV-actions og mediekort)
+
+- TV-titelskærmen har fået en samlet action-række med:
+  - `Fortsæt`/`Afspil`
+  - `Afspil fra start`
+  - Download
+  - Gem/fjern fra liste
+  - Markér set/uselset
+- Serielogikken i TV-handlingen bruger nu tydeligere branch: hvis serien er startbar vælges afsnit korrekt, ellers bruges normal medie-start (inkl. gemt position).
+- Mediekort-komponenten er opdateret med stærkere fokus-state, renere skygge, tydeligere overlay med titel/ikoner og bedre badge/prøgressionsindikator på TV.
+- Disse ændringer er formatteret (`dart format`) og har ingen `flutter analyze`-issues på de redigerede filer.
+- GitHub-push: `agent/encrypted-offline-mobile-release` med commit `d769357`.
+
+Manglende efter denne leverance:
+- Finere UI-polish af login- og anbefalingsflowet på TV.
+- Bedre global topmenu-oplevelse for hurtig genre/sektion-navigering i TV- og mobilvisning.
+- Endelig tuning af knapstørrelser/afstande på meget store TV-skærme.
+
 ## Leverance 2026-08-19: krypteret offline, push, crash-ledger og Android-release
 
 Denne leverance gør Android- og Android TV-klienten klar til en kontrolleret produktionsudgivelse på fire områder:
@@ -239,6 +279,20 @@ MEDIA_PATH=/home/seeds/Media/Films/user/google/google/external/Media
 ```text
 http://SERVERENS-IP:6555
 ```
+
+## Download af Android-apps
+
+Seneste signed builds ligger som GitHub release assets på disse links:
+
+- Mobil (APK): `https://github.com/skovhuus1/mediaserver/releases/latest/download/boltbytes-media-mobile-release.apk`
+- Android TV (APK): `https://github.com/skovhuus1/mediaserver/releases/latest/download/boltbytes-media-tv-release.apk`
+- Google Play AAB: `https://github.com/skovhuus1/mediaserver/releases/latest/download/boltbytes-media-google-play-release.aab`
+
+Bemærk:
+
+- Linksene peger på det seneste release-artefakt med det tilsvarende navn i workflowen.
+- TV-app er optimeret til fjerne controllere og stor skærm (D-pad/fokus).
+- Brug Wi-Fi ved upload/download af større APK-filer.
 
 `JWT_SECRET` og `ENCRYPTION_KEY` genereres automatisk af `scripts/bootstrap-env.mjs`. Eksisterende secrets overskrives ikke, og værdierne skrives aldrig til terminalen.
 
@@ -789,6 +843,7 @@ Implementeret:
 
 - Android mobil/tablet og Android TV fra samme Flutter-kodebase med separat `BB_MEDIA_DEVICE_TYPE`, Leanback-launcher og retningsbestemt fjernbetjeningsfokus.
 - Login med konfigurerbar serveradresse, krypteret access/refresh-tokenlagring, automatisk tokenrotation, engangs-passwordskifte og profilvalg med valgfri PIN.
+- Login-UI i TV/Android forbedret: serverfeltet validerer hostformat (ingen fulde URL'er), filtrerer whitespace, og form-felterne har forbedret fjernbetjeningsfokus (op/ned + Enter/Done-flow).
 - Personlig forside fra recommendations, katalog og profilscopet `Fortsæt med at se`; Hjem, Film, Serier, Fortsæt, søgning, profilskifte og logout udfører alle rigtig navigation.
 - Samlet serieside med sæsonvalg, episoder, set-status, progression, resumeepisode og TheTVDB-attribution.
 - Native Android-video via den officielle Flutter `video_player`/ExoPlayer-backend. Klienten autoriserer server-side, understøtter Direct Play og adaptiv HLS, venter på Direct Stream/transcode readiness og genbruger logical session ved HLS-seek/reconfiguration.

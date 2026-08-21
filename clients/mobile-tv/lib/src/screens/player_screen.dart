@@ -66,14 +66,21 @@ class _PlayerScreenState extends State<PlayerScreen>
   int? _nextEpisodeCountdown;
   bool _autoplaySuppressed = false;
   bool _recovering = false;
+  bool _isScrubbing = false;
+  int _scrubPositionMs = 0;
   int _reconnectAttempts = 0;
   DateTime _lastPlatformUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   bool _inPictureInPicture = false;
+  bool _fullscreen = true;
+  bool _qualityChanging = false;
+  bool _subtitleChoiceMade = false;
+  String? _chosenSubtitleTrackId;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _fullscreen = true;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     if (CastService.isSupported) {
       _castSubscription = _cast.states.listen(
@@ -101,6 +108,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _start(int startPositionMs) async {
+    _scrubPositionMs = math.max(0, startPositionMs);
     final mediaQuery = MediaQuery.of(context);
     setState(() {
       _status = 'Autoriserer afspilning...';
@@ -199,6 +207,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     await controller.setPlaybackSpeed(authorization.preferences.playbackRate);
     await controller.play();
+    await _ensureActiveTextSubtitle();
     _reconnectAttempts = 0;
     if (!mounted) return;
     setState(() {
@@ -269,7 +278,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         )
         .map((cue) => cue.text)
         .join('\n');
-    final changed = nextCue != _cueText || value.isBuffering != _buffering;
+    final changed =
+        (_subtitle == null && _cueText.isNotEmpty) ||
+        nextCue != _cueText ||
+        value.isBuffering != _buffering;
     if (changed) {
       setState(() {
         _cueText = nextCue;
@@ -462,7 +474,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final size = video?.value.size;
     try {
       await _platform.update(
-        title: widget.media.displayTitle,
+        title: _presentationTitle,
         subtitle: widget.media.isEpisode ? widget.media.episodeLabel : _status,
         playing: playing,
         buffering: _buffering,
@@ -493,6 +505,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   int get _absolutePositionMs {
     if (_casting) return math.max(0, _castPositionMs);
+    if (_isScrubbing) return _scrubPositionMs;
     final local = _video?.value.position.inMilliseconds ?? 0;
     return math.max(0, _timelineOffsetMs + local);
   }
@@ -501,6 +514,72 @@ class _PlayerScreenState extends State<PlayerScreen>
     final known = widget.media.durationMs ?? widget.media.progress?.durationMs;
     if (known != null && known > 0) return known;
     return _timelineOffsetMs + (_video?.value.duration.inMilliseconds ?? 0);
+  }
+
+  String get _presentationTitle {
+    final value = widget.media.displayTitle.trim();
+    if (value.isEmpty) return 'Afspilning';
+    final withoutExtension = value
+        .replaceAll(
+          RegExp(
+            r'\.(?:mkv|mp4|m4v|mov|avi|flv|webm|wmv|m4a|flac)$',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(
+          RegExp(
+            r'[\(\[].*?(?:\b(1080p|720p|2160p|4k|uhd|hdr|sdr|hevc|h\.?265|h\.?264|x264|x265|h265|avc|ddp|dts|opus|aac|flac|truehd|dolby|web.?dl|web.?rip|bdrip|bluray|blu.?ray|remux|hardsub).*?)[\)\]]',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(
+          RegExp(r'\b\d+\s*[xX]\s*\d+\b.*$', caseSensitive: false),
+          '',
+        )
+        .replaceAll(
+          RegExp(
+            r'\s+(1080p|720p|2160p|4k|x264|x265|hevc|h\.?265|h\.?264|hdr|sdr)\b.*$',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(RegExp(r'\s{2,}'), ' ')
+        .trim();
+    return withoutExtension.isEmpty ? 'Afspilning' : withoutExtension;
+  }
+
+  Rendition? get _activeRendition {
+    final auth = _authorization;
+    final video = _video;
+    if (auth == null || video == null) return null;
+    final displayHeight = video.value.size.height.isFinite
+        ? video.value.size.height.toInt()
+        : 0;
+    if (displayHeight > 0) {
+      Rendition? nearest;
+      var nearestDiff = double.infinity;
+      for (final rendition in auth.renditions) {
+        final diff = (rendition.height - displayHeight).abs().toDouble();
+        if (diff < nearestDiff) {
+          nearestDiff = diff;
+          nearest = rendition;
+        }
+      }
+      if (nearestDiff <= 120) return nearest;
+    }
+    return auth.renditions.where((item) => item.upscaled).firstOrNull ??
+        auth.renditions.firstOrNull;
+  }
+
+  String get _qualityLabel {
+    final rendition = _activeRendition;
+    if (rendition == null) return '';
+    final height = rendition.height > 0 ? '${rendition.height}p' : 'Ukendt';
+    final hdr = rendition.hdr ? ' · HDR' : ' · SDR';
+    final upscaled = rendition.upscaled ? ' · Opskaleret' : '';
+    return '$height$upscaled$hdr';
   }
 
   int get _bufferAheadMs {
@@ -581,20 +660,49 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Future<void> _selectDefaultSubtitle() async {
     final auth = _authorization;
-    if (auth == null || auth.preferences.subtitleMode == 'off') return;
-    SubtitleTrack? selected;
-    for (final language in auth.preferences.preferredSubtitleLanguages) {
-      selected = auth.subtitleTracks
-          .where(
-            (track) =>
-                _language(track.language) == _language(language) &&
-                track.isText,
-          )
-          .firstOrNull;
-      if (selected != null) break;
+    if (auth == null) return;
+    if (_subtitleChoiceMade) {
+      final selected = _chosenSubtitleTrackId == null
+          ? null
+          : auth.subtitleTracks
+                .where((track) => track.id == _chosenSubtitleTrackId)
+                .firstOrNull;
+      await _setSubtitle(selected, rememberChoice: false);
+      return;
     }
-    selected ??= auth.subtitleTracks.where((track) => track.isText).firstOrNull;
-    if (selected != null) await _setSubtitle(selected);
+    await _setSubtitle(
+      preferredSubtitleTrack(auth.subtitleTracks, auth.preferences),
+      rememberChoice: false,
+    );
+  }
+
+  Future<void> _ensureActiveTextSubtitle() async {
+    final active = _subtitle;
+    final auth = _authorization;
+    if (active == null || auth == null || !active.isText || _casting) {
+      return;
+    }
+    if (active.src == null || active.src!.isEmpty) {
+      return;
+    }
+    if (!auth.subtitleTracks.any((track) => track.id == active.id)) {
+      return;
+    }
+    setState(() {
+      _error = null;
+      _cueText = '';
+    });
+    try {
+      final text = await widget.api.getText(active.src!);
+      if (!mounted || _subtitle?.id != active.id) return;
+      setState(() => _cues = parseSubtitles(text));
+    } catch (_) {
+      if (!mounted || _subtitle?.id != active.id) return;
+      setState(() {
+        _cues = const [];
+        _error = 'Undertekstsporet kunne ikke indlæses.';
+      });
+    }
   }
 
   Future<void> _attachToConnectedCast() async {
@@ -668,7 +776,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       _handoffAccepted = true;
       final castSubtitles = jsonList(handoff['subtitleTracks'])
           .map(SubtitleTrack.fromJson)
-          .where((track) => track.isText)
+          .where(
+            (track) =>
+                track.isText && track.src != null && track.src!.isNotEmpty,
+          )
           .toList(growable: false);
       final trackIds = <String, int>{};
       final tracks = <CastLoadTrack>[];
@@ -697,7 +808,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         contentUrl: stringValue(handoff['streamUrl']) ?? '',
         contentType:
             stringValue(handoff['contentType']) ?? 'application/x-mpegURL',
-        title: widget.media.displayTitle,
+        title: _presentationTitle,
         subtitle: widget.media.isEpisode ? widget.media.episodeLabel : _status,
         posterUrl: poster.isEmpty ? null : poster,
         positionMs: localPosition,
@@ -777,10 +888,28 @@ class _PlayerScreenState extends State<PlayerScreen>
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  String _language(String value) =>
-      value.toLowerCase().split(RegExp('[-_]')).first;
-
-  Future<void> _setSubtitle(SubtitleTrack? track) async {
+  Future<void> _setSubtitle(
+    SubtitleTrack? track, {
+    bool rememberChoice = true,
+  }) async {
+    final previous = _subtitle;
+    final position = _absolutePositionMs;
+    if (rememberChoice) {
+      _subtitleChoiceMade = true;
+      _chosenSubtitleTrackId = track?.id;
+    }
+    if (previous != null &&
+        !previous.isText &&
+        (track == null || track.isText)) {
+      setState(() {
+        _subtitle = track;
+        _cues = const [];
+        _cueText = '';
+        _error = null;
+      });
+      await _restartPlayback(position);
+      return;
+    }
     if (_casting && (track == null || track.isText)) {
       try {
         await _cast.setTextTrack(
@@ -804,6 +933,14 @@ class _PlayerScreenState extends State<PlayerScreen>
         _subtitle = null;
         _cues = const [];
         _cueText = '';
+        _error = null;
+      });
+      return;
+    }
+    if (track.src == null || track.src!.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Undertekstsporet mangler kilde-fil.';
       });
       return;
     }
@@ -814,18 +951,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     setState(() {
       _subtitle = track;
       _cueText = '';
+      _error = null;
     });
-    try {
-      final text = await widget.api.getText(track.src!);
-      if (!mounted || _subtitle?.id != track.id) return;
-      setState(() => _cues = parseWebVtt(text));
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _cues = const [];
-        _error = 'Undertekstsporet kunne ikke indlæses.';
-      });
-    }
+    await _ensureActiveTextSubtitle();
   }
 
   Future<void> _reconfigure(
@@ -871,6 +999,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         await _beginCast(forceReload: true);
       } else {
         await _prepareController(next);
+        await _ensureActiveTextSubtitle();
       }
     } on ApiException catch (failure) {
       if (!mounted) return;
@@ -881,6 +1010,48 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  Future<void> _toggleFullscreen() async {
+    _fullscreen = !_fullscreen;
+    if (_fullscreen) {
+      await SystemChrome.setPreferredOrientations([]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      await SystemChrome.setPreferredOrientations([]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+    if (mounted) _revealControls();
+  }
+
+  void _startScrub(double value) {
+    if (_durationMs <= 0) return;
+    setState(() {
+      _isScrubbing = true;
+      _scrubPositionMs = value.clamp(0, _durationMs.toDouble()).round();
+      _cueText = '';
+    });
+  }
+
+  void _updateScrub(double value) {
+    if (!_isScrubbing) {
+      _startScrub(value);
+      return;
+    }
+    setState(() {
+      _scrubPositionMs = value.clamp(0, _durationMs.toDouble()).round();
+    });
+  }
+
+  void _endScrub(double value) {
+    if (_durationMs <= 0) return;
+    final target = value.clamp(0, _durationMs.toDouble()).round();
+    setState(() {
+      _isScrubbing = false;
+      _scrubPositionMs = target;
+      _cueText = '';
+    });
+    unawaited(_seekTo(target));
+  }
+
   Future<void> _seekTo(int targetMs) async {
     final video = _video;
     final auth = _authorization;
@@ -889,10 +1060,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_casting) {
       await _cast.seek(math.max(0, target - _timelineOffsetMs));
       setState(() => _castPositionMs = target);
+      await _saveProgress();
       return;
     }
+    final currentPosition = _absolutePositionMs;
+    if (target == currentPosition) return;
     if (auth.isDirectPlay) {
       await video.seekTo(Duration(milliseconds: target));
+      if (_subtitle?.isText == true) {
+        await _ensureActiveTextSubtitle();
+      }
+      await _saveProgress();
       return;
     }
     final local = target - _timelineOffsetMs;
@@ -903,15 +1081,23 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
     if (local >= 0 && buffered) {
       await video.seekTo(Duration(milliseconds: local));
+      if (_subtitle?.isText == true) {
+        await _ensureActiveTextSubtitle();
+      }
     } else {
       await _reconfigure(
         target,
         burnInTrack: _subtitle?.isText == false ? _subtitle : null,
       );
     }
+    await _saveProgress();
   }
 
   Future<void> _changeQuality(String value) async {
+    if (_qualityChanging) {
+      _showCastMessage('Kvalitetsindstillingen opdateres allerede.');
+      return;
+    }
     if (_casting) {
       _showCastMessage(
         'Chromecast bruger streamens adaptive kvalitet. Afbryd Cast for at ændre enhedens kvalitetsprofil.',
@@ -919,24 +1105,57 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
     final position = _absolutePositionMs;
+    final auth = _authorization;
+    if (auth == null) return;
     final body = <String, dynamic>{};
     if (value == 'auto' || value == 'original') {
+      if (auth.preferences.qualityMode == value) return;
       body['qualityMode'] = value;
     } else {
       body['qualityMode'] = 'fixed';
-      body['fixedQualityHeight'] = int.parse(value);
+      final fixedHeight = int.tryParse(value);
+      if (fixedHeight == null) return;
+      body['fixedQualityHeight'] = fixedHeight;
     }
     try {
+      _qualityChanging = true;
+      if (mounted) {
+        setState(() {
+          _status = 'Opdaterer afspilningskvalitet...';
+          _buffering = true;
+        });
+      }
       await widget.api.patchJson('/devices/me/preferences', body);
-      await _saveProgress();
-      await _release();
-      await _video?.dispose();
-      _video = null;
-      _authorization = null;
-      await _start(position);
+      await _restartPlayback(position);
     } on ApiException catch (failure) {
       if (mounted) setState(() => _error = failure.message);
+      if (mounted) {
+        setState(() {
+          _buffering = false;
+        });
+      }
+    } finally {
+      _qualityChanging = false;
     }
+  }
+
+  Future<void> _restartPlayback(int positionMs) async {
+    await _saveProgress();
+    final auth = _authorization;
+    if (auth != null && CastPlaybackCoordinator.instance.owns(auth.sessionId)) {
+      await CastPlaybackCoordinator.instance.stop();
+    } else if (_casting || _handoffAccepted) {
+      try {
+        await _cast.stop();
+      } catch (_) {}
+      _casting = false;
+      await _cancelCastHandoff();
+    }
+    await _release();
+    await _video?.dispose();
+    _video = null;
+    _authorization = null;
+    await _start(positionMs);
   }
 
   void _togglePlayback() {
@@ -1023,6 +1242,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     unawaited(_finishPlayback());
     unawaited(_video?.dispose());
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setPreferredOrientations([]);
     super.dispose();
   }
 
@@ -1153,7 +1373,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          widget.media.displayTitle,
+                          _presentationTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -1173,9 +1393,18 @@ class _PlayerScreenState extends State<PlayerScreen>
                   ),
                   const CastRouteButton(),
                   const SizedBox(width: 8),
+                  if (!AppConfig.isTvBuild)
+                    IconButton(
+                      onPressed: _toggleFullscreen,
+                      icon: Icon(
+                        _fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                      ),
+                      tooltip: _fullscreen ? 'Luk fuld skærm' : 'Fuld skærm',
+                    ),
                   _PlaybackBadge(
                     status: _status,
                     authorization: _authorization,
+                    quality: _qualityLabel,
                   ),
                 ],
               ),
@@ -1287,15 +1516,36 @@ class _PlayerScreenState extends State<PlayerScreen>
                     children: [
                       Text(_time(_absolutePositionMs)),
                       Expanded(
-                        child: Slider(
-                          min: 0,
-                          max: math.max(1, _durationMs).toDouble(),
-                          value: _absolutePositionMs
-                              .clamp(0, math.max(1, _durationMs))
-                              .toDouble(),
-                          onChangeStart: (_) => _hideTimer?.cancel(),
-                          onChanged: (_) {},
-                          onChangeEnd: (value) => _seekTo(value.round()),
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3.5,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 7,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 12,
+                            ),
+                            activeTrackColor: Theme.of(
+                              context,
+                            ).colorScheme.secondary,
+                            inactiveTrackColor: Colors.white24,
+                            thumbColor: Colors.white,
+                          ),
+                          child: Slider(
+                            min: 0,
+                            max: math.max(1, _durationMs).toDouble(),
+                            value: _isScrubbing
+                                ? _scrubPositionMs
+                                      .clamp(0, math.max(1, _durationMs))
+                                      .toDouble()
+                                : _absolutePositionMs
+                                      .clamp(0, math.max(1, _durationMs))
+                                      .toDouble(),
+                            onChangeStart: _startScrub,
+                            onChanged: _updateScrub,
+                            onChangeEnd: _endScrub,
+                            label: _time(_scrubPositionMs),
+                          ),
                         ),
                       ),
                       Text(_time(_durationMs)),
@@ -1307,7 +1557,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       TextButton.icon(
                         onPressed: _showSubtitles,
                         icon: const Icon(Icons.subtitles_outlined),
-                        label: Text(_subtitle?.label ?? 'Undertekster'),
+                        label: Text(_subtitle?.label ?? 'Undertekster: Fra'),
                       ),
                       const SizedBox(width: 10),
                       TextButton.icon(
@@ -1348,6 +1598,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _showSubtitles() {
     final tracks = _authorization?.subtitleTracks ?? const <SubtitleTrack>[];
+    final visibleTracks = tracks
+        .where((track) => track.id.isNotEmpty)
+        .toList(growable: false);
+    final textTracks = visibleTracks.where((track) => track.isText).toList();
+    final burnedTracks = visibleTracks.where((track) => !track.isText).toList();
     _hideTimer?.cancel();
     showModalBottomSheet<void>(
       context: context,
@@ -1372,14 +1627,48 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ),
               ),
               const RadioListTile<String?>(value: null, title: Text('Fra')),
-              for (final track in tracks)
-                RadioListTile<String?>(
-                  value: track.id,
-                  title: Text(track.label),
-                  subtitle: Text(
-                    '${track.language.toUpperCase()} · ${track.isText ? 'WebVTT' : 'Indbrændt'}',
+              if (textTracks.isNotEmpty) ...[
+                const ListTile(
+                  dense: true,
+                  title: Text(
+                    'Tekst-undertekster',
+                    style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
+                for (final track in textTracks)
+                  RadioListTile<String?>(
+                    value: track.id,
+                    title: Text(track.label),
+                    subtitle: Text(
+                      '${track.language.toUpperCase()} · WebVTT/SRT',
+                    ),
+                    secondary: _subtitle?.id == track.id
+                        ? const Icon(Icons.check_circle)
+                        : null,
+                  ),
+              ],
+              if (burnedTracks.isNotEmpty) ...[
+                const ListTile(
+                  dense: true,
+                  title: Text(
+                    'Indbrændte undertekster',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                for (final track in burnedTracks)
+                  RadioListTile<String?>(
+                    value: track.id,
+                    title: Text(track.label),
+                    subtitle: Text(
+                      '${track.language.toUpperCase()} · Indbrænding',
+                    ),
+                    secondary: _subtitle?.id == track.id
+                        ? const Icon(Icons.check_circle)
+                        : null,
+                  ),
+              ],
+              if (visibleTracks.isEmpty)
+                const ListTile(title: Text('Ingen undertekster blev fundet.')),
             ],
           ),
         ),
@@ -1390,6 +1679,15 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _showQuality() {
     final auth = _authorization;
     if (auth == null) return;
+    final uniqRenditions = <int, Rendition>{};
+    for (final rendition in auth.renditions) {
+      final current = uniqRenditions[rendition.height];
+      if (current == null || current.bitrate < rendition.bitrate) {
+        uniqRenditions[rendition.height] = rendition;
+      }
+    }
+    final sortedRenditions = uniqRenditions.values.toList()
+      ..sort((a, b) => a.height.compareTo(b.height));
     _hideTimer?.cancel();
     showModalBottomSheet<void>(
       context: context,
@@ -1433,7 +1731,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                 unawaited(_changeQuality('original'));
               },
             ),
-            for (final rendition in auth.renditions.reversed)
+            for (final rendition in sortedRenditions.reversed)
               ListTile(
                 leading: const Icon(Icons.hd_outlined),
                 title: Text(
@@ -1442,6 +1740,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                 subtitle: Text(
                   '${(rendition.bitrate / 1000000).toStringAsFixed(1)} Mbps · ${rendition.hdr ? 'HDR' : 'SDR'}',
                 ),
+                trailing:
+                    auth.preferences.qualityMode == 'fixed' &&
+                        auth.preferences.fixedQualityHeight == rendition.height
+                    ? const Icon(Icons.check)
+                    : null,
                 onTap: () {
                   Navigator.pop(context);
                   unawaited(_changeQuality('${rendition.height}'));
@@ -1486,10 +1789,15 @@ class _TimelineMarker {
 }
 
 class _PlaybackBadge extends StatelessWidget {
-  const _PlaybackBadge({required this.status, required this.authorization});
+  const _PlaybackBadge({
+    required this.status,
+    required this.authorization,
+    this.quality,
+  });
 
   final String status;
   final PlaybackAuthorization? authorization;
+  final String? quality;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1511,7 +1819,9 @@ class _PlaybackBadge extends StatelessWidget {
         ),
         if (authorization != null)
           Text(
-            '${authorization!.sourceHeight ?? 0}p · ${authorization!.sourceBitrate == null ? '?' : (authorization!.sourceBitrate! / 1000000).toStringAsFixed(1)} Mbps',
+            quality?.isNotEmpty == true
+                ? quality!
+                : '${authorization!.sourceHeight ?? 0}p · ${authorization!.sourceBitrate == null ? '?' : (authorization!.sourceBitrate! / 1000000).toStringAsFixed(1)} Mbps',
             style: const TextStyle(fontSize: 11, color: Colors.white60),
           ),
       ],

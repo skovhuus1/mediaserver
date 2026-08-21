@@ -11,6 +11,7 @@ describe('subtitle stream policy', () => {
       language: 'da',
       label: 'Dansk (tvungen)',
       format: 'srt',
+      forced: true,
     });
     expect(sidecarSubtitleDescriptor('Movie (2026).mkv', 'Another Movie.da.srt')).toBeNull();
   });
@@ -26,6 +27,28 @@ describe('subtitle stream policy', () => {
         { index: 2, codec_type: 'subtitle', codec_name: 'subrip', tags: { language: 'dan' } },
         { index: 3, codec_type: 'subtitle', codec_name: 'hdmv_pgs_subtitle', tags: { language: 'eng' } },
       ],
-    })).toEqual([{ streamIndex: 2, language: 'da', label: 'Dansk' }]);
+    })).toEqual([{
+      streamIndex: 2,
+      language: 'da',
+      label: 'Dansk',
+      forced: false,
+    }]);
+  });
+
+  it('exposes forced disposition for embedded text tracks', () => {
+    expect(embeddedSubtitleDescriptors({
+      streams: [{
+        index: 7,
+        codec_type: 'subtitle',
+        codec_name: 'ass',
+        tags: { language: 'eng' },
+        disposition: { forced: 1 },
+      }],
+    })).toEqual([{
+      streamIndex: 7,
+      language: 'en',
+      label: 'Engelsk (tvungen)',
+      forced: true,
+    }]);
   });
 });

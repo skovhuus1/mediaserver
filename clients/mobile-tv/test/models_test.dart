@@ -60,6 +60,7 @@ void main() {
           'label': 'Dansk',
           'language': 'da',
           'delivery': 'webvtt',
+          'forced': false,
           'src': '/sub.vtt',
         },
       ],
@@ -85,6 +86,52 @@ void main() {
     expect(authorization.renditions, hasLength(2));
     expect(authorization.subtitleTracks.single.isText, isTrue);
     expect(authorization.preferences.preferredSubtitleLanguages.first, 'da');
+  });
+
+  test('automatic subtitles only select a forced preferred track', () {
+    final tracks = [
+      const SubtitleTrack(
+        id: 'normal-da',
+        label: 'Dansk',
+        language: 'da',
+        delivery: 'webvtt',
+        forced: false,
+        src: '/normal.vtt',
+      ),
+      const SubtitleTrack(
+        id: 'forced-da',
+        label: 'Dansk (tvungen)',
+        language: 'da',
+        delivery: 'webvtt',
+        forced: true,
+        src: '/forced.vtt',
+      ),
+    ];
+    const automatic = PlaybackPreferences(
+      qualityMode: 'auto',
+      playbackRate: 1,
+      preferredSubtitleLanguages: ['da', 'en'],
+      subtitleMode: 'auto',
+      autoplayNext: true,
+    );
+    const always = PlaybackPreferences(
+      qualityMode: 'auto',
+      playbackRate: 1,
+      preferredSubtitleLanguages: ['da', 'en'],
+      subtitleMode: 'always',
+      autoplayNext: true,
+    );
+    const off = PlaybackPreferences(
+      qualityMode: 'auto',
+      playbackRate: 1,
+      preferredSubtitleLanguages: ['da', 'en'],
+      subtitleMode: 'off',
+      autoplayNext: true,
+    );
+
+    expect(preferredSubtitleTrack(tracks, automatic)?.id, 'forced-da');
+    expect(preferredSubtitleTrack(tracks, always)?.id, 'normal-da');
+    expect(preferredSubtitleTrack(tracks, off), isNull);
   });
 
   test('series experience preserves seasons and resume episode', () {
