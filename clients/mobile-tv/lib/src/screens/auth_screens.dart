@@ -44,8 +44,8 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _submit() async {
-    if (!(_form.currentState?.validate() ?? false)) return;
     _server.text = _normalizeServerInput(_server.text);
+    if (!(_form.currentState?.validate() ?? false)) return;
     await widget.controller.login(
       email: _email.text.trim(),
       password: _password.text,
@@ -54,34 +54,47 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   String _normalizeServerInput(String value) {
-    var normalized = value.trim();
+    var normalized = value.trim().replaceAll(RegExp(r'\s+'), '');
     if (normalized.isEmpty) return normalized;
-    normalized = normalized.replaceFirst(
-      RegExp(r'^(https?:\/\/)', caseSensitive: false),
-      '',
-    );
-    normalized = normalized.split('/').first.trim();
+    if (RegExp(r'^[a-z][a-z\d+.-]*://').hasMatch(normalized.toLowerCase())) {
+      final uri = Uri.tryParse(normalized);
+      if (uri != null && uri.hasAuthority) {
+        normalized = uri.host;
+        if (uri.hasPort) normalized = '$normalized:${uri.port}';
+      } else {
+        normalized = normalized.split('://').last.split('/').first;
+      }
+    } else if (normalized.contains('?') || normalized.contains('#')) {
+      normalized = normalized.split('?').first.split('#').first;
+    } else {
+      normalized = normalized.split('/').first;
+    }
     return normalized;
   }
 
-  bool _isLikelyUrl(String value) {
-    final lower = value.toLowerCase();
-    return lower.contains('://') ||
-        value.contains('/') ||
-        value.contains('?') ||
-        value.contains('#');
+  String? _validateServerInput(String? value) {
+    final server = _normalizeServerInput(value ?? '');
+    if (server.isEmpty) {
+      return 'Indtast serverhost (fx media.boltbytes.com:6555).';
+    }
+    final hostPart = server.split(':').first;
+    final portPart = server.split(':').skip(1).join('');
+    if (hostPart.isEmpty) return 'Servernavn mangler.';
+    final port = int.tryParse(portPart);
+    if (portPart.isNotEmpty && port == null) {
+      return 'Portnummer skal være et tal.';
+    }
+    if (port != null && (port < 1 || port > 65535)) {
+      return 'Portnummer skal være mellem 1 og 65535.';
+    }
+    return null;
   }
 
-  String? _validateServerInput(String? value) {
-    final server = value?.trim() ?? '';
-    if (server.isEmpty) return 'Indtast serveradressen.';
-    if (_isLikelyUrl(server)) {
-      return 'Brug kun serverhost (fx media.boltbytes.com:6555). Vi tilføjer https og /api/v1 automatisk.';
-    }
-    return _normalizeServerInput(server).isNotEmpty
-        ? null
-        : 'Indtast serveradressen.';
-  }
+  bool _isUrlLike(String value) =>
+      value.contains('://') ||
+      value.contains('/') ||
+      value.contains('?') ||
+      value.contains('#');
 
   KeyEventResult _handleUpDown(
     KeyEvent event,
@@ -142,9 +155,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   FilteringTextInputFormatter.deny(RegExp(r'\s')),
                 ],
                 decoration: const InputDecoration(
-                  labelText: 'Servernavn',
+                  labelText: 'Server',
                   hintText: 'fx media.boltbytes.com:6555',
                   prefixIcon: Icon(Icons.dns_outlined),
+                  helperText: 'Du kan indsætte https://... direkte.',
                 ),
                 validator: _validateServerInput,
                 onFieldSubmitted: (_) => _emailFocus.requestFocus(),
@@ -153,7 +167,8 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 14),
             Focus(
               onKeyEvent: tv
-                  ? (node, event) => _handleUpDown(event, _passwordFocus, _serverFocus)
+                  ? (node, event) =>
+                        _handleUpDown(event, _passwordFocus, _serverFocus)
                   : null,
               child: TextFormField(
                 controller: _email,
@@ -166,19 +181,21 @@ class _LoginScreenState extends State<LoginScreen> {
                   labelText: 'E-mail',
                   prefixIcon: Icon(Icons.alternate_email),
                 ),
-                validator: (value) => value != null && value.contains('@')
-                    ? null
-                    : 'Indtast en gyldig e-mail.',
+                validator: (value) {
+                  final raw = value?.trim() ?? '';
+                  if (raw.isEmpty) return 'Indtast din e-mail.';
+                  if (_isUrlLike(raw)) {
+                    return 'Indtast kun e-mail, ikke URL.';
+                  }
+                  return raw.contains('@') ? null : 'Indtast en gyldig e-mail.';
+                },
               ),
             ),
             const SizedBox(height: 14),
             Focus(
               onKeyEvent: tv
-                  ? (node, event) => _handleUpDown(
-                      event,
-                      _loginButtonFocus,
-                      _emailFocus,
-                    )
+                  ? (node, event) =>
+                        _handleUpDown(event, _loginButtonFocus, _emailFocus)
                   : null,
               child: TextFormField(
                 controller: _password,

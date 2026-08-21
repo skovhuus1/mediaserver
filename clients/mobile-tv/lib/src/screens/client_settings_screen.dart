@@ -167,6 +167,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                     initialValue: profile['subtitleMode']?.toString() ?? 'auto',
                     decoration: const InputDecoration(
                       labelText: 'Undertekster',
+                      helperText:
+                          'Automatisk viser kun tvungne spor. Vælg Altid for normale undertekster.',
                     ),
                     items: const [
                       DropdownMenuItem(

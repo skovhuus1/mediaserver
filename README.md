@@ -1,5 +1,27 @@
 # BoltBytes Media Server
 
+## Leverance 2026-08-21: mobil/TV-polish og deterministiske undertekster
+
+- Flutter-playeren respekterer nu profilens fire underteksttilstande: `Fra`, `Automatisk`, `Kun tvungne` og `Altid`.
+- `Automatisk` aktiverer kun et markeret forced-spor. Normale danske eller engelske spor bliver ikke længere slået til ved hver film eller episode.
+- Et manuelt sporvalg eller `Fra` bevares gennem seek, stream-rekonfiguration, kvalitetsændring og Cast-genindlæsning i den aktuelle player-session.
+- Sidecar-, embedded- og billedbaserede undertekster eksponerer nu et eksplicit `forced`-flag fra filnavn eller FFprobe-disposition i stedet for at klienten skal gætte ud fra visningsteksten.
+- Skift væk fra burn-in genautoriserer streamen ved den aktuelle position, så billedteksten ikke bliver siddende i videobilledet.
+- Kvalitetsmenuen viser den valgte faste rendition, og startside-/logo-navigationens fejl fra den igangværende UI-runde er rettet.
+
+Valideret lokalt i denne leverance:
+
+- `npm run lint`: bestået.
+- `npm run typecheck`: bestået for contracts, API, worker og admin.
+- `npm run test`: 45 API-testfiler med 149 tests og 5 worker-testfiler med 9 tests bestået.
+- `npm run build`: contracts, NestJS API, worker og Next.js admin bestået.
+- `flutter analyze`: ingen findings.
+- `flutter test`: 19 tests bestået.
+- Android mobile debug-APK: bygget med produktions-API-URL.
+- Android TV debug-APK: bygget med produktions-API-URL.
+
+Fysisk afspilning, fjernbetjeningsfokus og Chromecast discovery kræver fortsat rigtig Android-/TV-/Cast-hardware og er derfor en separat staging-gate. GitHub CI kontrolleres på feature-branchen efter push.
+
 ## Leverance 2026-08-20: Mobile TV UI polish (TV-actions og mediekort)
 
 - TV-titelskærmen har fået en samlet action-række med:

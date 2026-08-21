@@ -55,7 +55,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
         api.getJson('/media/catalog?type=series&pageSize=36&sort=newest'),
         api.getJson('/playback/history/continue'),
         api.getJson('/playback/watchlist'),
-        api.getJson('/media/recommendations').catchError((_) => <String, dynamic>{}),
+        api
+            .getJson('/media/recommendations')
+            .catchError((_) => <String, dynamic>{}),
       ]);
       if (!mounted) return;
       setState(() {
@@ -95,7 +97,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         .toList(growable: false);
   }
 
-  Future<void> _open(MediaItem media) async {
+  Future<void> _openTitle(MediaItem media) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => TitleScreen(api: api, media: media),
@@ -104,9 +106,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _load();
   }
 
+  Future<void> _openMedia(MediaItem media) async {
+    if (media.isSeries) {
+      await _openTitle(media);
+      return;
+    }
+    await _play(media);
+  }
+
   Future<void> _play(MediaItem media) async {
     if (media.isSeries) {
-      await _open(media);
+      await _openTitle(media);
       return;
     }
     await Navigator.of(context).push(
@@ -128,13 +138,32 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _load();
   }
 
+  Future<void> _openDownloads() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => OfflineDownloadsScreen(
+          api: api,
+          profileId: widget.controller.activeProfile?.id,
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => NotificationInboxScreen(api: api)),
+    );
+    await _load();
+  }
+
   Future<void> _showSearch() async {
     await showSearch<void>(
       context: context,
       delegate: _MediaSearchDelegate(
         api: api,
         items: [..._movies, ..._series],
-        onSelected: _open,
+        onSelected: _openTitle,
       ),
     );
   }
@@ -165,6 +194,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
               controller: widget.controller,
               onSearch: _showSearch,
               onSettings: _openSettings,
+              onDownloads: _openDownloads,
+              onNotifications: _openNotifications,
             ),
             const VerticalDivider(width: 1),
             Expanded(
@@ -186,8 +217,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
           onSelect: (index) => setState(() => _tab = index),
           onSearch: _showSearch,
           onSettings: _openSettings,
+          onDownloads: _openDownloads,
+          onNotifications: _openNotifications,
           compact: true,
-          showTabs: false,
+          showTabs: true,
         ),
         Expanded(
           child: RefreshIndicator(
@@ -255,14 +288,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
         api: api,
         title: 'Film',
         items: _movies,
-        onPressed: _open,
+        onPressed: _openTitle,
         tv: tv,
       ),
       2 => _CatalogGrid(
         api: api,
         title: 'Serier',
         items: _series,
-        onPressed: _open,
+        onPressed: _openTitle,
         tv: tv,
       ),
       3 => _CatalogGrid(
@@ -276,7 +309,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         api: api,
         title: 'Min liste',
         items: _watchlist,
-        onPressed: _open,
+        onPressed: _openTitle,
         tv: tv,
       ),
       _ => _HomeFeed(
@@ -286,7 +319,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         movies: _movies,
         series: _series,
         continueItems: _continue,
-        onOpen: _open,
+        onOpen: _openMedia,
         onPlay: _play,
         tv: tv,
       ),
@@ -301,6 +334,8 @@ class _LibraryHeader extends StatelessWidget {
     required this.onSelect,
     required this.onSearch,
     required this.onSettings,
+    required this.onDownloads,
+    required this.onNotifications,
     this.compact = false,
     this.showTabs = true,
   });
@@ -310,6 +345,8 @@ class _LibraryHeader extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final VoidCallback onSearch;
   final VoidCallback onSettings;
+  final VoidCallback onDownloads;
+  final VoidCallback onNotifications;
   final bool compact;
   final bool showTabs;
 
@@ -327,34 +364,49 @@ class _LibraryHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(999),
+          BrandLockup(
+            compact: compact,
             onTap: () => onSelect(0),
-            child: BrandLockup(compact: compact),
+            tooltip: 'Gå til hjem',
           ),
           if (showTabs) ...[
-            const SizedBox(width: 28),
-            for (final entry in const ['Hjem', 'Film', 'Serier', 'Fortsæt', 'Min liste'].indexed)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ChoiceChip(
-                  label: Text(entry.$2),
-                  selected: selected == entry.$1,
-                  onSelected: (_) => onSelect(entry.$1),
-                  visualDensity:
-                      compact ? VisualDensity.compact : VisualDensity.standard,
-                  labelStyle: TextStyle(
-                    fontWeight: selected == entry.$1
-                        ? FontWeight.w800
-                        : FontWeight.w600,
-                    color: selected == entry.$1
-                        ? Colors.white
-                        : Colors.white70,
-                  ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final entry in const [
+                      'Hjem',
+                      'Film',
+                      'Serier',
+                      'Fortsæt',
+                      'Min liste',
+                    ].indexed)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: _LibraryTopTab(
+                          label: entry.$2,
+                          selected: selected == entry.$1,
+                          onTap: () => onSelect(entry.$1),
+                        ),
+                      ),
+                  ],
                 ),
               ),
+            ),
           ],
           const Spacer(),
+          IconButton(
+            tooltip: 'Notifikationer',
+            onPressed: onNotifications,
+            icon: const Icon(Icons.notifications_none),
+          ),
+          IconButton(
+            tooltip: 'Downloads',
+            onPressed: onDownloads,
+            icon: const Icon(Icons.download_for_offline_outlined),
+          ),
           IconButton(
             tooltip: 'Søg',
             onPressed: onSearch,
@@ -374,27 +426,8 @@ class _LibraryHeader extends StatelessWidget {
             onSelected: (value) {
               if (value == 'profiles') controller.showProfiles();
               if (value == 'settings') onSettings();
-              if (value == 'downloads') {
-                unawaited(
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => OfflineDownloadsScreen(
-                        api: controller.api,
-                        profileId: controller.activeProfile?.id,
-                      ),
-                    ),
-                  ),
-                );
-              }
-              if (value == 'notifications') {
-                unawaited(
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => NotificationInboxScreen(api: controller.api),
-                    ),
-                  ),
-                );
-              }
+              if (value == 'downloads') onDownloads();
+              if (value == 'notifications') onNotifications();
               if (value == 'logout') unawaited(controller.logout());
             },
             itemBuilder: (_) => const [
@@ -439,6 +472,8 @@ class _TvSideRail extends StatelessWidget {
     required this.controller,
     required this.onSearch,
     required this.onSettings,
+    required this.onDownloads,
+    required this.onNotifications,
   });
 
   final List<String> labels;
@@ -448,6 +483,8 @@ class _TvSideRail extends StatelessWidget {
   final AppController controller;
   final VoidCallback onSearch;
   final VoidCallback onSettings;
+  final VoidCallback onDownloads;
+  final VoidCallback onNotifications;
 
   @override
   Widget build(BuildContext context) => SafeArea(
@@ -471,7 +508,10 @@ class _TvSideRail extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(999),
                   color: Colors.white.withValues(alpha: 0.06),
@@ -510,6 +550,16 @@ class _TvSideRail extends StatelessWidget {
                       icon: Icons.search,
                       label: 'Søg',
                       onTap: onSearch,
+                    ),
+                    _TvRailAction(
+                      icon: Icons.notifications_none_outlined,
+                      label: 'Notifikationer',
+                      onTap: onNotifications,
+                    ),
+                    _TvRailAction(
+                      icon: Icons.download_for_offline_outlined,
+                      label: 'Downloads',
+                      onTap: onDownloads,
                     ),
                     if (controller.isAdmin)
                       _TvRailAction(
@@ -613,6 +663,42 @@ class _TvRailAction extends StatelessWidget {
   }
 }
 
+class _LibraryTopTab extends StatelessWidget {
+  const _LibraryTopTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    borderRadius: BorderRadius.circular(999),
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: selected ? const Color(0xAA4D2EA3) : Colors.white12,
+        border: Border.all(
+          color: selected ? const Color(0xFF7CA8FF) : Colors.white24,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+        ),
+      ),
+    ),
+  );
+}
+
 class _TvScrollContainer extends StatelessWidget {
   const _TvScrollContainer({required this.child});
   final Widget child;
@@ -649,7 +735,8 @@ class _HomeFeed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hero = recommendations.hero ??
+    final hero =
+        recommendations.hero ??
         (continueItems.isNotEmpty
             ? continueItems.first
             : (movies.isNotEmpty ? movies.first : null));
@@ -666,13 +753,7 @@ class _HomeFeed extends StatelessWidget {
       padding: EdgeInsets.only(bottom: tv ? 56 : 28),
       children: [
         if (hero != null)
-          _Hero(
-            api: api,
-            media: hero,
-            onOpen: onOpen,
-            onPlay: onPlay,
-            tv: tv,
-          ),
+          _Hero(api: api, media: hero, onOpen: onOpen, onPlay: onPlay, tv: tv),
         if (hero == null)
           const Padding(
             padding: EdgeInsets.all(40),
@@ -681,12 +762,7 @@ class _HomeFeed extends StatelessWidget {
             ),
           ),
         for (final section in sections)
-          _MediaRail(
-            api: api,
-            section: section,
-            onPressed: onOpen,
-            tv: tv,
-          ),
+          _MediaRail(api: api, section: section, onPressed: onOpen, tv: tv),
         if (tv)
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
@@ -717,7 +793,10 @@ class _Hero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final image = api.absoluteMediaUrl(media.backdropPath ?? media.posterPath, imageSize: 'original');
+    final image = api.absoluteMediaUrl(
+      media.backdropPath ?? media.posterPath,
+      imageSize: 'original',
+    );
 
     return Container(
       height: tv ? 520 : 420,
@@ -767,7 +846,8 @@ class _Hero extends StatelessWidget {
                         if (media.releaseYear != null)
                           _ChipPill(label: '${media.releaseYear}'),
                         if (media.is4k) const _ChipPill(label: '4K'),
-                        if (media.isHdr) _ChipPill(label: media.hdr!.toUpperCase()),
+                        if (media.isHdr)
+                          _ChipPill(label: media.hdr!.toUpperCase()),
                         if (!tv && media.episodeLabel.isNotEmpty)
                           _ChipPill(label: media.episodeLabel),
                       ],
@@ -854,7 +934,9 @@ class _MediaRail extends StatelessWidget {
             child: Text(
               section.title,
               style: tv
-                  ? Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 28)
+                  ? Theme.of(
+                      context,
+                    ).textTheme.titleLarge?.copyWith(fontSize: 28)
                   : Theme.of(context).textTheme.titleLarge,
             ),
           ),

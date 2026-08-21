@@ -13,41 +13,59 @@ class BrandMark extends StatelessWidget {
 }
 
 class BrandLockup extends StatelessWidget {
-  const BrandLockup({this.compact = false, super.key});
+  const BrandLockup({
+    this.compact = false,
+    this.onTap,
+    this.tooltip,
+    super.key,
+  });
 
   final bool compact;
+  final VoidCallback? onTap;
+  final String? tooltip;
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      BrandMark(size: compact ? 34 : 46),
-      SizedBox(width: compact ? 9 : 12),
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'BoltBytes',
-            style: TextStyle(
-              fontSize: compact ? 18 : 24,
-              height: 1,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.8,
+  Widget build(BuildContext context) {
+    final logo = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        BrandMark(size: compact ? 34 : 46),
+        SizedBox(width: compact ? 9 : 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'BoltBytes',
+              style: TextStyle(
+                fontSize: compact ? 18 : 24,
+                height: 1,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.8,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'MEDIA SERVER',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              fontSize: compact ? 7 : 8,
-              color: Colors.white54,
+            const SizedBox(height: 4),
+            Text(
+              'MEDIA SERVER',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                fontSize: compact ? 7 : 8,
+                color: Colors.white54,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
+      ],
+    );
+    if (onTap == null) return logo;
+    return Tooltip(
+      message: tooltip ?? 'Gå til forsiden',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: onTap,
+        child: logo,
       ),
-    ],
-  );
+    );
+  }
 }
 
 class _BrandPainter extends CustomPainter {

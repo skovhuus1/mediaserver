@@ -69,6 +69,10 @@ class _TitleScreenState extends State<TitleScreen> {
   }
 
   Future<void> _play(MediaItem media, int resumeMs) async {
+    if (media.isSeries) {
+      await _open(media);
+      return;
+    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -77,6 +81,16 @@ class _TitleScreenState extends State<TitleScreen> {
           media: media,
           resumePositionMs: resumeMs,
         ),
+      ),
+    );
+    await _load(selectedSeason);
+  }
+
+  Future<void> _open(MediaItem media) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TitleScreen(api: widget.api, media: media),
       ),
     );
     await _load(selectedSeason);

@@ -354,6 +354,7 @@ class SubtitleTrack {
     required this.label,
     required this.language,
     required this.delivery,
+    required this.forced,
     this.src,
   });
 
@@ -361,9 +362,34 @@ class SubtitleTrack {
   final String label;
   final String language;
   final String delivery;
+  final bool forced;
   final String? src;
 
-  bool get isText => delivery == 'webvtt' && src != null;
+  bool get isText {
+    final normalized = delivery.trim().toLowerCase();
+    if (normalized == 'burn' ||
+        normalized == 'burn_in' ||
+        normalized == 'hardcoded') {
+      return false;
+    }
+    if (normalized == 'text' ||
+        normalized == 'webvtt' ||
+        normalized == 'vtt' ||
+        normalized == 'srt' ||
+        normalized == 'ass' ||
+        normalized == 'ssa' ||
+        normalized == 'subrip' ||
+        normalized == 'embedded' ||
+        normalized.endsWith('+text')) {
+      return true;
+    }
+    final source = src?.toLowerCase();
+    if (source == null || source.isEmpty) return false;
+    return source.endsWith('.vtt') ||
+        source.endsWith('.srt') ||
+        source.endsWith('.ass') ||
+        source.endsWith('.ssa');
+  }
 
   factory SubtitleTrack.fromJson(dynamic value) {
     final json = jsonMap(value);
@@ -372,9 +398,68 @@ class SubtitleTrack {
       label: stringValue(json['label']) ?? 'Undertekst',
       language: stringValue(json['language']) ?? '',
       delivery: stringValue(json['delivery']) ?? 'webvtt',
+      forced:
+          boolValue(json['forced']) ||
+          RegExp(
+            r'\b(forced|foreign|tvungen)\b',
+            caseSensitive: false,
+          ).hasMatch(stringValue(json['label']) ?? ''),
       src: stringValue(json['src']),
     );
   }
+}
+
+SubtitleTrack? preferredSubtitleTrack(
+  List<SubtitleTrack> tracks,
+  PlaybackPreferences preferences,
+) {
+  final mode = preferences.subtitleMode.toLowerCase();
+  if (mode == 'off') return null;
+  final textTracks = tracks.where((track) => track.isText).toList();
+  if (textTracks.isEmpty) return null;
+
+  SubtitleTrack? firstMatching(
+    Iterable<SubtitleTrack> candidates,
+    String language,
+  ) {
+    final normalized = language.toLowerCase().split(RegExp(r'[-_]')).first;
+    for (final track in candidates) {
+      final trackLanguage = track.language
+          .toLowerCase()
+          .split(RegExp(r'[-_]'))
+          .first;
+      if (trackLanguage == normalized) return track;
+    }
+    return null;
+  }
+
+  final candidates = mode == 'always'
+      ? textTracks
+      : textTracks.where((track) => track.forced).toList();
+  if (candidates.isEmpty) return null;
+  for (final language in preferences.preferredSubtitleLanguages) {
+    final languageTracks = candidates.where((track) {
+      final trackLanguage = track.language
+          .toLowerCase()
+          .split(RegExp(r'[-_]'))
+          .first;
+      return trackLanguage ==
+          language.toLowerCase().split(RegExp(r'[-_]')).first;
+    });
+    if (mode == 'always') {
+      final normal = languageTracks.where((track) => !track.forced);
+      final normalMatch = firstMatching(normal, language);
+      if (normalMatch != null) return normalMatch;
+    }
+    final match = firstMatching(languageTracks, language);
+    if (match != null) return match;
+  }
+  if (mode == 'always') {
+    for (final track in candidates) {
+      if (!track.forced) return track;
+    }
+  }
+  return candidates.first;
 }
 
 class Rendition {
@@ -404,6 +489,7 @@ class Rendition {
 class PlaybackPreferences {
   const PlaybackPreferences({
     required this.qualityMode,
+    this.fixedQualityHeight,
     required this.playbackRate,
     required this.preferredSubtitleLanguages,
     required this.subtitleMode,
@@ -411,6 +497,7 @@ class PlaybackPreferences {
   });
 
   final String qualityMode;
+  final int? fixedQualityHeight;
   final double playbackRate;
   final List<String> preferredSubtitleLanguages;
   final String subtitleMode;
@@ -420,6 +507,7 @@ class PlaybackPreferences {
     final json = jsonMap(value);
     return PlaybackPreferences(
       qualityMode: stringValue(json['qualityMode']) ?? 'auto',
+      fixedQualityHeight: intValue(json['fixedQualityHeight']),
       playbackRate: doubleValue(json['playbackRate']) ?? 1,
       preferredSubtitleLanguages: jsonList(
         json['preferredSubtitleLanguages'],
