@@ -25,22 +25,23 @@ class BoltBytesApp extends StatelessWidget {
     const violet = Color(0xFF8E66FF);
     const mint = Color(0xFF40DFC2);
 
-    final scheme = ColorScheme.fromSeed(
-      seedColor: violet,
-      brightness: Brightness.dark,
-      surface: surface,
-    ).copyWith(
-      primary: violet,
-      secondary: mint,
-      error: const Color(0xFFFF717C),
-      surface: surface,
-      onSurface: Colors.white,
-      onPrimary: Colors.black,
-      outline: const Color(0xFF2D3842),
-      shadow: const Color(0x66000000),
-      surfaceContainerLow: panel,
-      surfaceContainerHighest: rail,
-    );
+    final scheme =
+        ColorScheme.fromSeed(
+          seedColor: violet,
+          brightness: Brightness.dark,
+          surface: surface,
+        ).copyWith(
+          primary: violet,
+          secondary: mint,
+          error: const Color(0xFFFF717C),
+          surface: surface,
+          onSurface: Colors.white,
+          onPrimary: Colors.black,
+          outline: const Color(0xFF2D3842),
+          shadow: const Color(0x66000000),
+          surfaceContainerLow: panel,
+          surfaceContainerHighest: rail,
+        );
 
     return MaterialApp(
       title: 'BoltBytes Media',
@@ -109,11 +110,15 @@ class BoltBytesApp extends StatelessWidget {
         snackBarTheme: SnackBarThemeData(
           backgroundColor: const Color(0xEE0D1A24),
           contentTextStyle: const TextStyle(fontWeight: FontWeight.w600),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
         ),
         popupMenuTheme: PopupMenuThemeData(
           color: panel,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           textStyle: const TextStyle(fontWeight: FontWeight.w600),
         ),
         dividerTheme: const DividerThemeData(
@@ -170,7 +175,9 @@ class BoltBytesApp extends StatelessWidget {
         navigationBarTheme: const NavigationBarThemeData(
           backgroundColor: Color(0xF20A0E13),
           indicatorColor: Color(0xFF38205E),
-          iconTheme: WidgetStatePropertyAll(IconThemeData(color: Color(0xFFDCE3EC))),
+          iconTheme: WidgetStatePropertyAll(
+            IconThemeData(color: Color(0xFFDCE3EC)),
+          ),
           labelTextStyle: WidgetStatePropertyAll(
             TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
           ),
@@ -199,8 +206,13 @@ class BoltBytesApp extends StatelessWidget {
         chipTheme: ChipThemeData(
           backgroundColor: const Color(0xC40A121B),
           side: const BorderSide(color: Color(0xFF26313A)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-          labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(999),
+          ),
+          labelStyle: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         ),
         switchTheme: SwitchThemeData(
