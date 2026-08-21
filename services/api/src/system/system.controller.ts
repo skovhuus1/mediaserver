@@ -9,6 +9,7 @@ import { SetUpdateBranchDto, UpdateServerSettingsDto } from './system.dto';
 import { SaveMetadataSettingsDto } from './metadata-settings.dto';
 import { metadataSettingsStatus, saveMetadataSettings } from './metadata-settings';
 import { resolveTranscoderStatus } from './transcoder-status';
+import { jobPayload, jobReferences, presentJobProgress } from './system-jobs';
 import { collectDefaultMetrics, register } from 'prom-client';
 import { cpus, freemem, loadavg, totalmem, uptime } from 'node:os';
 
@@ -121,6 +122,47 @@ export class SystemController {
       ...serverStatsSnapshot(),
       transcoder: resolveTranscoderStatus(persistedStatus?.value, { running, queued }, now),
     };
+  }
+
+  @Get('jobs')
+  @Roles('admin', 'operator')
+  async jobs(@CurrentUser() actor: AuthenticatedUser) {
+    const jobs = await this.prisma.systemJob.findMany({
+      where: { accountId: actor.accountId },
+      include: { attempts: { orderBy: { number: 'desc' }, take: 1, select: { number: true, status: true, error: true, startedAt: true, endedAt: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const references = jobs.map((job) => jobReferences(job.payload));
+    const libraryIds = [...new Set(references.flatMap((reference) => reference.libraryId ? [reference.libraryId] : []))];
+    const mediaIds = [...new Set(references.flatMap((reference) => reference.mediaId ? [reference.mediaId] : []))];
+    const [libraries, media, scans] = await Promise.all([
+      this.prisma.library.findMany({ where: { accountId: actor.accountId, id: { in: libraryIds } }, select: { id: true, name: true } }),
+      this.prisma.mediaItem.findMany({ where: { accountId: actor.accountId, id: { in: mediaIds } }, select: { id: true, title: true, seriesDisplayTitle: true, seriesTitle: true, seasonNumber: true, episodeNumber: true } }),
+      this.prisma.libraryScan.findMany({ where: { accountId: actor.accountId, jobId: { in: jobs.map((job) => job.id) } }, select: { jobId: true, filesSeen: true, filesCreated: true, filesUpdated: true, errors: true } }),
+    ]);
+    const libraryNames = new Map(libraries.map((library) => [library.id, library.name]));
+    const mediaNames = new Map(media.map((item) => [item.id, item.episodeNumber !== null ? `${item.seriesDisplayTitle ?? item.seriesTitle ?? item.title} · S${String(item.seasonNumber ?? 0).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}` : item.title]));
+    const scansByJob = new Map(scans.flatMap((scan) => scan.jobId ? [[scan.jobId, scan] as const] : []));
+    const items = jobs.map((job, index) => {
+      const payload = jobPayload(job.payload);
+      const reference = references[index]!;
+      const scan = scansByJob.get(job.id);
+      const storedProgress = presentJobProgress(job.payload, job.status);
+      const progress = scan && job.status === 'running' ? { ...storedProgress, current: scan.filesSeen, message: `${scan.filesSeen} filer set · ${scan.filesCreated} nye · ${scan.filesUpdated} opdateret · ${scan.errors} fejl` } : storedProgress;
+      const mediaType = payload.mediaType === 'movie' ? 'film' : payload.mediaType === 'series' ? 'serier' : 'alle medier';
+      const target = reference.libraryId ? libraryNames.get(reference.libraryId) ?? 'Ukendt bibliotek' : reference.mediaId ? mediaNames.get(reference.mediaId) ?? 'Ukendt medie' : job.type === 'media.metadata' ? `Metadata · ${mediaType}` : job.type === 'media.playback-assets' ? 'Playback-analyse' : 'Serveropgave';
+      return {
+        id: job.id, type: job.type, status: job.status, target, progress,
+        attemptCount: job.attemptCount, maxAttempts: job.maxAttempts,
+        error: job.attempts[0]?.error ?? null,
+        createdAt: job.createdAt.toISOString(), updatedAt: job.updatedAt.toISOString(), availableAt: job.availableAt.toISOString(),
+        startedAt: job.lockedAt?.toISOString() ?? job.attempts[0]?.startedAt.toISOString() ?? null,
+        finishedAt: job.attempts[0]?.endedAt?.toISOString() ?? null,
+      };
+    });
+    const count = (status: string) => items.filter((item) => item.status === status).length;
+    return { summary: { total: items.length, queued: count('queued'), running: count('running'), completed: count('completed'), failed: count('failed') }, items, sampledAt: new Date().toISOString() };
   }
 
   @Get('errors')

@@ -12,7 +12,7 @@ import { posix, resolve, sep } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../infra/redis.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
-import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, QueuePlaybackAssetsBatchDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
 import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metadata-settings';
 import { searchMetadataProviders, validateMetadataSelection } from './metadata-provider';
@@ -525,7 +525,7 @@ export class CatalogService {
     const stale = Boolean(asset?.sourceModifiedAt && asset.sourceModifiedAt < media.file.modifiedAt);
     const retryableFailure = asset?.status === 'failed' && Date.now() - asset.updatedAt.getTime() > 60 * 60_000;
     if (!asset || stale || retryableFailure) {
-      asset = await this.queuePlaybackAssetsInternal(actor.accountId, mediaId, media.file.modifiedAt, stale);
+      asset = (await this.queuePlaybackAssetsInternal(actor.accountId, mediaId, media.file.modifiedAt, stale)).asset;
     }
     const markers = await this.prisma.mediaTimelineMarker.findMany({
       where: { accountId: actor.accountId, mediaId },
@@ -571,6 +571,26 @@ export class CatalogService {
     }
     await this.queuePlaybackAssetsInternal(actor.accountId, mediaId, media.file.modifiedAt, force);
     return this.getPlaybackAssets(actor, mediaId);
+  }
+
+  async queuePlaybackAssetsBatch(actor: AuthenticatedUser, dto: QueuePlaybackAssetsBatchDto) {
+    const items = await this.prisma.mediaItem.findMany({
+      where: { accountId: actor.accountId, type: { in: dto.mediaType === 'movie' ? ['movie'] : dto.mediaType === 'series' ? ['episode'] : ['movie', 'episode'] }, file: { is: { status: 'ready' } } },
+      select: { id: true, file: { select: { modifiedAt: true } }, playbackAsset: { select: { status: true, sourceModifiedAt: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: 5_000,
+    });
+    let queued = 0;
+    let skipped = 0;
+    for (const item of items) {
+      if (!item.file) continue;
+      const fresh = item.playbackAsset?.status === 'ready' && Boolean(item.playbackAsset.sourceModifiedAt && item.playbackAsset.sourceModifiedAt >= item.file.modifiedAt);
+      if (dto.mode === 'missing' && fresh) { skipped += 1; continue; }
+      const result = await this.queuePlaybackAssetsInternal(actor.accountId, item.id, item.file.modifiedAt, dto.mode === 'all');
+      if (result.queued) queued += 1; else skipped += 1;
+    }
+    await this.prisma.auditLog.create({ data: { accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId, action: 'media.playback_assets.batch', outcome: 'allowed', code: 'playback_assets_batch_queued', details: { mode: dto.mode, mediaType: dto.mediaType, inspected: items.length, queued, skipped } } });
+    return { inspected: items.length, queued, skipped, limited: items.length === 5_000 };
   }
 
   async updateTimelineMarkers(actor: AuthenticatedUser, mediaId: string, dto: UpdateTimelineMarkersDto) {
@@ -653,9 +673,10 @@ export class CatalogService {
       });
       const currentIsFresh = current?.status === 'ready'
         && Boolean(current.sourceModifiedAt && current.sourceModifiedAt >= modifiedAt);
-      if ((!force && currentIsFresh) || active) return current ?? tx.mediaPlaybackAsset.create({
-        data: { accountId, mediaId, status: 'queued', sourceModifiedAt: modifiedAt },
-      });
+      if ((!force && currentIsFresh) || active) return {
+        asset: current ?? await tx.mediaPlaybackAsset.create({ data: { accountId, mediaId, status: 'queued', sourceModifiedAt: modifiedAt } }),
+        queued: false,
+      };
       const asset = await tx.mediaPlaybackAsset.upsert({
         where: { mediaId },
         create: { accountId, mediaId, status: 'queued', sourceModifiedAt: modifiedAt },
@@ -670,7 +691,7 @@ export class CatalogService {
           maxAttempts: 3,
         },
       });
-      return asset;
+      return { asset, queued: true };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 

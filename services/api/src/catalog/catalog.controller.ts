@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MediaDetailsQueryDto, MetadataMatchQueryDto, QueueMetadataDto, SetMetadataLockDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MediaDetailsQueryDto, MetadataMatchQueryDto, QueueMetadataDto, QueuePlaybackAssetsBatchDto, SetMetadataLockDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -88,6 +88,12 @@ export class CatalogController {
   @Roles('admin')
   rebuildPlaybackAssets(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.catalog.queuePlaybackAssets(actor, id, true);
+  }
+
+  @Post('media/playback-assets/jobs')
+  @Roles('admin')
+  rebuildPlaybackAssetsBatch(@CurrentUser() actor: AuthenticatedUser, @Body() dto: QueuePlaybackAssetsBatchDto) {
+    return this.catalog.queuePlaybackAssetsBatch(actor, dto);
   }
 
   @Put('media/:id/timeline-markers')

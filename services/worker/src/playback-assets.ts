@@ -11,8 +11,9 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { spawn } from 'node:child_process';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
+import { updateJobProgress } from './job-progress.js';
 
-type PlaybackAssetJob = { accountId: string; payload: Prisma.JsonValue };
+type PlaybackAssetJob = { id?: string; accountId: string; payload: Prisma.JsonValue };
 type ProcessResult = { stdout: Buffer; stderr: string };
 
 const tileWidth = 320;
@@ -26,6 +27,10 @@ export async function generatePlaybackAssets(prisma: PrismaClient, job: Playback
   const payload = jsonObject(job.payload);
   const mediaId = typeof payload.mediaId === 'string' ? payload.mediaId : null;
   if (!mediaId) throw new Error('media.playback-assets payload requires mediaId');
+  const report = (stage: string, percent: number, message?: string) => job.id
+    ? updateJobProgress(prisma, job as PlaybackAssetJob & { id: string }, { stage, percent, ...(message ? { message } : {}) })
+    : Promise.resolve();
+  await report('Forbereder analyse', 3);
   const media = await prisma.mediaItem.findFirst({
     where: { id: mediaId, accountId: job.accountId },
     include: { file: { include: { storageRoot: true } } },
@@ -49,12 +54,14 @@ export async function generatePlaybackAssets(prisma: PrismaClient, job: Playback
   try {
     await rm(assetDirectory, { recursive: true, force: true });
     await mkdir(assetDirectory, { recursive: true });
+    await report('Læser tidslinje', 10);
     const probe = await probeTimeline(sourcePath);
     const durationMs = media.file.durationMs ?? probe.durationMs;
     if (!durationMs || durationMs < 1_000) throw new Error('Media duration is unavailable for trickplay');
     const intervalSeconds = Math.max(5, Math.min(30, Math.ceil(durationMs / 1_000 / 240)));
     const cues = buildTrickplayCues({ durationMs, intervalSeconds, columns, rows });
     const expectedSheets = Math.ceil(cues.length / (columns * rows));
+    await report('Genererer seek-preview', 25, `${expectedSheets} sprite-ark planlagt`);
     await runProcess('ffmpeg', [
       '-hide_banner', '-loglevel', 'error', '-y', '-i', sourcePath,
       '-vf', `fps=1/${intervalSeconds},scale=${tileWidth}:${tileHeight}:force_original_aspect_ratio=decrease,pad=${tileWidth}:${tileHeight}:(ow-iw)/2:(oh-ih)/2,tile=${columns}x${rows}:nb_frames=${columns * rows}`,
@@ -64,10 +71,12 @@ export async function generatePlaybackAssets(prisma: PrismaClient, job: Playback
     const sheetFiles = (await readdir(assetDirectory)).filter((name) => /^sprite-\d{3}\.jpg$/.test(name)).sort();
     if (!sheetFiles.length) throw new Error('FFmpeg did not create any trickplay sheets');
 
+    await report('Finder intro og kapitler', 70, `${sheetFiles.length} sprite-ark genereret`);
     const fingerprint = await createFingerprint(sourcePath, durationMs).catch(() => null);
     const automaticMarkers = await discoverMarkers(prisma, media, sourcePath, durationMs, probe.chapters, fingerprint);
     for (const marker of automaticMarkers) await storeAutomaticMarker(prisma, job.accountId, mediaId, marker);
 
+    await report('Gemmer playback-data', 94, `${automaticMarkers.length} automatiske markører`);
     await prisma.mediaPlaybackAsset.update({
       where: { mediaId },
       data: {

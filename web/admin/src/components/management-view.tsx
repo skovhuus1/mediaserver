@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Database, FolderOpen, RefreshCw, Server, ShieldCheck, Users } from 'lucide-react';
 import { api, type ApiFailure } from '@/lib/api';
 import { PlaybackAnalysis } from './playback-analysis';
+import { OperationsCenter } from './operations-center';
 
 type Root = { id: string; label: string; mountPath: string; isReadOnly: boolean };
 type Scan = { id: string; status: string; filesSeen: number; filesCreated: number; errors: number; error: string | null };
@@ -70,6 +71,7 @@ type MetadataStatus = {
 };
 
 export function ManagementView({ view }: { view: string }) {
+  if (view === 'tasks') return <OperationsCenter />;
   if (view === 'playback-analysis') return <PlaybackAnalysis />;
   if (view === 'libraries') return <LibrariesView />;
   if (view === 'users') return <UsersView />;

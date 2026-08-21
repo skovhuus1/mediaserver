@@ -39,6 +39,7 @@ type TvdbSeriesMatch = {
 };
 
 type MetadataStats = { inspected: number; matched: number; unmatched: number };
+type MetadataProgress = MetadataStats & { completed: number; total: number };
 
 export async function enrichLibraryMetadata(
   prisma: PrismaClient,
@@ -50,7 +51,7 @@ export async function enrichLibraryMetadata(
     onlyMissing: boolean;
     force?: boolean;
     mediaType?: 'all' | 'movie' | 'series';
-    onProgress: () => Promise<void>;
+    onProgress: (progress: MetadataProgress) => Promise<void>;
   },
 ): Promise<MetadataStats> {
   const settings = await resolveMetadataSettings(prisma, input.accountId);
@@ -84,13 +85,19 @@ export async function enrichLibraryMetadata(
   ]));
   let matched = 0;
   let unmatched = 0;
+  let completed = 0;
+  const reportProgress = async () => {
+    completed += 1;
+    await input.onProgress({ completed, total: items.length, inspected: completed, matched, unmatched });
+  };
+  await input.onProgress({ completed: 0, total: items.length, inspected: 0, matched: 0, unmatched: 0 });
 
   for (const item of items) {
     const movie = item.type === 'movie';
     const title = movie ? item.title : item.seriesTitle;
     if (!title) {
       unmatched += 1;
-      await input.onProgress();
+      await reportProgress();
       continue;
     }
 
@@ -146,7 +153,7 @@ export async function enrichLibraryMetadata(
         },
       });
       matched += 1;
-      await input.onProgress();
+      await reportProgress();
       continue;
     }
     if (binding?.provider === 'tmdb') {
@@ -186,7 +193,7 @@ export async function enrichLibraryMetadata(
         },
       });
       matched += 1;
-      await input.onProgress();
+      await reportProgress();
       continue;
     }
 
@@ -200,7 +207,7 @@ export async function enrichLibraryMetadata(
       const match = await pending;
       if (!match) {
         unmatched += 1;
-        await input.onProgress();
+        await reportProgress();
         continue;
       }
       const episode = item.seasonNumber !== null && item.episodeNumber !== null
@@ -245,14 +252,14 @@ export async function enrichLibraryMetadata(
         },
       });
       matched += 1;
-      await input.onProgress();
+      await reportProgress();
       continue;
     }
 
     const token = settings.tmdbToken;
     if (!token) {
       unmatched += 1;
-      await input.onProgress();
+      await reportProgress();
       continue;
     }
     const kind = movie ? 'movie' : 'tv';
@@ -265,7 +272,7 @@ export async function enrichLibraryMetadata(
     const candidate = await pending;
     if (!candidate) {
       unmatched += 1;
-      await input.onProgress();
+      await reportProgress();
       continue;
     }
     await prisma.mediaItem.update({
@@ -293,7 +300,7 @@ export async function enrichLibraryMetadata(
       },
     });
     matched += 1;
-    await input.onProgress();
+    await reportProgress();
   }
   return { inspected: items.length, matched, unmatched };
 }

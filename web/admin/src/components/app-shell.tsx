@@ -40,6 +40,7 @@ const admin = [
   { label: t.users, icon: Users, href: '/?admin=users' },
   { label: t.libraries, icon: FolderOpen, href: '/?admin=libraries' },
   { label: t.plans, icon: ShieldCheck, href: '/?admin=plans' },
+  { label: 'Opgaver', icon: Activity, href: '/?admin=tasks' },
   { label: 'Playback-analyse', icon: ScanSearch, href: '/?admin=playback-analysis' },
   { label: t.updates, icon: Sparkles, href: '/update' },
   { label: t.settings, icon: Settings, href: '/?admin=settings' },
