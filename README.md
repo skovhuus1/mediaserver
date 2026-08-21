@@ -20,7 +20,7 @@ Valideret lokalt i denne leverance:
 - Android mobile debug-APK: bygget med produktions-API-URL.
 - Android TV debug-APK: bygget med produktions-API-URL.
 
-Fysisk afspilning, fjernbetjeningsfokus og Chromecast discovery kræver fortsat rigtig Android-/TV-/Cast-hardware og er derfor en separat staging-gate. GitHub CI kontrolleres på feature-branchen efter push.
+Fysisk afspilning, fjernbetjeningsfokus og Chromecast discovery kræver fortsat rigtig Android-/TV-/Cast-hardware og er derfor en separat staging-gate. På feature-branchen bestod både push- og PR-varianterne af serverens `validate`-job og Flutter-klientens `validate`-job.
 
 ## Leverance 2026-08-20: Mobile TV UI polish (TV-actions og mediekort)
 
