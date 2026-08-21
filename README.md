@@ -10,7 +10,7 @@
 
 Opgavevisningen er en præsentation af den eksisterende holdbare `SystemJob`-ledger, ikke en separat browserkø. Jobs fortsætter derfor efter navigation og worker-genstart. Operators har read-only adgang; kun administratorer kan starte batcharbejde. Fysisk visuel QA på produktionsdomænet og tidsmåling på serverens rigtige mediebibliotek forbliver en staging-gate efter deployment.
 
-Valideret lokalt i denne leverance: ESLint, API/worker/admin-typecheck, 46 API-testfiler med 152 tests, 6 worker-testfiler med 10 tests samt API-, worker- og Next.js-produktionsbuild. Ingen databaseændring eller migration er nødvendig, fordi levende fremdrift gemmes i jobbenes eksisterende JSON-payload.
+Valideret lokalt på den kombinerede branch: fuld `npm run ci`, 46 API-testfiler med 152 tests, 7 worker-testfiler med 13 tests samt contracts-, API-, worker- og Next.js-produktionsbuild. Ingen databaseændring eller migration er nødvendig, fordi levende fremdrift gemmes i jobbenes eksisterende JSON-payload.
 
 ## Mediekompatibilitets-certificering
 
