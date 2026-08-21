@@ -4,6 +4,7 @@ export type SubtitleDescriptor = {
   language: string;
   label: string;
   format: 'srt' | 'vtt';
+  forced: boolean;
 };
 
 const languageAliases: Record<string, { code: string; label: string }> = {
@@ -53,6 +54,7 @@ export function sidecarSubtitleDescriptor(videoFilename: string, subtitleFilenam
     language: language?.code ?? 'und',
     label: qualifiers.length ? `${baseLabel} (${qualifiers.join(', ')})` : baseLabel,
     format: extension === '.srt' ? 'srt' : 'vtt',
+    forced,
   };
 }
 
@@ -60,6 +62,7 @@ export function embeddedSubtitleDescriptors(probe: unknown): Array<{
   streamIndex: number;
   language: string;
   label: string;
+  forced: boolean;
 }> {
   const root = asObject(probe);
   const streams = Array.isArray(root.streams) ? root.streams.map(asObject) : [];
@@ -85,6 +88,7 @@ export function embeddedSubtitleDescriptors(probe: unknown): Array<{
       streamIndex,
       language: alias?.code ?? 'und',
       label: qualifiers.length ? `${baseLabel} (${qualifiers.join(', ')})` : baseLabel,
+      forced,
     }];
   });
 }

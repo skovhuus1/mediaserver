@@ -1,5 +1,13 @@
 # BoltBytes Media mobile og TV
 
+## Undertekst- og playbackadfærd
+
+- `Automatisk` viser kun forced-undertekster; normale spor vælges med `Altid` eller direkte i playeren.
+- `Fra` er et eksplicit valg og bevares gennem seek, kvalitetsændring og genindlæsning af den aktuelle stream.
+- Serverens `forced`-metadata bruges for sidecar-, embedded- og billedbaserede spor.
+- Valgt fast kvalitet markeres direkte i kvalitetsmenuen.
+- Leverancen er lokalt valideret med `flutter analyze`, 19 Flutter-tests og separate mobile/TV debug-APK-builds mod produktions-API'en.
+
 Den native Android-klient til BoltBytes Media Server. Projektet bygger både et adaptivt mobil/tablet-layout og et fjernbetjeningsvenligt Android TV-layout fra samme kontraktlag.
 
 Se repository-roden for kørselskommandoer, arkitektur, sikkerhedsmodel og aktuel acceptance-status.

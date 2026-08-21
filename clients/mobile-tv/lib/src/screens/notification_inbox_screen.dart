@@ -53,11 +53,36 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
     await _load();
   }
 
+  Future<void> _clear() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      await widget.api.postJson('/client-services/notifications/read-all');
+      if (!mounted) return;
+      setState(() {
+        items = [];
+        loading = false;
+      });
+    } catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+        error = failure.toString();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('Notifikationer'),
       actions: [
+        TextButton(
+          onPressed: items.isEmpty ? null : () => _clear(),
+          child: const Text('Ryd'),
+        ),
         TextButton(
           onPressed: items.isEmpty
               ? null

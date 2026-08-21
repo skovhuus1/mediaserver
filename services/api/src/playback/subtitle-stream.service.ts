@@ -23,6 +23,7 @@ export type PlaybackSubtitleTrack = {
   id: string;
   label: string;
   language: string;
+  forced: boolean;
   src: string | null;
   contentType: 'text/vtt' | null;
   delivery: 'webvtt' | 'burn_in';
@@ -48,6 +49,7 @@ export class SubtitleStreamService {
       id: `sidecar-${index}`,
       label: track.label,
       language: track.language,
+      forced: track.forced,
       src: `/api/v1/playback/sessions/${sessionId}/subtitles/sidecar-${index}.vtt?token=${encodedToken}`,
       contentType: 'text/vtt',
       delivery: 'webvtt',
@@ -58,6 +60,7 @@ export class SubtitleStreamService {
           id: `embedded-${track.streamIndex}`,
           label: track.label,
           language: track.language,
+          forced: track.forced,
           src: `/api/v1/playback/sessions/${sessionId}/subtitles/embedded-${track.streamIndex}.vtt?token=${encodedToken}`,
           contentType: 'text/vtt',
           delivery: 'webvtt',
@@ -69,6 +72,7 @@ export class SubtitleStreamService {
         id: `burnin-${track.streamIndex}`,
         label: `${track.label} · Burn-in`,
         language: track.language,
+        forced: track.forced,
         src: null,
         contentType: null,
         delivery: 'burn_in',
@@ -258,10 +262,17 @@ export function imageSubtitleDescriptors(probe: unknown) {
     const language =
       typeof tags.language === 'string' ? tags.language.toLowerCase() : 'und';
     const title = typeof tags.title === 'string' ? tags.title : language.toUpperCase();
+    const disposition =
+      typeof stream.disposition === 'object'
+      && stream.disposition !== null
+      && !Array.isArray(stream.disposition)
+        ? stream.disposition as Record<string, unknown>
+        : {};
     return [{
       streamIndex: Math.trunc(stream.index),
       language,
       label: `${title} (${stream.codec_name})`,
+      forced: disposition.forced === 1,
     }];
   });
 }

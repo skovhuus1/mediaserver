@@ -72,6 +72,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   DateTime _lastPlatformUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   bool _inPictureInPicture = false;
   bool _fullscreen = true;
+  bool _qualityChanging = false;
+  bool _subtitleChoiceMade = false;
+  String? _chosenSubtitleTrackId;
 
   @override
   void initState() {
@@ -204,6 +207,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     await controller.setPlaybackSpeed(authorization.preferences.playbackRate);
     await controller.play();
+    await _ensureActiveTextSubtitle();
     _reconnectAttempts = 0;
     if (!mounted) return;
     setState(() {
@@ -656,20 +660,49 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Future<void> _selectDefaultSubtitle() async {
     final auth = _authorization;
-    if (auth == null || auth.preferences.subtitleMode == 'off') return;
-    SubtitleTrack? selected;
-    for (final language in auth.preferences.preferredSubtitleLanguages) {
-      selected = auth.subtitleTracks
-          .where(
-            (track) =>
-                _language(track.language) == _language(language) &&
-                track.isText,
-          )
-          .firstOrNull;
-      if (selected != null) break;
+    if (auth == null) return;
+    if (_subtitleChoiceMade) {
+      final selected = _chosenSubtitleTrackId == null
+          ? null
+          : auth.subtitleTracks
+                .where((track) => track.id == _chosenSubtitleTrackId)
+                .firstOrNull;
+      await _setSubtitle(selected, rememberChoice: false);
+      return;
     }
-    selected ??= auth.subtitleTracks.where((track) => track.isText).firstOrNull;
-    if (selected != null) await _setSubtitle(selected);
+    await _setSubtitle(
+      preferredSubtitleTrack(auth.subtitleTracks, auth.preferences),
+      rememberChoice: false,
+    );
+  }
+
+  Future<void> _ensureActiveTextSubtitle() async {
+    final active = _subtitle;
+    final auth = _authorization;
+    if (active == null || auth == null || !active.isText || _casting) {
+      return;
+    }
+    if (active.src == null || active.src!.isEmpty) {
+      return;
+    }
+    if (!auth.subtitleTracks.any((track) => track.id == active.id)) {
+      return;
+    }
+    setState(() {
+      _error = null;
+      _cueText = '';
+    });
+    try {
+      final text = await widget.api.getText(active.src!);
+      if (!mounted || _subtitle?.id != active.id) return;
+      setState(() => _cues = parseSubtitles(text));
+    } catch (_) {
+      if (!mounted || _subtitle?.id != active.id) return;
+      setState(() {
+        _cues = const [];
+        _error = 'Undertekstsporet kunne ikke indlæses.';
+      });
+    }
   }
 
   Future<void> _attachToConnectedCast() async {
@@ -743,7 +776,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       _handoffAccepted = true;
       final castSubtitles = jsonList(handoff['subtitleTracks'])
           .map(SubtitleTrack.fromJson)
-          .where((track) => track.isText)
+          .where(
+            (track) =>
+                track.isText && track.src != null && track.src!.isNotEmpty,
+          )
           .toList(growable: false);
       final trackIds = <String, int>{};
       final tracks = <CastLoadTrack>[];
@@ -852,10 +888,28 @@ class _PlayerScreenState extends State<PlayerScreen>
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  String _language(String value) =>
-      value.toLowerCase().split(RegExp('[-_]')).first;
-
-  Future<void> _setSubtitle(SubtitleTrack? track) async {
+  Future<void> _setSubtitle(
+    SubtitleTrack? track, {
+    bool rememberChoice = true,
+  }) async {
+    final previous = _subtitle;
+    final position = _absolutePositionMs;
+    if (rememberChoice) {
+      _subtitleChoiceMade = true;
+      _chosenSubtitleTrackId = track?.id;
+    }
+    if (previous != null &&
+        !previous.isText &&
+        (track == null || track.isText)) {
+      setState(() {
+        _subtitle = track;
+        _cues = const [];
+        _cueText = '';
+        _error = null;
+      });
+      await _restartPlayback(position);
+      return;
+    }
     if (_casting && (track == null || track.isText)) {
       try {
         await _cast.setTextTrack(
@@ -879,6 +933,14 @@ class _PlayerScreenState extends State<PlayerScreen>
         _subtitle = null;
         _cues = const [];
         _cueText = '';
+        _error = null;
+      });
+      return;
+    }
+    if (track.src == null || track.src!.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Undertekstsporet mangler kilde-fil.';
       });
       return;
     }
@@ -889,18 +951,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     setState(() {
       _subtitle = track;
       _cueText = '';
+      _error = null;
     });
-    try {
-      final text = await widget.api.getText(track.src!);
-      if (!mounted || _subtitle?.id != track.id) return;
-      setState(() => _cues = parseSubtitles(text));
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _cues = const [];
-        _error = 'Undertekstsporet kunne ikke indlæses.';
-      });
-    }
+    await _ensureActiveTextSubtitle();
   }
 
   Future<void> _reconfigure(
@@ -946,6 +999,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         await _beginCast(forceReload: true);
       } else {
         await _prepareController(next);
+        await _ensureActiveTextSubtitle();
       }
     } on ApiException catch (failure) {
       if (!mounted) return;
@@ -1006,10 +1060,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_casting) {
       await _cast.seek(math.max(0, target - _timelineOffsetMs));
       setState(() => _castPositionMs = target);
+      await _saveProgress();
       return;
     }
+    final currentPosition = _absolutePositionMs;
+    if (target == currentPosition) return;
     if (auth.isDirectPlay) {
       await video.seekTo(Duration(milliseconds: target));
+      if (_subtitle?.isText == true) {
+        await _ensureActiveTextSubtitle();
+      }
+      await _saveProgress();
       return;
     }
     final local = target - _timelineOffsetMs;
@@ -1020,15 +1081,23 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
     if (local >= 0 && buffered) {
       await video.seekTo(Duration(milliseconds: local));
+      if (_subtitle?.isText == true) {
+        await _ensureActiveTextSubtitle();
+      }
     } else {
       await _reconfigure(
         target,
         burnInTrack: _subtitle?.isText == false ? _subtitle : null,
       );
     }
+    await _saveProgress();
   }
 
   Future<void> _changeQuality(String value) async {
+    if (_qualityChanging) {
+      _showCastMessage('Kvalitetsindstillingen opdateres allerede.');
+      return;
+    }
     if (_casting) {
       _showCastMessage(
         'Chromecast bruger streamens adaptive kvalitet. Afbryd Cast for at ændre enhedens kvalitetsprofil.',
@@ -1049,16 +1118,44 @@ class _PlayerScreenState extends State<PlayerScreen>
       body['fixedQualityHeight'] = fixedHeight;
     }
     try {
+      _qualityChanging = true;
+      if (mounted) {
+        setState(() {
+          _status = 'Opdaterer afspilningskvalitet...';
+          _buffering = true;
+        });
+      }
       await widget.api.patchJson('/devices/me/preferences', body);
-      await _saveProgress();
-      await _release();
-      await _video?.dispose();
-      _video = null;
-      _authorization = null;
-      await _start(position);
+      await _restartPlayback(position);
     } on ApiException catch (failure) {
       if (mounted) setState(() => _error = failure.message);
+      if (mounted) {
+        setState(() {
+          _buffering = false;
+        });
+      }
+    } finally {
+      _qualityChanging = false;
     }
+  }
+
+  Future<void> _restartPlayback(int positionMs) async {
+    await _saveProgress();
+    final auth = _authorization;
+    if (auth != null && CastPlaybackCoordinator.instance.owns(auth.sessionId)) {
+      await CastPlaybackCoordinator.instance.stop();
+    } else if (_casting || _handoffAccepted) {
+      try {
+        await _cast.stop();
+      } catch (_) {}
+      _casting = false;
+      await _cancelCastHandoff();
+    }
+    await _release();
+    await _video?.dispose();
+    _video = null;
+    _authorization = null;
+    await _start(positionMs);
   }
 
   void _togglePlayback() {
@@ -1419,20 +1516,36 @@ class _PlayerScreenState extends State<PlayerScreen>
                     children: [
                       Text(_time(_absolutePositionMs)),
                       Expanded(
-                        child: Slider(
-                          min: 0,
-                          max: math.max(1, _durationMs).toDouble(),
-                          value: _isScrubbing
-                              ? _scrubPositionMs
-                                    .clamp(0, math.max(1, _durationMs))
-                                    .toDouble()
-                              : _absolutePositionMs
-                                    .clamp(0, math.max(1, _durationMs))
-                                    .toDouble(),
-                          onChangeStart: _startScrub,
-                          onChanged: _updateScrub,
-                          onChangeEnd: _endScrub,
-                          label: _time(_scrubPositionMs),
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3.5,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 7,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 12,
+                            ),
+                            activeTrackColor: Theme.of(
+                              context,
+                            ).colorScheme.secondary,
+                            inactiveTrackColor: Colors.white24,
+                            thumbColor: Colors.white,
+                          ),
+                          child: Slider(
+                            min: 0,
+                            max: math.max(1, _durationMs).toDouble(),
+                            value: _isScrubbing
+                                ? _scrubPositionMs
+                                      .clamp(0, math.max(1, _durationMs))
+                                      .toDouble()
+                                : _absolutePositionMs
+                                      .clamp(0, math.max(1, _durationMs))
+                                      .toDouble(),
+                            onChangeStart: _startScrub,
+                            onChanged: _updateScrub,
+                            onChangeEnd: _endScrub,
+                            label: _time(_scrubPositionMs),
+                          ),
                         ),
                       ),
                       Text(_time(_durationMs)),
@@ -1444,7 +1557,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       TextButton.icon(
                         onPressed: _showSubtitles,
                         icon: const Icon(Icons.subtitles_outlined),
-                        label: Text(_subtitle?.label ?? 'Undertekster'),
+                        label: Text(_subtitle?.label ?? 'Undertekster: Fra'),
                       ),
                       const SizedBox(width: 10),
                       TextButton.icon(
@@ -1485,6 +1598,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _showSubtitles() {
     final tracks = _authorization?.subtitleTracks ?? const <SubtitleTrack>[];
+    final visibleTracks = tracks
+        .where((track) => track.id.isNotEmpty)
+        .toList(growable: false);
+    final textTracks = visibleTracks.where((track) => track.isText).toList();
+    final burnedTracks = visibleTracks.where((track) => !track.isText).toList();
     _hideTimer?.cancel();
     showModalBottomSheet<void>(
       context: context,
@@ -1509,14 +1627,48 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ),
               ),
               const RadioListTile<String?>(value: null, title: Text('Fra')),
-              for (final track in tracks)
-                RadioListTile<String?>(
-                  value: track.id,
-                  title: Text(track.label),
-                  subtitle: Text(
-                    '${track.language.toUpperCase()} · ${track.isText ? 'WebVTT' : 'Indbrændt'}',
+              if (textTracks.isNotEmpty) ...[
+                const ListTile(
+                  dense: true,
+                  title: Text(
+                    'Tekst-undertekster',
+                    style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
+                for (final track in textTracks)
+                  RadioListTile<String?>(
+                    value: track.id,
+                    title: Text(track.label),
+                    subtitle: Text(
+                      '${track.language.toUpperCase()} · WebVTT/SRT',
+                    ),
+                    secondary: _subtitle?.id == track.id
+                        ? const Icon(Icons.check_circle)
+                        : null,
+                  ),
+              ],
+              if (burnedTracks.isNotEmpty) ...[
+                const ListTile(
+                  dense: true,
+                  title: Text(
+                    'Indbrændte undertekster',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                for (final track in burnedTracks)
+                  RadioListTile<String?>(
+                    value: track.id,
+                    title: Text(track.label),
+                    subtitle: Text(
+                      '${track.language.toUpperCase()} · Indbrænding',
+                    ),
+                    secondary: _subtitle?.id == track.id
+                        ? const Icon(Icons.check_circle)
+                        : null,
+                  ),
+              ],
+              if (visibleTracks.isEmpty)
+                const ListTile(title: Text('Ingen undertekster blev fundet.')),
             ],
           ),
         ),
@@ -1588,6 +1740,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                 subtitle: Text(
                   '${(rendition.bitrate / 1000000).toStringAsFixed(1)} Mbps · ${rendition.hdr ? 'HDR' : 'SDR'}',
                 ),
+                trailing:
+                    auth.preferences.qualityMode == 'fixed' &&
+                        auth.preferences.fixedQualityHeight == rendition.height
+                    ? const Icon(Icons.check)
+                    : null,
                 onTap: () {
                   Navigator.pop(context);
                   unawaited(_changeQuality('${rendition.height}'));

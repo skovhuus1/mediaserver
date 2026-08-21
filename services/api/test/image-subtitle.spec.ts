@@ -11,6 +11,7 @@ describe('image subtitle descriptors', () => {
             codec_type: 'subtitle',
             codec_name: 'hdmv_pgs_subtitle',
             tags: { language: 'dan', title: 'Dansk' },
+            disposition: { forced: 1 },
           },
           {
             index: 6,
@@ -25,11 +26,13 @@ describe('image subtitle descriptors', () => {
         streamIndex: 4,
         language: 'dan',
         label: 'Dansk (hdmv_pgs_subtitle)',
+        forced: true,
       },
       {
         streamIndex: 6,
         language: 'eng',
         label: 'ENG (dvd_subtitle)',
+        forced: false,
       },
     ]);
   });
