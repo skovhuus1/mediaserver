@@ -8,6 +8,7 @@ import { Brand } from './brand';
 import { WebPlayer } from './web-player';
 import { CastSdkLoader } from './cast-sdk-loader';
 import { logoutSession, type SessionUser } from '@/lib/api';
+import styles from './customer-shell.module.css';
 
 export function CustomerShell({ user, children }: { user: SessionUser; children: ReactNode }) {
   const router = useRouter();
@@ -33,19 +34,19 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
     router.replace('/login');
   }
   return (
-    <div className="watch-shell">
-      <header className="watch-header">
+    <div className={`watch-shell ${styles.shell}`}>
+      <header className={`watch-header ${styles.header}`}>
         <Link aria-label="BoltBytes hjem" href="/watch"><Brand /></Link>
-        <nav>{links.map(({ href, label, icon: Icon }) => <Link className={active(href) ? 'active' : ''} href={href} key={href}><Icon size={16} />{label}</Link>)}</nav>
-        <form className="watch-search" action="/watch"><Search size={16} /><input name="q" defaultValue={searchParams.get('q') ?? ''} placeholder="Søg efter film og serier" /></form>
-        <div className="watch-account">
-          {isAdmin && <Link className="admin-return" href="/"><ChevronLeft size={15} />Admin</Link>}
-          <Link className="admin-return" href="/watch/settings">Indstillinger</Link>
-          <Link className="profile-button" href="/profiles"><span>{activeProfile?.name.slice(0, 1).toUpperCase() ?? <UserRound size={15} />}</span>{activeProfile?.name ?? user.displayName}</Link>
+        <nav className={styles.nav}>{links.map(({ href, label, icon: Icon }) => <Link className={active(href) ? 'active' : ''} href={href} key={href}><Icon size={16} />{label}</Link>)}</nav>
+        <form className={`watch-search ${styles.search}`} action="/watch"><Search size={16} /><input name="q" defaultValue={searchParams.get('q') ?? ''} placeholder="Søg i dit bibliotek" /></form>
+        <div className={`watch-account ${styles.account}`}>
+          {isAdmin && <Link className={`admin-return ${styles.accountLink}`} href="/"><ChevronLeft size={15} />Admin</Link>}
+          <Link className={`admin-return ${styles.accountLink}`} href="/watch/settings">Indstillinger</Link>
+          <Link className={`profile-button ${styles.profile}`} href="/profiles"><span>{activeProfile?.name.slice(0, 1).toUpperCase() ?? <UserRound size={15} />}</span>{activeProfile?.name ?? user.displayName}</Link>
           <button onClick={() => void logout()} aria-label="Log ud"><LogOut size={16} /></button>
         </div>
       </header>
-      <main className="watch-main">{children}</main>
+      <main className={`watch-main ${styles.main}`}>{children}</main>
       <CastSdkLoader />
       <WebPlayer />
     </div>

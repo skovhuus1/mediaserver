@@ -49,7 +49,7 @@ export function PersonalizedRecommendations() {
     }
   }
 
-  if (!data) return null;
+  if (!data) return <section className={styles.loading} aria-label="Henter personlige anbefalinger"><i /><div><i /><i /><i /></div></section>;
   const controls = (item: Card) => (
     <>
       <button aria-label={`Synes godt om ${item.title}`} onClick={() => void feedback(item.id, 'like')}><ThumbsUp size={15} /></button>
@@ -61,7 +61,7 @@ export function PersonalizedRecommendations() {
   return (
     <section className={styles.personal}>
       {data.hero && (
-        <article className={styles.hero} style={{ backgroundImage: data.hero.backdropPath ? `linear-gradient(90deg,rgba(5,8,12,.97),rgba(5,8,12,.18)),url("${data.hero.backdropPath}")` : undefined }}>
+        <article className={styles.hero} style={{ backgroundImage: recommendationImage(data.hero.backdropPath) ? `linear-gradient(90deg,rgba(5,8,10,.98) 4%,rgba(5,8,10,.68) 46%,rgba(5,8,10,.12)),linear-gradient(0deg,rgba(5,8,10,.86),transparent 55%),url("${recommendationImage(data.hero.backdropPath)}")` : undefined }}>
           <div>
             <span>{data.hero.reason}</span>
             <h1>{data.hero.title}</h1>
@@ -92,4 +92,10 @@ export function PersonalizedRecommendations() {
       ))}
     </section>
   );
+}
+
+function recommendationImage(path: string | null): string | null {
+  if (!path) return null;
+  if (/^https:\/\//i.test(path)) return path;
+  return `https://image.tmdb.org/t/p/original${path}`;
 }

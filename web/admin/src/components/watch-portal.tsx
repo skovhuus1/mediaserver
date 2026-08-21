@@ -1,29 +1,18 @@
 'use client';
 
-import { ArrowRight, Play, Sparkles } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Film, Library, Play, Tv } from 'lucide-react';
 import { PersonalizedRecommendations } from './personalized-recommendations';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, clearSession, type SessionUser } from '@/lib/api';
 import { CatalogView } from './catalog-view';
 import { ContinueWatching } from './continue-watching';
 import { CustomerShell } from './customer-shell';
 import { PosterQualityBadges } from './poster-quality-badges';
+import styles from './watch-portal.module.css';
 
-type WatchItem = {
-  id: string;
-  title: string;
-  type: string;
-  seriesTitle: string | null;
-  seriesDisplayTitle?: string | null;
-  seriesMetadataProviderId?: string | null;
-  releaseYear: number | null;
-  posterPath: string | null;
-  width?: number | null;
-  height?: number | null;
-  hdr?: 'hdr10' | 'hlg' | 'dolby_vision' | null;
-};
+type WatchItem = { id: string; title: string; type: string; seriesTitle: string | null; releaseYear: number | null; posterPath: string | null; width?: number | null; height?: number | null; hdr?: 'hdr10' | 'hlg' | 'dolby_vision' | null };
 type CatalogResponse = { items: WatchItem[] };
 
 export function WatchPortal() {
@@ -34,56 +23,15 @@ export function WatchPortal() {
   const [series, setSeries] = useState<WatchItem[]>([]);
   const browse = Boolean(Array.from(searchParams.keys()).some((key) => key !== 'view'));
   const continueOnly = searchParams.get('view') === 'continue';
-  useEffect(() => {
-    void api<SessionUser>('/auth/me').then((session) => {
-      setUser(session);
-      return Promise.all([
-        api<CatalogResponse>('/media/catalog?type=movie&pageSize=12&sort=newest'),
-        api<CatalogResponse>('/media/catalog?type=series&pageSize=12&sort=newest'),
-      ]);
-    }).then(([movieCatalog, seriesCatalog]) => {
-      setMovies(movieCatalog.items);
-      setSeries(seriesCatalog.items);
-    }).catch(() => {
-      clearSession();
-      router.replace('/login');
-    });
-  }, [router]);
+  useEffect(() => { void api<SessionUser>('/auth/me').then((session) => { setUser(session); return Promise.all([api<CatalogResponse>('/media/catalog?type=movie&pageSize=18&sort=newest'), api<CatalogResponse>('/media/catalog?type=series&pageSize=18&sort=newest')]); }).then(([movieCatalog, seriesCatalog]) => { setMovies(movieCatalog.items); setSeries(seriesCatalog.items); }).catch(() => { clearSession(); router.replace('/login'); }); }, [router]);
   if (!user) return <main className="watch-loading" aria-busy="true" />;
-  return (
-    <CustomerShell user={user}>
-      {!browse && !continueOnly ? <PersonalizedRecommendations /> : null}
-      {continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : (
-        <>
-          <section className="watch-hero">
-            <div className="watch-hero-copy"><span className="eyebrow"><Sparkles size={13} /> DIT BIBLIOTEK</span><h1>Din næste historie<br />venter allerede.</h1><p>Film, serier og fortsæt-positioner fra din egen BoltBytes-server.</p><div><Link className="watch-primary" href="/watch?type=movie"><Play size={16} />Se film</Link><Link className="watch-secondary" href="/watch?type=series">Udforsk serier <ArrowRight size={15} /></Link></div></div>
-            <div className="watch-hero-art"><i /><i /><i /></div>
-          </section>
-          <ContinueWatching />
-          <DiscoveryRow title="Nyeste film" items={movies} allHref="/watch?type=movie" />
-          <DiscoveryRow title="Serier" items={series} allHref="/watch?type=series" />
-        </>
-      )}
-    </CustomerShell>
-  );
+  return <CustomerShell user={user}><div className={styles.portal}>{continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : <><PersonalizedRecommendations /><section className={styles.libraryBar}><div><Library size={22} /><strong>Dit BoltBytes-bibliotek</strong><span>{movies.length}+ film · {series.length}+ serier klar til afspilning</span></div><nav><Link href="/watch?type=movie"><Film size={14} />Film</Link><Link href="/watch?type=series"><Tv size={14} />Serier</Link></nav></section><ContinueWatching /><DiscoveryRow title="Nye film" items={movies} allHref="/watch?type=movie" /><DiscoveryRow title="Nye serier" items={series} allHref="/watch?type=series" /></>}</div></CustomerShell>;
 }
 
 function DiscoveryRow({ title, items, allHref }: { title: string; items: WatchItem[]; allHref: string }) {
-  return (
-    <section className="watch-discovery">
-      <header><h2>{title}</h2><Link href={allHref}>Se alle <ArrowRight size={14} /></Link></header>
-      <div>
-        {items.slice(0, 6).map((item) => {
-          const href = `/watch/title/${encodeURIComponent(item.id)}`;
-          return <Link className="watch-card" href={href} key={`${item.type}-${item.id}`}><span className="watch-poster" style={posterStyle(item.posterPath)}><PosterQualityBadges media={item} /></span><strong>{item.title}</strong><small>{item.releaseYear ?? (item.type === 'series' ? 'Serie' : 'Film')}</small></Link>;
-        })}
-      </div>
-    </section>
-  );
+  const rail = useRef<HTMLDivElement>(null);
+  const scroll = (direction: number) => rail.current?.scrollBy({ left: direction * Math.max(420, rail.current.clientWidth * .78), behavior: 'smooth' });
+  return <section className={styles.row}><header><h2>{title}</h2><Link href={allHref}>Se alle <ArrowRight size={14} /></Link></header>{items.length ? <div className={styles.railWrap}><button className={`${styles.arrow} ${styles.left}`} aria-label={`Rul ${title} til venstre`} onClick={() => scroll(-1)}><ChevronLeft /></button><div className={styles.rail} ref={rail}>{items.map((item) => <Link className={styles.card} href={`/watch/title/${encodeURIComponent(item.id)}`} key={`${item.type}-${item.id}`}><span className={styles.poster} style={posterStyle(item.posterPath)}><PosterQualityBadges media={item} /><i><Play size={16} fill="currentColor" /></i></span><strong>{item.title}</strong><small>{item.releaseYear ?? (item.type === 'series' ? 'Serie' : 'Film')}</small></Link>)}</div><button className={`${styles.arrow} ${styles.right}`} aria-label={`Rul ${title} til højre`} onClick={() => scroll(1)}><ChevronRight /></button></div> : <div className={styles.empty}>Ingen titler i denne række endnu.</div>}</section>;
 }
-
-function posterStyle(path: string | null): { backgroundImage: string } | undefined {
-  if (!path) return undefined;
-  const url = /^https:\/\/(?:artworks\.)?thetvdb\.com\//i.test(path) ? path : `https://image.tmdb.org/t/p/w500${path}`;
-  return { backgroundImage: `linear-gradient(160deg, transparent 45%, rgba(0,0,0,.6)), url("${url}")` };
-}
+function posterStyle(path: string | null): { backgroundImage: string } | undefined { const url = imageUrl(path); return url ? { backgroundImage: `linear-gradient(160deg,transparent 48%,rgba(0,0,0,.72)),url("${url}")` } : undefined; }
+function imageUrl(path: string | null) { if (!path) return null; if (/^https:\/\//i.test(path)) return path; return `https://image.tmdb.org/t/p/w500${path}`; }

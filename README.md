@@ -1,5 +1,17 @@
 # BoltBytes Media Server
 
+## Leverance 2026-08-22: Plex-lignende kundeportal og samlet opgavecenter
+
+- Kundeportalen bruger nu den personlige anbefaling som reel filmisk hero med korrekt TMDB/TVDB-billedsti, skarpere navigation, kompakte bibliotekstal og vandrette mediehylder med egne pile uden native scrollbars.
+- Adminpanelet har en ny `Opgaver`-fane, som samler biblioteksscan, metadata og playback-analyse. Fanen viser account-scopet kø, workerstatus, forsøg, fejl, mål, tidsstempler og levende fremdrift.
+- Metadatajobs rapporterer præcist antal behandlede og samlede titler. Biblioteksscans rapporterer løbende filantal, og playback-analyse viser navngivne FFmpeg-faser fra probe til seek-preview og markører.
+- Playback-analyse kan nu sætte alle manglende analyser i kø på én gang. API'et understøtter også kontrolleret genopbygning af alle film, serier eller begge med deduplikering mod aktive jobs.
+- Nye kontrakter: `GET /api/v1/system/jobs` og `POST /api/v1/media/playback-assets/jobs`.
+
+Opgavevisningen er en præsentation af den eksisterende holdbare `SystemJob`-ledger, ikke en separat browserkø. Jobs fortsætter derfor efter navigation og worker-genstart. Operators har read-only adgang; kun administratorer kan starte batcharbejde. Fysisk visuel QA på produktionsdomænet og tidsmåling på serverens rigtige mediebibliotek forbliver en staging-gate efter deployment.
+
+Valideret lokalt i denne leverance: ESLint, API/worker/admin-typecheck, 46 API-testfiler med 152 tests, 6 worker-testfiler med 10 tests samt API-, worker- og Next.js-produktionsbuild. Ingen databaseændring eller migration er nødvendig, fordi levende fremdrift gemmes i jobbenes eksisterende JSON-payload.
+
 ## Leverance 2026-08-21: mobil/TV-polish og deterministiske undertekster
 
 - Flutter-playeren respekterer nu profilens fire underteksttilstande: `Fra`, `Automatisk`, `Kun tvungne` og `Altid`.

@@ -16,6 +16,7 @@ import {
 import { generatePlaybackAssets } from './playback-assets.js';
 import { prepareOfflineDownload } from './offline-downloads.js';
 import { deliverPushNotification, queueOfflineReadyNotification } from './push-notifications.js';
+import { updateJobProgress, withJobProgress } from './job-progress.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -220,12 +221,14 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
       errors: 0,
     },
   });
+  await updateJobProgress(prisma, job, { stage: 'Gennemgår bibliotek', current: 0, total: null, message: library.name });
 
   let filesSeen = 0;
   let filesCreated = 0;
   let filesUpdated = 0;
   let errors = 0;
   let lastLeaseRenewal = 0;
+  let lastProgressUpdate = 0;
   const discovered = new Set<string>();
 
   try {
@@ -297,6 +300,10 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
             where: { id: scan.id },
             data: { filesSeen, filesCreated, filesUpdated, errors },
           });
+          if (Date.now() - lastProgressUpdate > 1_000) {
+            await updateJobProgress(prisma, job, { stage: 'Scanner mediefiler', current: filesSeen, total: null, message: `${filesCreated} nye · ${filesUpdated} opdateret · ${errors} fejl` });
+            lastProgressUpdate = Date.now();
+          }
         },
         () => { errors += 1; },
       );
@@ -313,6 +320,7 @@ async function scanLibrary(job: ClaimedJob): Promise<void> {
       },
       data: { status: 'missing' },
     });
+    await updateJobProgress(prisma, job, { stage: 'Afstemmer bibliotek', current: filesSeen, total: filesSeen, percent: 98, message: `${missing.count} manglende filer` });
     await prisma.libraryScan.update({
       where: { id: scan.id },
       data: {
@@ -991,7 +999,10 @@ async function enrichMetadata(job: ClaimedJob): Promise<void> {
     onlyMissing: payload.onlyMissing === true,
     force: payload.force === true,
     mediaType,
-    onProgress: () => renewJobLease(job.id),
+    onProgress: async (progress) => {
+      await renewJobLease(job.id);
+      await updateJobProgress(prisma, job, { stage: 'Henter metadata', current: progress.completed, total: progress.total, percent: progress.total > 0 ? (progress.completed / progress.total) * 100 : 100, message: `${progress.matched} matchet · ${progress.unmatched} uden match` });
+    },
   });
 }
 
@@ -1199,7 +1210,7 @@ async function finishJob(job: ClaimedJob): Promise<void> {
     }),
     prisma.systemJob.update({
       where: { id: job.id },
-      data: { status: 'completed', workerId: null, lockedAt: null, leaseExpiresAt: null },
+      data: { status: 'completed', workerId: null, lockedAt: null, leaseExpiresAt: null, payload: withJobProgress(job.payload, { stage: 'Afsluttet', percent: 100 }) },
     }),
   ]);
 }

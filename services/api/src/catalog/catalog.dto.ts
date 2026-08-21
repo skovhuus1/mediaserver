@@ -207,6 +207,16 @@ export class ApplyMetadataMatchDto {
   locked = true;
 }
 
+export class QueuePlaybackAssetsBatchDto {
+  @IsOptional()
+  @IsIn(['missing', 'all'])
+  mode: 'missing' | 'all' = 'missing';
+
+  @IsOptional()
+  @IsIn(['all', 'movie', 'series'])
+  mediaType: 'all' | 'movie' | 'series' = 'all';
+}
+
 export class TimelineMarkerRangeDto {
   @Type(() => Number)
   @IsInt()
