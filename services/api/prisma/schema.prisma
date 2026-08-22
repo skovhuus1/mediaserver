@@ -100,6 +100,7 @@ model Account {
   libraries            Library[]
   mediaItems           MediaItem[]
   metadataBindings     MetadataBinding[]
+  metadataOverrides    MetadataOverride[]
   mediaFiles           MediaFile[]
   libraryScans         LibraryScan[]
   playbackSessions     PlaybackSession[]
@@ -408,6 +409,7 @@ model Library {
   mediaFiles    MediaFile[]
   scans         LibraryScan[]
   metadataBindings MetadataBinding[]
+  metadataOverrides MetadataOverride[]
 
   @@index([accountId])
   @@map("libraries")
@@ -549,6 +551,30 @@ model MetadataBinding {
   @@unique([accountId, libraryId, mediaType, localKey])
   @@index([accountId, provider, providerId])
   @@map("metadata_bindings")
+}
+
+model MetadataOverride {
+  id            String   @id @default(uuid())
+  accountId     String   @map("account_id")
+  libraryId     String   @map("library_id")
+  seriesKey     String   @map("series_key")
+  scope         String
+  scopeKey      String   @map("scope_key")
+  seasonNumber  Int      @map("season_number")
+  episodeNumber Int?     @map("episode_number")
+  title         String?
+  overview      String?
+  releaseDate   DateTime? @map("release_date")
+  imagePath     String?  @map("image_path")
+  createdBy     String?  @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  library       Library  @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, libraryId, seriesKey, scopeKey])
+  @@index([accountId, libraryId, seriesKey])
+  @@map("metadata_overrides")
 }
 
 model MediaFile {

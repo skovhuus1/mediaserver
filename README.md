@@ -608,9 +608,15 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 - Workeren adskiller cache pr. episodeorden, henter episoder fra TVDB's `series/{id}/episodes/{season-type}/{lang}`-endpoint og prioriterer sæsondata fra den valgte orden.
 - Eksisterende bindinger migreres additivt til `default`; lokale filnavne og scannerens `SxxExx`-numre ændres ikke.
 
+## Sæson- og episode-overrides (2026-08-22)
+
+- Administratorer kan nu sætte et separat artwork på en enkelt sæson og rette titel, beskrivelse, premieredato eller still-billede på en enkelt episode.
+- Overrides gemmes i en account- og library-scopet ledger med stabil lokal serie-, sæson- og episodeidentitet. Providerdata overskrives ikke i ledgeren.
+- Metadataworkeren lægger overrides oven på TVDB/TMDB efter hver refresh. Sletning køer en tvungen metadataopdatering, der gendanner providerens oprindelige værdier.
+- Alle oprettelser og sletninger er admin-only, validerede, auditloggede og blokeres atomisk, mens et andet metadatajob er aktivt.
+
 ### Kendte rester
 
-- Manuel sæson- eller episode-specifik override ud over seriens valgte provider mangler fortsat; den nuværende binding er bevidst på film- eller serieniveau.
 - TVDB-liveflow kræver fortsat en gyldig nøgle på installationsserveren og verificeres først dér.
 ## Separat kundeportal og adminområde (2026-07-29)
 

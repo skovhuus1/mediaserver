@@ -218,6 +218,28 @@ export class MetadataEpisodeOrdersQueryDto {
   providerId!: string;
 }
 
+export class MetadataOverrideDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 240)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 5000)
+  overview?: string;
+
+  @IsOptional()
+  @IsDateString()
+  releaseDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 500)
+  @Matches(/^(?:\/[A-Za-z0-9._-]+|https:\/\/(?:artworks\.)?thetvdb\.com\/[A-Za-z0-9_./%-]+)$/i)
+  imagePath?: string;
+}
+
 export class QueuePlaybackAssetsBatchDto {
   @IsOptional()
   @IsIn(['missing', 'all'])

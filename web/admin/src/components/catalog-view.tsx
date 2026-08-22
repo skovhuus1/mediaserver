@@ -75,6 +75,13 @@ type MetadataMatchCandidate = {
 };
 type TvdbEpisodeOrder = { key: string; label: string };
 type CurrentMetadataBinding = { provider: string; providerId: string; episodeOrder: string };
+type MetadataOverride = {
+  id: string;
+  title: string | null;
+  overview: string | null;
+  releaseDate: string | null;
+  imagePath: string | null;
+};
 
 const emptyCatalog: CatalogResponse = {
   items: [],
@@ -375,7 +382,7 @@ function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: 
       </div>}
       {detail.kind !== 'series' && <button className={playerStyles.playButton} onClick={() => requestPlayback(item)}><Play size={16} /> Afspil</button>}
       {detail.kind === 'series' ? (
-        <SeriesEpisodes key={item.seriesTitle ?? item.title} episodes={detail.episodes} next={detail.next} />
+        <SeriesEpisodes key={item.seriesTitle ?? item.title} episodes={detail.episodes} next={detail.next} adminMode={adminMode} />
       ) : (
         <dl className="detail-facts">
           <div><dt>Type</dt><dd>{episodeLabel(item)}</dd></div>
@@ -389,29 +396,111 @@ function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: 
   );
 }
 
-function SeriesEpisodes({ episodes, next }: { episodes: CatalogItem[]; next: SeriesNext | null }) {
+function SeriesEpisodes({ episodes, next, adminMode }: { episodes: CatalogItem[]; next: SeriesNext | null; adminMode: boolean }) {
   const seasons = Array.from(new Set(episodes.map((episode) => episode.seasonNumber ?? 0))).sort((left, right) => left - right);
   const [season, setSeason] = useState(seasons[0] ?? 0);
+  const [overrideEditor, setOverrideEditor] = useState<{ scope: 'season' | 'episode'; episode: CatalogItem } | null>(null);
   const visible = episodes
     .filter((episode) => (episode.seasonNumber ?? 0) === season)
     .sort((left, right) => (left.episodeNumber ?? 0) - (right.episodeNumber ?? 0));
+  const seasonRepresentative = visible[0] ?? null;
   return (
     <div className="episode-list">
       {next && <button className={playerStyles.playButton} onClick={() => requestPlayback(next.media, next.resumePositionMs)}><Play size={16} /> {next.resumePositionMs > 0 ? 'Fortsæt episode' : 'Afspil næste episode'} · {episodeLabel(next.media)}</button>}
       <nav className="season-tabs" aria-label="Sæsoner">
         {seasons.map((value) => <button className={season === value ? 'active' : ''} onClick={() => setSeason(value)} key={value}>{value === 0 ? 'Specials' : `Sæson ${value}`}</button>)}
       </nav>
-      <header className="series-episode-heading"><strong>{season === 0 ? 'Specials' : `Sæson ${season}`}</strong><span>{visible.length} afsnit</span></header>
+      <header className="series-episode-heading"><strong>{season === 0 ? 'Specials' : `Sæson ${season}`}</strong><span>{visible.length} afsnit</span>{adminMode && seasonRepresentative && <button onClick={() => setOverrideEditor({ scope: 'season', episode: seasonRepresentative })}>Ret sæson-artwork</button>}</header>
       {visible.map((episode) => (
-        <button className={`${playerStyles.episodeButton} ${playerStyles.episodeRich}`} onClick={() => requestPlayback(episode)} key={episode.id}>
-          <span className={playerStyles.episodeStill} style={imageStyle(episode.episodeStillPath ?? episode.seasonPosterPath, 'w500')} />
-          <strong>{episodeLabel(episode)}</strong>
-          <span className={playerStyles.episodeCopy}><b>{episode.title}</b><small>{episode.overview ?? (episode.releaseDate ? new Date(episode.releaseDate).toLocaleDateString('da-DK') : 'Episodebeskrivelse afventer')}</small></span>
-          <small>{durationLabel(episode.file?.durationMs)}</small>
-        </button>
+        <div className="admin-episode-row" key={episode.id}>
+          <button className={`${playerStyles.episodeButton} ${playerStyles.episodeRich}`} onClick={() => requestPlayback(episode)}>
+            <span className={playerStyles.episodeStill} style={imageStyle(episode.episodeStillPath ?? episode.seasonPosterPath, 'w500')} />
+            <strong>{episodeLabel(episode)}</strong>
+            <span className={playerStyles.episodeCopy}><b>{episode.title}</b><small>{episode.overview ?? (episode.releaseDate ? new Date(episode.releaseDate).toLocaleDateString('da-DK') : 'Episodebeskrivelse afventer')}</small></span>
+            <small>{durationLabel(episode.file?.durationMs)}</small>
+          </button>
+          {adminMode && <button className="episode-metadata-edit" onClick={() => setOverrideEditor({ scope: 'episode', episode })}>Ret metadata</button>}
+        </div>
       ))}
+      {overrideEditor && <MetadataOverrideEditor scope={overrideEditor.scope} episode={overrideEditor.episode} onClose={() => setOverrideEditor(null)} />}
     </div>
   );
+}
+
+function MetadataOverrideEditor({ scope, episode, onClose }: { scope: 'season' | 'episode'; episode: CatalogItem; onClose: () => void }) {
+  const [existing, setExisting] = useState<MetadataOverride | null>(null);
+  const [title, setTitle] = useState('');
+  const [overview, setOverview] = useState('');
+  const [releaseDate, setReleaseDate] = useState('');
+  const [imagePath, setImagePath] = useState('');
+  const [busy, setBusy] = useState(true);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    void api<{ season: MetadataOverride | null; episode: MetadataOverride | null }>(`/media/${encodeURIComponent(episode.id)}/metadata/overrides`)
+      .then((result) => {
+        if (!active) return;
+        const value = result[scope];
+        setExisting(value);
+        setTitle(value?.title ?? '');
+        setOverview(value?.overview ?? '');
+        setReleaseDate(value?.releaseDate?.slice(0, 10) ?? '');
+        setImagePath(value?.imagePath ?? '');
+      })
+      .catch((failure) => { if (active) setMessage(errorMessage(failure)); })
+      .finally(() => { if (active) setBusy(false); });
+    return () => { active = false; };
+  }, [episode.id, scope]);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage('');
+    const body = scope === 'season'
+      ? { imagePath: imagePath.trim() || undefined }
+      : {
+          title: title.trim() || undefined,
+          overview: overview.trim() || undefined,
+          releaseDate: releaseDate ? new Date(`${releaseDate}T00:00:00.000Z`).toISOString() : undefined,
+          imagePath: imagePath.trim() || undefined,
+        };
+    try {
+      const result = await api<{ override: MetadataOverride }>(`/media/${encodeURIComponent(episode.id)}/metadata/overrides/${scope}`, {
+        method: 'PUT', body: JSON.stringify(body),
+      });
+      setExisting(result.override);
+      setMessage('Override er gemt. Metadataopdateringen er sat i kø.');
+    } catch (failure) {
+      setMessage(errorMessage(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    setMessage('');
+    try {
+      await api(`/media/${encodeURIComponent(episode.id)}/metadata/overrides/${scope}`, { method: 'DELETE' });
+      setExisting(null);
+      setMessage('Override er fjernet. Providerens metadata gendannes i baggrunden.');
+    } catch (failure) {
+      setMessage(errorMessage(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="metadata-override-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <form className="metadata-override-editor" onSubmit={save}>
+      <header><div><span className="eyebrow">MANUEL OVERRIDE</span><h3>{scope === 'season' ? `Sæson ${episode.seasonNumber} artwork` : `${episodeLabel(episode)} metadata`}</h3></div><button type="button" onClick={onClose} aria-label="Luk"><X size={17} /></button></header>
+      {scope === 'episode' && <><label>Titel<input value={title} maxLength={240} onChange={(event) => setTitle(event.target.value)} /></label><label>Beskrivelse<textarea value={overview} maxLength={5000} rows={5} onChange={(event) => setOverview(event.target.value)} /></label><label>Premieredato<input type="date" value={releaseDate} onChange={(event) => setReleaseDate(event.target.value)} /></label></>}
+      <label>{scope === 'season' ? 'Sæsonposter' : 'Episodebillede'}<input value={imagePath} maxLength={500} onChange={(event) => setImagePath(event.target.value)} placeholder="/tmdb-fil.jpg eller https://thetvdb.com/..." required={scope === 'season'} /></label>
+      {message && <small>{message}</small>}
+      <footer>{existing && <button className="danger" type="button" disabled={busy} onClick={() => void remove()}>Fjern override</button>}<button type="button" onClick={onClose}>Luk</button><button type="submit" disabled={busy}>{busy ? 'Arbejder...' : 'Gem override'}</button></footer>
+    </form>
+  </div>;
 }
 
 async function fetchSeriesDetail(item: CatalogItem): Promise<DetailState> {

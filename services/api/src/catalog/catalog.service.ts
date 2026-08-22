@@ -3,6 +3,9 @@ import {
   detectVideoSignalProfile,
   groupBySeriesIdentity,
   sanitizeMediaTitle,
+  metadataOverrideScopeKey,
+  metadataOverrideSeriesKey,
+  type MetadataOverrideScope,
   selectSeriesContinuation,
   type AuthenticatedUser,
 } from '@boltbytes/contracts';
@@ -12,7 +15,7 @@ import { posix, resolve, sep } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../infra/redis.service';
 import { resolveStorageBrowsePath } from '../setup/storage-path';
-import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, QueuePlaybackAssetsBatchDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MetadataOverrideDto, QueueMetadataDto, QueuePlaybackAssetsBatchDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
 import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metadata-settings';
 import { listTvdbEpisodeOrders, resolveTvdbEpisodeOrder, searchMetadataProviders, validateMetadataSelection } from './metadata-provider';
@@ -1005,6 +1008,170 @@ export class CatalogService {
       });
       return { id: mediaId, metadataLocked: locked, affectedItems: updated.count };
     });
+  }
+
+  async getMetadataOverrides(actor: AuthenticatedUser, mediaId: string) {
+    const target = await this.metadataOverrideTarget(actor, mediaId);
+    const scopeKeys = [metadataOverrideScopeKey('season', target.seasonNumber, null)];
+    if (target.episodeNumber !== null) {
+      scopeKeys.push(metadataOverrideScopeKey('episode', target.seasonNumber, target.episodeNumber));
+    }
+    const overrides = await this.prisma.metadataOverride.findMany({
+      where: {
+        accountId: actor.accountId,
+        libraryId: target.libraryId,
+        seriesKey: target.seriesKey,
+        scopeKey: { in: scopeKeys },
+      },
+    });
+    return {
+      mediaId,
+      season: overrides.find((override) => override.scope === 'season') ?? null,
+      episode: overrides.find((override) => override.scope === 'episode') ?? null,
+    };
+  }
+
+  async saveMetadataOverride(actor: AuthenticatedUser, mediaId: string, rawScope: string, dto: MetadataOverrideDto) {
+    const scope = this.metadataOverrideScope(rawScope);
+    const target = await this.metadataOverrideTarget(actor, mediaId);
+    if (scope === 'episode' && target.episodeNumber === null) {
+      throw new BadRequestException({ code: 'metadata_override_episode_identity_missing', message: 'Episoden mangler et stabilt episodenummer.' });
+    }
+    if (scope === 'season' && (!dto.imagePath || dto.title || dto.overview || dto.releaseDate)) {
+      throw new BadRequestException({ code: 'metadata_override_season_fields_invalid', message: 'Sæsonoverride understøtter kun et artwork.' });
+    }
+    if (scope === 'episode' && !dto.title && !dto.overview && !dto.releaseDate && !dto.imagePath) {
+      throw new BadRequestException({ code: 'metadata_override_empty', message: 'Angiv mindst ét episodefelt, der skal overskrives.' });
+    }
+    const scopeKey = metadataOverrideScopeKey(scope, target.seasonNumber, target.episodeNumber);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:metadata-override'),
+          hashtext(CAST(${actor.accountId} AS text))
+        )::text AS lock_result
+      `;
+      const active = await tx.systemJob.findFirst({
+        where: { accountId: actor.accountId, type: 'media.metadata', status: { in: ['queued', 'running'] } },
+      });
+      if (active) throw new ConflictException({ code: 'metadata_job_active', message: 'Vent til den aktive metadataopdatering er afsluttet.' });
+      const override = await tx.metadataOverride.upsert({
+        where: {
+          accountId_libraryId_seriesKey_scopeKey: {
+            accountId: actor.accountId,
+            libraryId: target.libraryId,
+            seriesKey: target.seriesKey,
+            scopeKey,
+          },
+        },
+        create: {
+          accountId: actor.accountId,
+          libraryId: target.libraryId,
+          seriesKey: target.seriesKey,
+          scope,
+          scopeKey,
+          seasonNumber: target.seasonNumber,
+          episodeNumber: scope === 'episode' ? target.episodeNumber : null,
+          title: dto.title?.trim() ?? null,
+          overview: dto.overview?.trim() ?? null,
+          releaseDate: dto.releaseDate ? new Date(dto.releaseDate) : null,
+          imagePath: dto.imagePath?.trim() ?? null,
+          createdBy: actor.sub,
+        },
+        update: {
+          title: dto.title?.trim() ?? null,
+          overview: dto.overview?.trim() ?? null,
+          releaseDate: dto.releaseDate ? new Date(dto.releaseDate) : null,
+          imagePath: dto.imagePath?.trim() ?? null,
+          createdBy: actor.sub,
+        },
+      });
+      const job = await tx.systemJob.create({
+        data: {
+          accountId: actor.accountId,
+          type: 'media.metadata',
+          status: 'queued',
+          payload: { libraryId: target.libraryId, seriesTitle: target.seriesTitle, onlyMissing: false, force: true, requestedBy: actor.sub },
+          maxAttempts: 3,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: actor.profileId,
+          action: 'media.metadata.override',
+          outcome: 'allowed',
+          code: 'media_metadata_override',
+          details: { mediaId, scope, scopeKey, overrideId: override.id, jobId: job.id },
+        },
+      });
+      return { override, job };
+    });
+  }
+
+  async deleteMetadataOverride(actor: AuthenticatedUser, mediaId: string, rawScope: string) {
+    const scope = this.metadataOverrideScope(rawScope);
+    const target = await this.metadataOverrideTarget(actor, mediaId);
+    const scopeKey = metadataOverrideScopeKey(scope, target.seasonNumber, target.episodeNumber);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:metadata-override'),
+          hashtext(CAST(${actor.accountId} AS text))
+        )::text AS lock_result
+      `;
+      const active = await tx.systemJob.findFirst({
+        where: { accountId: actor.accountId, type: 'media.metadata', status: { in: ['queued', 'running'] } },
+      });
+      if (active) throw new ConflictException({ code: 'metadata_job_active', message: 'Vent til den aktive metadataopdatering er afsluttet.' });
+      const removed = await tx.metadataOverride.deleteMany({
+        where: { accountId: actor.accountId, libraryId: target.libraryId, seriesKey: target.seriesKey, scopeKey },
+      });
+      const job = await tx.systemJob.create({
+        data: {
+          accountId: actor.accountId,
+          type: 'media.metadata',
+          status: 'queued',
+          payload: { libraryId: target.libraryId, seriesTitle: target.seriesTitle, onlyMissing: false, force: true, requestedBy: actor.sub },
+          maxAttempts: 3,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          accountId: actor.accountId,
+          userId: actor.sub,
+          profileId: actor.profileId,
+          action: 'media.metadata.override.delete',
+          outcome: 'allowed',
+          code: 'media_metadata_override_delete',
+          details: { mediaId, scope, scopeKey, removed: removed.count, jobId: job.id },
+        },
+      });
+      return { removed: removed.count, job };
+    });
+  }
+
+  private metadataOverrideScope(value: string): MetadataOverrideScope {
+    if (value === 'season' || value === 'episode') return value;
+    throw new BadRequestException({ code: 'metadata_override_scope_invalid', message: 'Override-scope skal være season eller episode.' });
+  }
+
+  private async metadataOverrideTarget(actor: AuthenticatedUser, mediaId: string) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: { id: true, type: true, libraryId: true, seriesTitle: true, seasonNumber: true, episodeNumber: true },
+    });
+    if (!media) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+    if (media.type === 'movie' || !media.seriesTitle?.trim() || media.seasonNumber === null) {
+      throw new BadRequestException({ code: 'metadata_override_series_identity_missing', message: 'Metadataoverride kræver en scannet serieepisode.' });
+    }
+    return {
+      ...media,
+      seriesTitle: media.seriesTitle,
+      seriesKey: metadataOverrideSeriesKey(media.seriesTitle),
+      seasonNumber: media.seasonNumber,
+    };
   }
 
   listScans(actor: AuthenticatedUser, libraryId: string) {

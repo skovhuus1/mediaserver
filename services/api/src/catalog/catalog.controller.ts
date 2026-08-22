@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MediaDetailsQueryDto, MetadataEpisodeOrdersQueryDto, MetadataMatchQueryDto, QueueMetadataDto, QueuePlaybackAssetsBatchDto, SetMetadataLockDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MediaDetailsQueryDto, MetadataEpisodeOrdersQueryDto, MetadataMatchQueryDto, MetadataOverrideDto, QueueMetadataDto, QueuePlaybackAssetsBatchDto, SetMetadataLockDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -146,6 +146,33 @@ export class CatalogController {
     @Query() query: MetadataEpisodeOrdersQueryDto,
   ) {
     return this.catalog.listMetadataEpisodeOrders(actor, id, query.providerId);
+  }
+
+  @Get('media/:id/metadata/overrides')
+  @Roles('admin')
+  metadataOverrides(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.catalog.getMetadataOverrides(actor, id);
+  }
+
+  @Put('media/:id/metadata/overrides/:scope')
+  @Roles('admin')
+  saveMetadataOverride(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('scope') scope: string,
+    @Body() dto: MetadataOverrideDto,
+  ) {
+    return this.catalog.saveMetadataOverride(actor, id, scope, dto);
+  }
+
+  @Delete('media/:id/metadata/overrides/:scope')
+  @Roles('admin')
+  deleteMetadataOverride(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('scope') scope: string,
+  ) {
+    return this.catalog.deleteMetadataOverride(actor, id, scope);
   }
 
   @Post('media/:id/metadata/match')
