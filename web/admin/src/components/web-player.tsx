@@ -819,18 +819,17 @@ export function WebPlayer() {
         upscaleUnlockedRef.current = !hasDeferredUpscale;
         setUpscaleUnlocked(!hasDeferredUpscale);
         hls.autoLevelCapping = hasDeferredUpscale ? Math.max(0, lastSourceLevel) : -1;
-        const initialSelection = authorization.method === 'direct_stream'
-          ? 0
-          : resolveInitialPlaybackQualitySelection(
+        const preferredSelection = normalizePlaybackQualitySelection(qualitySelectionRef.current, hls.levels.length);
+        const initialSelection = preferredSelection >= 0
+          ? preferredSelection
+          : authorization.method === 'direct_stream'
+            ? -1
+            : resolveInitialPlaybackQualitySelection(
               authorization.playbackPreferences.qualityMode,
               authorization.playbackPreferences.fixedQualityHeight,
               hls.levels,
             );
-        hls.currentLevel = initialSelection;
-        hls.nextLevel = initialSelection;
-        hls.loadLevel = initialSelection;
-        qualitySelectionRef.current = initialSelection;
-        setQualitySelection(qualitySelectionRef.current);
+        applyQualitySelection(hls, initialSelection);
         setCurrentQuality(hls.currentLevel);
         setAudioTracks(hls.audioTracks.map((track, index) => ({
           index,
@@ -854,7 +853,11 @@ export function WebPlayer() {
       hls.on(Hls.Events.BUFFER_APPENDED, start);
       hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => {
         const selected = qualitySelectionRef.current;
-        setQualitySwitching(selected >= 0 && data.level === selected ? null : data.level);
+        if (selected >= 0) {
+          setQualitySwitching(data.level === selected ? null : data.level);
+        } else {
+          setQualitySwitching(null);
+        }
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         setCurrentQuality(data.level);
@@ -1139,16 +1142,29 @@ export function WebPlayer() {
     setMenu(null);
   };
 
+  const applyQualitySelection = useCallback((
+    hls: Hls,
+    requestedLevel: number,
+  ) => {
+    const selected = normalizePlaybackQualitySelection(requestedLevel, hls.levels.length);
+    qualitySelectionRef.current = selected;
+    setQualitySelection(selected);
+    setQualitySwitching(selected >= 0 && selected === hls.currentLevel ? null : selected >= 0 ? selected : null);
+    hls.autoLevelEnabled = selected === -1;
+    hls.currentLevel = selected;
+    hls.nextLevel = selected;
+    hls.loadLevel = selected;
+  }, []);
+
   const selectQuality = (index: number) => {
     const hls = hlsRef.current;
     if (!hls) return;
     const selected = normalizePlaybackQualitySelection(index, hls.levels.length);
-    qualitySelectionRef.current = selected;
-    setQualitySelection(selected);
-    setQualitySwitching(selected === -1 || selected === hls.currentLevel ? null : selected);
-    hls.currentLevel = selected;
-    hls.nextLevel = selected;
-    hls.loadLevel = selected;
+    if (selected >= 0 && !upscaleUnlocked) {
+      const nextCandidate = qualities.find((quality) => quality.index === selected);
+      if (nextCandidate?.upscaled) return;
+    }
+    applyQualitySelection(hls, selected);
     setMenu(null);
   };
 
@@ -1198,15 +1214,21 @@ export function WebPlayer() {
   useEffect(() => {
     const video = videoRef.current;
     activeSubtitleRef.current = activeSubtitle;
-    subtitleCuesRef.current = [];
-    setSubtitleCue('');
     setSubtitleError('');
-    if (!video || !authorization || !sourceReady || !activeSubtitle) return;
+    if (!video || !authorization || !sourceReady || !activeSubtitle) {
+      subtitleCuesRef.current = [];
+      setSubtitleCue('');
+      return;
+    }
 
     const selectedTrack = authorization.subtitleTracks.find(
       (track) => track.id === activeSubtitle && track.delivery === 'webvtt' && Boolean(track.src),
     );
-    if (!selectedTrack?.src) return;
+    if (!selectedTrack?.src) {
+      subtitleCuesRef.current = [];
+      setSubtitleCue('');
+      return;
+    }
 
     const controller = new AbortController();
     void fetch(selectedTrack.src, { cache: 'no-store', signal: controller.signal })
