@@ -32,7 +32,7 @@ RUN npm run build --workspace=@boltbytes/api
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN apk add --no-cache docker-cli docker-cli-compose git openssl
+RUN apk add --no-cache docker-cli docker-cli-compose git openssl postgresql-client
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/shared/contracts ./shared/contracts
 COPY --from=build /app/services/api/dist ./services/api/dist

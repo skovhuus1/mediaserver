@@ -8,6 +8,7 @@ import {
   FolderOpen,
   Gauge,
   HeartPulse,
+  HardDriveDownload,
   Home,
   Library,
   LogOut,
@@ -44,6 +45,7 @@ const admin = [
   { label: 'Opgaver', icon: Activity, href: '/?admin=tasks' },
   { label: 'Playback-analyse', icon: ScanSearch, href: '/?admin=playback-analysis' },
   { label: 'Diagnostik', icon: HeartPulse, href: '/?admin=diagnostics' },
+  { label: 'Backup', icon: HardDriveDownload, href: '/?admin=backups' },
   { label: t.updates, icon: Sparkles, href: '/update' },
   { label: t.settings, icon: Settings, href: '/?admin=settings' },
 ];

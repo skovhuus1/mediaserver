@@ -1024,6 +1024,17 @@ Physical acceptance still requires an Android phone and Chromecast on the same W
 - Receiveren kalder det nye tokenbeskyttede `DELETE /api/v1/playback/sessions/:id/cast-heartbeat` ved stop/afslutning, så reservationen frigives deterministisk uden at kræve, at senderappen stadig er åben.
 - Receiveren bruger CAF's normale produktions-idle-timeout og ét segments auto-resume. Den gamle globale `disableIdleTimeout` er fjernet.
 - Google anbefaler `cast-media-player` til Custom Web Receivers og kræver registrering af HTTPS-receiver-URL og samme Application ID i senderne: [Custom Web Receiver core features](https://developers.google.com/cast/docs/web_receiver/core_features) og [Web Receiver overview](https://developers.google.com/cast/docs/web_receiver).
+
+## Krypteret database-backup og restore - 2026-08-22
+
+- Adminmenuen `Backup` kan oprette, importere, downloade, slette og gendanne komplette PostgreSQL-backups. Kun serverens bootstrap-account med rollen `admin` har adgang.
+- Arkivet er et komprimeret PostgreSQL custom archive, der krypteres streaming med AES-256-GCM. En separat nøgle afledes med HKDF-SHA256, tilfældig salt og IV fra serverens 32-byte `ENCRYPTION_KEY`; header og payload er autentificeret.
+- Mediefiler, transcode-cache og downloads kopieres ikke. Databaseindholdet omfatter konti, brugere, password-hashes, planer, biblioteksindeks, metadata, historik, indstillinger, jobs og auditlog og er derfor altid krypteret i `.bbbackup`-filen.
+- Import dekrypterer filen til en mode-`0600` midlertidig fil og kræver, at `pg_restore --list` godkender arkivet, før det bliver synligt. Filer fra en anden account, forkert nøgle eller beskadigede tags afvises.
+- Restore kræver samme account og migrationsversion, nul aktive streams/jobs, signeret femminutters challenge og den eksakte tekst `RESTORE <filnavn>`. Før restore oprettes automatisk en ny `pre-restore`-backup.
+- `pg_restore` bruger `--single-transaction --clean --if-exists --exit-on-error`; en PostgreSQL-fejl ruller hele restore tilbage. Efter succes stoppes snapshot-aktive streams/jobs, refresh-tokens tilbagekaldes og Redis-cachen ryddes.
+- Standardretention er 12 filer i Docker-volumen `application_data:/app/data/backups`. Justér med `BB_MEDIA_BACKUP_RETENTION`; uploadgrænsen styres af `BB_MEDIA_BACKUP_MAX_BYTES` og er 20 GiB som standard.
+- Bevar altid den tilhørende `.env`/`ENCRYPTION_KEY` separat. Uden den oprindelige nøgle kan en backup med vilje ikke dekrypteres. Ved import gennem Nginx Proxy Manager skal proxyens `client_max_body_size` og timeouts tillade backupfilens størrelse.
 # Native Android playback, TV controls and signed updates
 
 The Flutter client now shares one server-side playback model across Android mobile, Android TV and Chromecast. Series playback uses `/playback/history/series-next`, profile `autoplayNext`, and real timeline markers for intro, recap and credits actions. A ten-second credits countdown can advance to the next local episode and can be cancelled by the viewer.

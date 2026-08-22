@@ -36,6 +36,14 @@ services:
     volumes:
       - transcode_data:/transcode
 
+  application-data-init:
+    image: alpine:3.22
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /app/data/backups && chown -R 1000:1000 /app/data"]
+    volumes:
+      - application_data:/app/data
+
   api:
     build:
       context: .
@@ -49,6 +57,9 @@ services:
       MEDIA_MOUNT_PATH: /media
       TRANSCODE_PATH: /transcode
       BB_MEDIA_UPDATE_REPO_PATH: /workspace
+      BB_MEDIA_BACKUP_PATH: /app/data/backups
+      BB_MEDIA_BACKUP_RETENTION: ${BB_MEDIA_BACKUP_RETENTION:-12}
+      BB_MEDIA_BACKUP_MAX_BYTES: ${BB_MEDIA_BACKUP_MAX_BYTES:-21474836480}
     volumes:
       - .:/workspace
       - ${MEDIA_PATH:-./media}:/media:ro
@@ -56,6 +67,8 @@ services:
       - transcode_data:/transcode
       - application_data:/app/data
     depends_on:
+      application-data-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
