@@ -49,7 +49,7 @@ Hostmappen monteres read-only som **/media** i API og worker. Biblioteker vælge
 | Adgang | Planversioner, snapshots, overrides, release windows, suspend/revoke og atomiske streamreservationer |
 | Bibliotek | Flere biblioteker, parallel scans, filesystem-watcher, metadata, manuel match, låsning og playback-analyse |
 | Playback | Direct Play, Direct Stream/remux, HLS-transcoding, ABR, 4K/HDR-policy, subtitles, historik og fortsæt-position |
-| Kundeportal | Personlig forside, anbefalinger, søgning, film-/seriesider, sæsoner, præferencer og downloads |
+| Kundeportal | Kompakt personlig forside, anbefalinger, søgning, film-/seriesider, sæsoner, præferencer og downloads |
 | Chromecast | Web Sender, signed cast-media-kontrakt og branded receiver-side; produktion kræver registreret Cast App ID |
 | Admin | Operationscenter, diagnostics, CPU/RAM/playback-telemetri, logs, opdatering, backup og integrationer |
 | Backup | Krypteret PostgreSQL-backup, import, download, retention, pre-restore safety backup og gated restore |

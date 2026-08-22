@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowRight, ChevronLeft, ChevronRight, Film, Library, Play, Tv } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import { PersonalizedRecommendations } from './personalized-recommendations';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -64,7 +64,7 @@ export function WatchPortal() {
       : row === 'new_movies'
         ? <DiscoveryRow key={row} title="Nye film" items={movies} allHref="/watch?type=movie" />
         : <DiscoveryRow key={row} title="Nye serier" items={series} allHref="/watch?type=series" />;
-  return <CustomerShell user={user}><div className={styles.portal}>{catalogError && <p className={styles.catalogNotice}>{catalogError}</p>}{continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : <><section className={styles.libraryBar}><div><Library size={22} /><strong>Dit BoltBytes-bibliotek</strong><span>{movies.length}+ film · {series.length}+ serier klar til afspilning</span></div><nav><Link href="/watch?type=movie"><Film size={14} />Film</Link><Link href="/watch?type=series"><Tv size={14} />Serier</Link></nav></section>{visibleRows.length ? visibleRows.map(homeRow) : <section className={styles.empty}><strong>Din forside er tom</strong><p>Vis mindst én række under Indstillinger → Anbefalinger.</p><Link href="/watch/settings">Tilpas forsiden</Link></section>}</>}</div></CustomerShell>;
+  return <CustomerShell user={user}><div className={styles.portal}>{catalogError && <p className={styles.catalogNotice}>{catalogError}</p>}{continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : <>{visibleRows.length ? visibleRows.map(homeRow) : <section className={styles.empty}><strong>Din forside er tom</strong><p>Vis mindst én række under Indstillinger → Anbefalinger.</p><Link href="/watch/settings">Tilpas forsiden</Link></section>}</>}</div></CustomerShell>;
 }
 
 function DiscoveryRow({ title, items, allHref }: { title: string; items: WatchItem[]; allHref: string }) {
