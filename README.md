@@ -986,6 +986,8 @@ Denne leverance samler kundeportal, titeloplevelse, webplayer, administration og
 - Anbefalinger har nu en rigtig fejl- og retry-state, og relative TMDB-posterstier omsaettes til gyldige billed-URL'er.
 - Serieoplevelsen har en samlet hero, faner, episodekort, ko-status og ensartede loading-, empty- og error-states.
 - Webplayeren har et roligere fuldskaerms-overlay, tydelig tidslinje, kvalitetsmenu, undertekststatus, Cast-status, trickplay og mobile kontrolflader. Den eksisterende seek-, subtitle-, quality- og Cast-logik er bevaret.
+- Webplayeren respekterer nu standard-undertekstvalget (`subtitleMode`) og aktiverer ikke undertekster ved `off`. OFF er synlig for alle afspilningsmetoder. Ved load af undertekster er der fallback til et gyldigt WebVTT-spor, hvis det valgte spor mangler.
+- Kvalitetslåsen er rettet (forkert variabelreference fjernet), og seek-situationer gemmer fremdrift med kort debounce ved `seeked`, så brugeren ikke mister position ved hurtige seek-handlinger.
 - Adminpanelet har et samlet kontrolrumsdesign med tydeligere formularer, tabeller, task center, playback-analyse, statuskort og en responsiv bundnavigation pa sma skaerme.
 - Den dekorative admin-playerbar er fjernet, fordi rigtig afspilning foregar i webplayeren.
 - Flutter mobil/TV bruger samme rav/jade-identitet, forbedrede fokusmarkeringer og konsistente kort, profiler, notifikationer, titel- og Cast-flader.
@@ -1006,3 +1008,11 @@ Denne leverance samler kundeportal, titeloplevelse, webplayer, administration og
 
 - Visuel kontrol pa den rigtige `media.boltbytes.com`-installation kraever adgang til den deployede konto og dens faktiske katalogdata.
 - Fjernbetjeningsfokus, overscan og Cast-dialog skal fortsat smoke-testes pa den konkrete Android TV-enhed og Chromecast-hardware, fordi emulator- og widgettests ikke kan bevise hardwareadfaerd.
+
+## Webplayer-stabilitet - 2026-08-22
+
+- Manuel HLS-kvalitet skifter nu niveau én gang og forbliver låst uden gentagne niveauskrivninger, der kunne skabe en endeløs skiftecyklus før afspilning.
+- Auto-kvalitet overdrager niveauskift til Hls.js og respekterer det eksisterende server-, skærm- og upscale-loft.
+- Underteksttilstanden `off` starter uden undertekster. Automatisk fallback til første tekstspor sker kun ved den eksplicitte tilstand `always`.
+- Et valgt WebVTT-spor beholdes stabilt. En load-fejl vises på det valgte spor i stedet for lydløst at skifte sprog eller spor under afspilning.
+- Fysisk HLS-, subtitle- og Chromecast-acceptance skal fortsat udføres mod `media.boltbytes.com`, fordi browserens netværksforhold og Cast-hardware ikke kan bevises af unit-tests alene.
