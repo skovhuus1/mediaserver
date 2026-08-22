@@ -1,68 +1,76 @@
 # BoltBytes Media mobile og TV
 
-## Undertekst- og playbackadfærd
+Flutter-klienten deler domæne- og netværkskode, men Android leveres som to rigtige product flavors:
 
-- `Automatisk` viser kun forced-undertekster; normale spor vælges med `Altid` eller direkte i playeren.
-- `Fra` er et eksplicit valg og bevares gennem seek, kvalitetsændring og genindlæsning af den aktuelle stream.
-- Serverens `forced`-metadata bruges for sidecar-, embedded- og billedbaserede spor.
-- Valgt fast kvalitet markeres direkte i kvalitetsmenuen.
-- Leverancen er lokalt valideret med `flutter analyze`, 19 Flutter-tests og separate mobile/TV debug-APK-builds mod produktions-API'en.
+- `mobile`: touch-launcher uden Leanback launcher.
+- `tv`: Leanback launcher, TV-banner og krav om `android.software.leanback`.
 
-Den native Android-klient til BoltBytes Media Server. Projektet bygger både et adaptivt mobil/tablet-layout og et fjernbetjeningsvenligt Android TV-layout fra samme kontraktlag.
+Det forhindrer, at samme APK blot omdøbes til både mobil og TV.
 
-Se repository-roden for kørselskommandoer, arkitektur, sikkerhedsmodel og aktuel acceptance-status.
+## Lokal udvikling
 
-## Download seneste Android-versioner
+~~~bash
+flutter pub get
+flutter run --flavor mobile --dart-define=BB_MEDIA_DEVICE_TYPE=mobile
+flutter run --flavor tv --dart-define=BB_MEDIA_DEVICE_TYPE=tv
+~~~
 
-- Mobil APK: `https://github.com/skovhuus1/mediaserver/releases/latest/download/boltbytes-media-mobile-release.apk`
-- Android TV APK: `https://github.com/skovhuus1/mediaserver/releases/latest/download/boltbytes-media-tv-release.apk`
-- Google Play AAB: `https://github.com/skovhuus1/mediaserver/releases/latest/download/boltbytes-media-google-play-release.aab`
+Standardflavoren er `mobile`. Produktionsbuilds får server-URL og Cast App ID via beskyttet releasekonfiguration; slutbrugeren skal ikke indtaste en teknisk URL i det normale loginflow.
 
-Hvis linket returnerer 404, er der ikke publiceret et tag `android-vX.Y.Z` siden
-sidste ændring, eller workflowet er endnu ikke kørt succesfuldt.
+## CI
 
-## Seneste implementering (phase: UX polish)
+`flutter-client.yml` udfører formatkontrol, analyze, tests og bygger begge debug-flavors. Derefter kontrollerer `scripts/android-release-evidence.mjs` de faktisk mergede manifests, versionsdata, signaturer og at APK-hashene er forskellige.
 
-- Forbedret biblioteksshell i `library_screen.dart`
-  - Logo (BrandLockup) er nu klikbar hjem-knap.
-  - Topnavigationen er gjort til scrollbare “pill”-tabs med tydelig aktive state (og vises også på mobil).
-  - Hurtige knapper til Notifikationer og Downloads er rykket frem fra menuen.
-  - TV-sidepanel får direkte handlinger for Notifikationer og Downloads.
-- Login påklædt bedre i `auth_screens.dart`
-  - Serverfeltet normaliserer automatisk indsatte URL’er/hosts.
-  - Bedre validering af host + optional port.
-  - Hjælpetekst der gør det tydeligt, at https-URL kan indsættes.
-- Notifikationer i `notification_inbox_screen.dart`
-  - Tilføjet ryd-knap (lokalt markerer som tom indbakke efter server-side read-all).
-- Brand-komponent i `widgets/brand.dart`
-  - Understøtter valgfri tap-callback og tooltip, så logo kan bruges som hjem-navigation.
+Debug-certifikatet er kun tilladt i PR-CI. Det kan ikke passere produktionsgaten.
 
-### Kørsel / kontrol
+## Produktionsrelease
 
-- Koden er formateret med `dart format`.
-- Hurtigt tjek: `dart analyze` på de ændrede filer.
+`android-release.yml` kan køres fra `main` eller via et `android-v*` tag. Workflowet kræver:
 
-### Næste iteration
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+- `FIREBASE_ANDROID_OPTIONS_BASE64` eller `GOOGLE_SERVICES_JSON_BASE64`
+- repository variable `BB_MEDIA_CAST_RECEIVER_APP_ID`
+- repository variable `BB_MEDIA_DEFAULT_SERVER_URL`
+- `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`, når Play-publicering vælges
 
-- Plex-agtig afspillingsopsætning (realtids-undertekster, hurtig overlay, smartere TV-fokus samt samlet admin/kunde-oplevelse-fortolkning).
+Releasecommitten skal findes i `origin/main`. Workflowet publicerer først efter Flutter-tests og følgende artifact-gates:
 
-## Udført i denne iteration
+- korrekt package ID, versionName og versionCode
+- separat mobil- og TV-manifest
+- ingen `REQUEST_INSTALL_PACKAGES`
+- APK Signature Scheme v2 eller nyere
+- samme ikke-debug certifikat på begge APK'er og AAB
+- SHA-256 checksums og GitHub artifact attestation
 
-- Undertekstflow forbedret:
-  - `SubtitleTrack.isText` genkender nu webvtt/srt/ass/ssa og embedded/tekst-tracks korrekt.
-  - Faldt ved manglende undertekstkilde bliver nu håndteret med en tydelig fejl i UI'en.
-  - Undertekstmenuen har tydeligt opdelte tekst- og indbrændte spor + fallback når ingen undertekster findes.
-- Playback UX:
-  - Forbedret fallback ved at rydde lokal fejl-state når undertekster slås fra.
-  - Login: e-mailfeltet afviser URL-lignende input, så loginfelt ikke tager web-adresser ved en fejl.
+En publiceret release overskrives ikke. Et mislykket workflow kan kun fortsætte på en eksisterende draft.
 
-## Nyt i denne runde
+## Downloads og verifikation
 
-- Titelafspilning i `library_screen.dart` og `title_screen.dart`
-  - Serietryk åbner altid serien som title-side i stedet for at forsøge at afspille et seriesag overordnet.
-  - Continue / anbefalinger bruger fortsat samme `onPlay`-vej med automatisk serie-håndtering.
-- Afspilning i `player_screen.dart`
-  - Undertekster genindlæses efter seek/reconfigure, så de ikke forsvinder ved tidsnavigation.
-  - Søgehandlinger gemmer straks afspilningsposition i session-progress.
-  - Kvalitetsændring er låst mod dobbelte kald, så den ikke “flakker” på gentagende switches.
-  - Slideren har et renere tema for mere moderne, Plex-lignende playback-UI.
+Når version `X.Y.Z` faktisk er publiceret, er de direkte links:
+
+- `https://github.com/skovhuus1/mediaserver/releases/download/android-vX.Y.Z/boltbytes-media-mobile-release.apk`
+- `https://github.com/skovhuus1/mediaserver/releases/download/android-vX.Y.Z/boltbytes-media-tv-release.apk`
+
+Hent også `SHA256SUMS.txt` og `RELEASE_MANIFEST.json` fra samme release:
+
+~~~bash
+sha256sum -c SHA256SUMS.txt
+gh attestation verify boltbytes-media-mobile-release.apk -R skovhuus1/mediaserver
+~~~
+
+Et link er først gyldigt, når releasen findes. README må ikke bruges som bevis for et endnu ikke publiceret artifact.
+
+## Fysisk certificering
+
+Automatisk CI beviser build, manifest, signatur og provenance. Den beviser ikke fysisk funktion. Før en bred rollout skal `scripts/certify-android.mjs` og den dokumenterede matrix dække:
+
+- login og playback på en fysisk mobil
+- D-pad, fokus og back-navigation på fysisk Android TV
+- seek, subtitles, Direct Play og transcode
+- Cast discovery, handoff og disconnect
+- install, upgrade og rollback
+
+Se [Flutter flavors](https://docs.flutter.dev/deployment/flavors), [Flutter Android release](https://docs.flutter.dev/deployment/android), [Android app signing](https://developer.android.com/studio/publish/app-signing) og [GitHub artifact attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).

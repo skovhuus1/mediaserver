@@ -1,55 +1,86 @@
-name: flutter-client
+name: Flutter client
 
 on:
   push:
+    branches: [main, "agent/**"]
+    paths:
+      - "clients/mobile-tv/**"
+      - "scripts/android-release-evidence.mjs"
+      - "scripts/android-release-evidence.test.mjs"
+      - ".github/workflows/flutter-client.yml"
+      - ".github/workflows/android-release.yml"
   pull_request:
+    paths:
+      - "clients/mobile-tv/**"
+      - "scripts/android-release-evidence.mjs"
+      - "scripts/android-release-evidence.test.mjs"
+      - ".github/workflows/flutter-client.yml"
+      - ".github/workflows/android-release.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: flutter-client-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  validate:
+  flutter-client:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      BB_MEDIA_CAST_RECEIVER_APP_ID: ${{ vars.BB_MEDIA_CAST_RECEIVER_APP_ID }}
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: clients/mobile-tv
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.44.6
           channel: stable
           cache: true
       - name: Resolve dependencies
         run: flutter pub get
-      - name: Verify formatting
+      - name: Check formatting
         run: dart format --output=none --set-exit-if-changed lib test
       - name: Analyze
         run: flutter analyze
       - name: Test
         run: flutter test
-      - name: Build mobile debug APK
+      - name: Build mobile flavor
+        run: >-
+          flutter build apk --debug --flavor mobile
+          --build-name=0.1.0 --build-number=${{ github.run_number }}
+          --dart-define=BB_MEDIA_DEVICE_TYPE=mobile
+      - name: Build TV flavor
+        run: >-
+          flutter build apk --debug --flavor tv
+          --build-name=0.1.0 --build-number=${{ github.run_number }}
+          --dart-define=BB_MEDIA_DEVICE_TYPE=tv
+      - name: Prepare CI artifacts
         run: |
-          flutter build apk --debug \
-            --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 \
-            --dart-define=BB_MEDIA_APP_VERSION=0.1.0 \
-            --dart-define=BB_MEDIA_DEVICE_TYPE=mobile
-          cp build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/boltbytes-media-mobile-debug.apk
-      - name: Build Android TV debug APK
-        run: |
-          flutter build apk --debug \
-            --dart-define=BB_MEDIA_API_URL=https://media.boltbytes.com/api/v1 \
-            --dart-define=BB_MEDIA_APP_VERSION=0.1.0 \
-            --dart-define=BB_MEDIA_DEVICE_TYPE=tv
-          cp build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/boltbytes-media-tv-debug.apk
-      - uses: actions/upload-artifact@v4
+          mkdir -p build/ci-artifacts build/release-gate
+          cp build/app/outputs/flutter-apk/app-mobile-debug.apk build/ci-artifacts/boltbytes-media-mobile-debug.apk
+          cp build/app/outputs/flutter-apk/app-tv-debug.apk build/ci-artifacts/boltbytes-media-tv-debug.apk
+      - name: Certify merged Android manifests and artifacts
+        run: >-
+          node ../../scripts/android-release-evidence.mjs
+          --mobile build/ci-artifacts/boltbytes-media-mobile-debug.apk
+          --tv build/ci-artifacts/boltbytes-media-tv-debug.apk
+          --version 0.1.0
+          --build-number ${{ github.run_number }}
+          --commit ${{ github.sha }}
+          --repository ${{ github.repository }}
+          --output-dir build/release-gate
+          --allow-debug-signing true
+      - name: Upload certified debug artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: boltbytes-media-android-debug
+          name: boltbytes-android-debug-${{ github.run_number }}
           path: |
-            clients/mobile-tv/build/app/outputs/flutter-apk/boltbytes-media-mobile-debug.apk
-            clients/mobile-tv/build/app/outputs/flutter-apk/boltbytes-media-tv-debug.apk
+            clients/mobile-tv/build/ci-artifacts/*.apk
+            clients/mobile-tv/build/release-gate/*
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14

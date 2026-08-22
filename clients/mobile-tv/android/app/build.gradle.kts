@@ -43,15 +43,26 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.boltbytes.boltbytes_media"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         resValue("string", "cast_receiver_app_id", castReceiverAppId)
+    }
+
+    flavorDimensions += "device"
+    productFlavors {
+        create("mobile") {
+            dimension = "device"
+            resValue("string", "app_name", "BoltBytes Media")
+            resValue("string", "device_variant", "mobile")
+        }
+        create("tv") {
+            dimension = "device"
+            resValue("string", "app_name", "BoltBytes Media TV")
+            resValue("string", "device_variant", "tv")
+        }
     }
 
     val productionSigning = if (hasReleaseSigning) {
