@@ -67,6 +67,36 @@ export function cleanLocalTitle(value: string) {
     .trim();
 }
 
+export function normalizeSearchText(value: string) {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/æ/gi, 'ae')
+    .replace(/ø/gi, 'o')
+    .replace(/å/gi, 'a')
+    .toLocaleLowerCase('da')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+export function scoreSearchMatch(query: string, values: Array<string | null | undefined>) {
+  const normalizedQuery = normalizeSearchText(query);
+  if (normalizedQuery.length < 2) return 0;
+  const tokens = normalizedQuery.split(' ').filter(Boolean);
+  return values.reduce((best, value) => {
+    const candidate = normalizeSearchText(value ?? '');
+    if (!candidate || !tokens.every((token) => candidate.includes(token))) return best;
+    const score = candidate === normalizedQuery
+      ? 140
+      : candidate.startsWith(normalizedQuery)
+        ? 110
+        : candidate.split(' ').some((word) => word.startsWith(normalizedQuery))
+          ? 90
+          : 60;
+    return Math.max(best, score - Math.min(20, Math.abs(candidate.length - normalizedQuery.length)));
+  }, 0);
+}
+
 export function readLocalGenres(value: unknown) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.flatMap((entry) => {

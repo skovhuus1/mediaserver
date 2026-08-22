@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSeriesSeasons,
   cleanLocalTitle,
+  normalizeSearchText,
   readLocalCredits,
   readLocalGenres,
   readSimilarProviderIds,
   scoreRelatedTitle,
+  scoreSearchMatch,
   slugifyDiscovery,
 } from './experience-utils';
 
@@ -43,5 +45,12 @@ describe('experience utilities', () => {
     const castAndGenre = scoreRelatedTitle(source, { providerId: '3', category: 'movie', genres: ['Action'], people: ['actor-1'], rating: 9 }, new Set());
     expect(similar.score).toBeGreaterThan(castAndGenre.score);
     expect(similar.reason).toBe('Lignende titel');
+  });
+
+  it('searches Danish titles accent-insensitively and ranks exact matches first', () => {
+    expect(normalizeSearchText('Badehotellet på Øen')).toBe('badehotellet pa oen');
+    expect(scoreSearchMatch('Anna Pihl', ['Anna Pihl'])).toBeGreaterThan(scoreSearchMatch('Anna', ['Anna Pihl']));
+    expect(scoreSearchMatch('forbrydelsen', ['Forbrydelsen', 'Drama'])).toBeGreaterThan(0);
+    expect(scoreSearchMatch('matrix', ['Matador', 'Drama'])).toBe(0);
   });
 });

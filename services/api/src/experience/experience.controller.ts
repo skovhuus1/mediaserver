@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser } from '../common/auth';
@@ -8,6 +8,11 @@ import { ExperienceService } from './experience.service';
 @Controller('experience')
 export class ExperienceController {
   constructor(private readonly experience: ExperienceService) {}
+
+  @Get('search')
+  search(@CurrentUser() actor: AuthenticatedUser, @Query('q') query = '') {
+    return this.experience.search(actor, query);
+  }
 
   @Get('titles/:id')
   title(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {

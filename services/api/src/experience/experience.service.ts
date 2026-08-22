@@ -9,6 +9,7 @@ import {
   readLocalGenres,
   readSimilarProviderIds,
   scoreRelatedTitle,
+  scoreSearchMatch,
   slugifyDiscovery,
 } from './experience-utils';
 
@@ -52,6 +53,44 @@ type MediaRecord = Prisma.MediaItemGetPayload<{ select: typeof mediaSelect }>;
 @Injectable()
 export class ExperienceService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async search(actor: AuthenticatedUser, rawQuery: string) {
+    const query = String(rawQuery ?? '').trim().slice(0, 80);
+    if (query.length < 2) return { query, total: 0, groups: { titles: [], people: [], genres: [] } };
+    const media = (await this.localCatalog(actor.accountId)).filter(playable);
+    const titles = collapseTitles(media).flatMap((item) => {
+      const score = scoreSearchMatch(query, [item.title, item.overview, ...item.genres]);
+      return score > 0 ? [{ ...item, score, matchReason: titleMatchReason(query, item) }] : [];
+    }).sort((left, right) => right.score - left.score || (right.rating ?? 0) - (left.rating ?? 0)).slice(0, 12);
+
+    const peopleByKey = new Map<string, { person: ReturnType<typeof readLocalCredits>[number]; titleKeys: Set<string> }>();
+    const genresByKey = new Map<string, { name: string; titleKeys: Set<string>; imagePath: string | null }>();
+    media.forEach((item) => {
+      const titleKey = mediaGroupKey(item);
+      readLocalCredits(item.credits).forEach((person) => {
+        const current = peopleByKey.get(person.key) ?? { person, titleKeys: new Set<string>() };
+        current.titleKeys.add(titleKey);
+        if (!current.person.profilePath && person.profilePath) current.person = person;
+        peopleByKey.set(person.key, current);
+      });
+      readLocalGenres(item.genres).forEach((genre) => {
+        const key = slugifyDiscovery(genre);
+        const current = genresByKey.get(key) ?? { name: genre, titleKeys: new Set<string>(), imagePath: item.backdropPath ?? item.posterPath };
+        current.titleKeys.add(titleKey);
+        if (!current.imagePath) current.imagePath = item.backdropPath ?? item.posterPath;
+        genresByKey.set(key, current);
+      });
+    });
+    const people = [...peopleByKey.values()].flatMap(({ person, titleKeys }) => {
+      const score = scoreSearchMatch(query, [person.name, person.role, person.department]);
+      return score > 0 ? [{ key: person.key, name: person.name, role: person.role, department: person.department, profilePath: person.profilePath, titleCount: titleKeys.size, score }] : [];
+    }).sort((left, right) => right.score - left.score || right.titleCount - left.titleCount || left.name.localeCompare(right.name, 'da')).slice(0, 8);
+    const genres = [...genresByKey.entries()].flatMap(([key, genre]) => {
+      const score = scoreSearchMatch(query, [genre.name]);
+      return score > 0 ? [{ key: `genre-${key}`, name: genre.name, titleCount: genre.titleKeys.size, imagePath: genre.imagePath, score }] : [];
+    }).sort((left, right) => right.score - left.score || right.titleCount - left.titleCount || left.name.localeCompare(right.name, 'da')).slice(0, 8);
+    return { query, total: titles.length + people.length + genres.length, groups: { titles, people, genres } };
+  }
 
   async title(actor: AuthenticatedUser, mediaId: string) {
     const anchor = await this.prisma.mediaItem.findFirst({
@@ -276,6 +315,19 @@ function collapseTitles(media: MediaRecord[]) {
       episodeCount: seriesName ? sorted.length : null,
     };
   }).sort((left, right) => (right.rating ?? 0) - (left.rating ?? 0) || (right.releaseYear ?? 0) - (left.releaseYear ?? 0) || left.title.localeCompare(right.title, 'da'));
+}
+
+function mediaGroupKey(item: MediaRecord) {
+  const seriesName = item.seriesDisplayTitle ?? item.seriesTitle;
+  return item.type === 'episode' && seriesName
+    ? `series:${item.seriesMetadataProviderId ?? slugifyDiscovery(seriesName)}`
+    : `title:${item.id}`;
+}
+
+function titleMatchReason(query: string, item: ReturnType<typeof collapseTitles>[number]) {
+  if (scoreSearchMatch(query, [item.title]) > 0) return item.type === 'series' ? 'Serie' : 'Titel';
+  const genre = item.genres.find((value) => scoreSearchMatch(query, [value]) > 0);
+  return genre ? `Genre · ${genre}` : 'Beskrivelse';
 }
 
 function personIdentity(key: string) {
