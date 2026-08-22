@@ -30,6 +30,7 @@
 - Sonarr/Radarr automation
 - branch-aware updater med progress
 - CI for backend, web, Docker og Flutter
+- Android mobile/TV product flavors med automatiseret manifest-, signatur-, checksum- og provenancegate
 
 ## Eksterne gates
 
@@ -37,7 +38,7 @@ Disse kræver credentials, hardware eller konto uden for repositoryet:
 
 - Google Cast receiverregistrering
 - fysisk Chromecast-test
-- Android signing og Play Console
+- Android signing-credentials og Play Console-konto
 - fysisk Android TV D-pad-test
 - FCM service account
 - TMDB/TVDB credentials
@@ -48,7 +49,7 @@ Disse kræver credentials, hardware eller konto uden for repositoryet:
 ## Næste produktleverancer
 
 1. Betalingsprovider og idempotent webhookledger
-2. App-store release, signing og staged rollout
+2. App-store listing, Play Console-validering og staged rollout
 3. Fysisk device-certificering for 4K/HDR, subtitles, seek og Cast
 4. Hardwaretranscoding certification pr. GPU/runtime
 5. SMTP/invitationsflow og password recovery

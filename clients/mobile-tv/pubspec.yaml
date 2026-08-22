@@ -2,6 +2,7 @@ name: boltbytes_media
 description: BoltBytes Media native client for Android phones, tablets and TV.
 publish_to: 'none'
 version: 0.1.0+1
+default-flavor: mobile
 
 environment:
   sdk: ^3.12.2

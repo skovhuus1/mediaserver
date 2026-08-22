@@ -54,7 +54,7 @@ Hostmappen monteres read-only som **/media** i API og worker. Biblioteker vælge
 | Admin | Operationscenter, diagnostics, CPU/RAM/playback-telemetri, logs, opdatering, backup og integrationer |
 | Backup | Krypteret PostgreSQL-backup, import, download, retention, pre-restore safety backup og gated restore |
 | Automation | Sonarr/Radarr health, lookup, add, root/profile defaults og autentificerede import-webhooks |
-| Klienter | Flutter mobile/TV-kode, Android-buildflow, TV-navigation, offline-downloads og cast-handoff |
+| Klienter | Flutter mobile/TV-flavors, manifest- og signaturcertificeret Android-releaseflow, TV-navigation, offline-downloads og cast-handoff |
 
 ## Arkitektur
 
@@ -93,6 +93,7 @@ API'et ejer identitet, entitlements, playbackvalg, streamlimits og signed URLs. 
 npm run lint
 npm run typecheck
 npm run test
+npm run test:release
 npm run test:integration
 npm run build
 npm run ci
@@ -137,5 +138,7 @@ Se [domæne og Nginx Proxy Manager](docs/domain-nginx-proxy-manager.md).
 ## Bidrag og release-flow
 
 Arbejdet laves på **agent/...** branches. Hver færdig leverance skal have opdateret dokumentation, lokale gates og grønne push- og PR-checks. Først derefter squash-merges den til **main**.
+
+Android-releases bygges som separate `mobile`- og `tv`-flavors. Produktionsworkflowet udgiver APK/AAB sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk mobil-, TV- og Cast-certificering forbliver en særskilt releasegate.
 
 Licens er ikke fastlagt i repositoryet. Tilføj en licensfil, før projektet distribueres uden for den nuværende private anvendelse.

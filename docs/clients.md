@@ -77,9 +77,13 @@ Flow:
 
 ## Android artifacts
 
-APK/AAB bygges i Flutter-workflowet. Et downloadlink er kun gyldigt, når artifact faktisk er publiceret af GitHub Actions eller releaseflowet.
+Android bruger separate `mobile`- og `tv`-product flavors. Mobilmanifestet har almindelig launcher, mens TV-manifestet har Leanback launcher og kræver `android.software.leanback`.
 
-Se workflowrun og artifacts i repositoryets Actions. README må ikke hævde et direkte APK-link, som ikke findes.
+PR-workflowet bygger og inspicerer begge debug-APK'er. Produktionsworkflowet kræver et commit fra `main`, produktionssignering og publicerer mobil-APK, TV-APK, mobil-AAB, checksums, release-evidence, et maskinlæsbart manifest og GitHub artifact attestations.
+
+Release-manifestet binder package ID, version, buildnummer, commit, certifikatfingeraftryk og SHA-256 til filerne. Mobile og TV skal have forskellige hashes og samme releasecertifikat. En publiceret GitHub release er immutable i workflowet.
+
+Et downloadlink er kun gyldigt, når artifact faktisk er publiceret. README må ikke hævde et direkte APK-link, som ikke findes.
 
 ## Chromecast
 
@@ -90,8 +94,9 @@ Mobil og web kan starte Cast, men receiverregistrering hos Google og fysisk devi
 Før offentlig mobil/TV-release:
 
 - Flutter analyze og tests grønne
-- signed APK/AAB
-- manifest og version verificeret
+- separate mobile/TV-flavors bygget
+- signed APK/AAB uden debug-certifikat
+- merged manifest, version, checksum og provenance verificeret
 - login på fysisk mobil
 - D-pad på fysisk Android TV
 - playback, seek, subtitles og Cast fysisk testet
