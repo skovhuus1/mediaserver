@@ -15,6 +15,13 @@ Eksisterende playback-assets opgraderes ved at vælge **Genopbyg analyse** på e
 
 Valideret 22. august 2026 med grøn `npm run ci` (lint, typecheck, 46 API-testfiler/153 tests, 8 worker-testfiler/15 tests og alle builds) samt separat grøn fingerprint-kontrakttest med 7 tests. Den resterende driftsgate er real-media-verifikation i servercontaineren med mindst tre episoder fra samme serie.
 
+## Leverance 2026-08-22: Synlig og testbar bibliotek-watcher
+
+- Workerens filesystem-watcher publicerer nu account-scopet heartbeat, native/polling-mode, overvågede biblioteker og mapper, seneste filhændelse, automatisk scan og seneste fejl i den eksisterende runtime-ledger.
+- Adminpanelets `Opgaver` viser watcherens faktiske driftstilstand og mappeoversigt. `Test watcher` kontrollerer både et friskt worker-heartbeat og læseadgang til samtlige aktiverede bibliotekstier uden at oprette filer i mediemapperne.
+- Nye kontrakter: `GET /api/v1/system/library-watcher/status` for admin/operator og auditlogget `POST /api/v1/system/library-watcher/test` for administratorer.
+- Watcheren falder fortsat sikkert tilbage på de planlagte scanninger ved event- eller mountfejl; status bliver `degraded` eller `offline` med den konkrete sidste fejl i stedet for at skjule driftsproblemet.
+
 ## Leverance 2026-08-22: Plex-lignende kundeportal og samlet opgavecenter
 
 - Kundeportalen bruger nu den personlige anbefaling som reel filmisk hero med korrekt TMDB/TVDB-billedsti, skarpere navigation, kompakte bibliotekstal og vandrette mediehylder med egne pile uden native scrollbars.
