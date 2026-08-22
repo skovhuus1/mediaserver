@@ -1016,3 +1016,10 @@ Denne leverance samler kundeportal, titeloplevelse, webplayer, administration og
 - Underteksttilstanden `off` starter uden undertekster. Automatisk fallback til første tekstspor sker kun ved den eksplicitte tilstand `always`.
 - Et valgt WebVTT-spor beholdes stabilt. En load-fejl vises på det valgte spor i stedet for lydløst at skifte sprog eller spor under afspilning.
 - Fysisk HLS-, subtitle- og Chromecast-acceptance skal fortsat udføres mod `media.boltbytes.com`, fordi browserens netværksforhold og Cast-hardware ikke kan bevises af unit-tests alene.
+
+## Resume, seek og kundenavigation - 2026-08-22
+
+- Et nyt medie eller næste serieepisode nulstiller nu altid den forrige streams tidslinje, pending seek og viste position, også når den forrige session allerede var frigivet efter en fejl.
+- HLS-seek bruger latest-request-wins. Hvis brugeren søger igen, mens Direct Stream eller transcoding genstartes, annulleres den forældede statuspolling, og kun den seneste absolutte position klargøres og aktiveres.
+- En HLS-genstart genbruger fortsat samme logical playback-session og streamreservation; resume-positionen genanvendes ikke som et lokalt seek efter kildeskift.
+- Film-, serie-, søge- og filterklik beskytter nu kataloget mod sene svar fra den forrige forespørgsel. Navigationen viser desuden korrekt aktiv side via `aria-current`.

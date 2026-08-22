@@ -95,36 +95,48 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
   const adminMode = basePath !== '/watch';
 
   useEffect(() => {
+    let active = true;
+    const currentSearchParams = new URLSearchParams(queryKey);
     const params = new URLSearchParams();
     for (const key of ['q', 'type', 'category', 'libraryId', 'page', 'sort']) {
-      const value = searchParams.get(key);
+      const value = currentSearchParams.get(key);
       if (value) params.set(key, value);
     }
     setLoading(true);
     setError(null);
     void api<CatalogResponse>(`/media/catalog?${params.toString()}`)
-      .then(setCatalog)
-      .catch((failure) => setError(errorMessage(failure)))
-      .finally(() => setLoading(false));
-  }, [queryKey, searchParams]);
+      .then((result) => { if (active) setCatalog(result); })
+      .catch((failure) => { if (active) setError(errorMessage(failure)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [queryKey]);
 
   useEffect(() => {
-    const mediaId = searchParams.get('media') ?? searchParams.get('info') ?? searchParams.get('play');
-    if (!mediaId) return;
+    let active = true;
+    const currentSearchParams = new URLSearchParams(queryKey);
+    const mediaId = currentSearchParams.get('media') ?? currentSearchParams.get('info') ?? currentSearchParams.get('play');
+    if (!mediaId) {
+      setDetail(null);
+      setDetailLoading(false);
+      return () => { active = false; };
+    }
     setDetailLoading(true);
     void api<CatalogItem>(`/media/${encodeURIComponent(mediaId)}`)
       .then(async (item) => {
-        if (searchParams.get('play') && item.type !== 'series') {
+        if (!active) return;
+        if (currentSearchParams.get('play') && item.type !== 'series') {
           requestPlayback(item);
           return;
         }
-        setDetail(item.type === 'episode' || item.type === 'series'
+        const nextDetail = item.type === 'episode' || item.type === 'series'
           ? await fetchSeriesDetail(item)
-          : { kind: 'media', item });
+          : { kind: 'media', item } satisfies DetailState;
+        if (active) setDetail(nextDetail);
       })
-      .catch((failure) => setError(errorMessage(failure)))
-      .finally(() => setDetailLoading(false));
-  }, [queryKey, searchParams]);
+      .catch((failure) => { if (active) setError(errorMessage(failure)); })
+      .finally(() => { if (active) setDetailLoading(false); });
+    return () => { active = false; };
+  }, [queryKey]);
 
   const updateFilter = (key: string, value: string | null) => {
     const params = new URLSearchParams(searchParams.toString());
