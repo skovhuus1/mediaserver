@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import { CatalogService } from './catalog.service';
-import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MediaDetailsQueryDto, MetadataMatchQueryDto, QueueMetadataDto, QueuePlaybackAssetsBatchDto, SetMetadataLockDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
+import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, MediaDetailsQueryDto, MetadataEpisodeOrdersQueryDto, MetadataMatchQueryDto, QueueMetadataDto, QueuePlaybackAssetsBatchDto, SetMetadataLockDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
 
 @ApiTags('libraries')
 @Controller()
@@ -136,6 +136,16 @@ export class CatalogController {
     @Query() query: MetadataMatchQueryDto,
   ) {
     return this.catalog.searchMetadataMatches(actor, id, query.q);
+  }
+
+  @Get('media/:id/metadata/episode-orders')
+  @Roles('admin')
+  metadataEpisodeOrders(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Query() query: MetadataEpisodeOrdersQueryDto,
+  ) {
+    return this.catalog.listMetadataEpisodeOrders(actor, id, query.providerId);
   }
 
   @Post('media/:id/metadata/match')

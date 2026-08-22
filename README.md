@@ -601,9 +601,15 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 - API’et returnerer kun normaliserede metadata- og HDR-felter. Rå ffprobe-data fjernes fra katalog-, detalje-, historik- og næste-episode-responser.
 - TVDB-kontrakten er dokumenteret i den [officielle v4 Swagger](https://thetvdb.github.io/v4-api/) og TVDB anbefaler lokal caching frem for klientkald direkte til udbyderen.
 
+## TVDB episodeorden (2026-08-22)
+
+- Adminens manuelle seriematch henter de episodeordener, som den valgte TVDB-serie faktisk annoncerer, og tilbyder altid seriens providerdefinerede standardorden.
+- Valget valideres server-side, gemmes på den eksisterende account- og library-scopede metadata-binding og genbruges ved alle senere metadataopdateringer.
+- Workeren adskiller cache pr. episodeorden, henter episoder fra TVDB's `series/{id}/episodes/{season-type}/{lang}`-endpoint og prioriterer sæsondata fra den valgte orden.
+- Eksisterende bindinger migreres additivt til `default`; lokale filnavne og scannerens `SxxExx`-numre ændres ikke.
+
 ### Kendte rester
 
-- Alternate/DVD/streaming episode orders kan endnu ikke vælges manuelt; standardordenen bruges.
 - Manuel sæson- eller episode-specifik override ud over seriens valgte provider mangler fortsat; den nuværende binding er bevidst på film- eller serieniveau.
 - TVDB-liveflow kræver fortsat en gyldig nøgle på installationsserveren og verificeres først dér.
 ## Separat kundeportal og adminområde (2026-07-29)
