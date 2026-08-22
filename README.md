@@ -581,10 +581,10 @@ Alt arbejde sker på en opgavebranch. Branch-commits pushes til GitHub efter en 
 - Implementeringen følger [TVDB v4 API-specifikationen](https://thetvdb.github.io/v4-api/) for login, series search og extended series records.
 - Nøgler returneres aldrig fra status-endpoints eller til browseren efter lagring. Alternativ miljøkonfiguration er `TMDB_API_TOKEN`, `TVDB_API_KEY`, `TVDB_SUBSCRIBER_PIN` og `TMDB_LANGUAGE`.
 
-### Mangler efter denne leverance
+### Efterfølgende implementeret
 
-- HDR10/Dolby Vision tone mapping ved transcoding er ikke implementeret; HDR er i denne fase passthrough via Direct Play/Direct Stream.
-- TVDB episode-level metadata og sæson-/episode-artwork er ikke implementeret endnu; den nuværende worker beriger serieepisoder med det matchede series-record.
+- HDR-kilder tone-mappes nu i software til BT.709 SDR med FFmpeg `zscale` + `tonemap`, når klienten eller enhedsindstillingen kræver SDR. Outputrenditions mærkes eksplicit som BT.709 limited-range, mens kompatible klienter fortsat kan få 10-bit HDR. Software tone mapping er CPU-tungt; Dolby Vision afhænger fortsat af, at FFmpeg kan afkode en kompatibel base layer fra kildefilen.
+- TVDB episode-level metadata og sæson-/episode-artwork er implementeret i det senere serieflow, som beskrevet i afsnittet nedenfor.
 - Android/TV-klienten viser TheTVDB-attribution på seriesider og åbner TheTVDB.com eksternt. Eventuelle kommende klienter skal bevare samme attribution.
 ## 4K- og HDR-badges på posters (2026-07-29)
 

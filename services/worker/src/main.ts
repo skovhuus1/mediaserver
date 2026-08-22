@@ -17,6 +17,7 @@ import { generatePlaybackAssets } from './playback-assets.js';
 import { prepareOfflineDownload } from './offline-downloads.js';
 import { deliverPushNotification, queueOfflineReadyNotification } from './push-notifications.js';
 import { updateJobProgress, withJobProgress } from './job-progress.js';
+import { buildSdrColorMetadataArguments, resolveVideoColorPipeline } from './video-color.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -582,9 +583,10 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
   const subtitleInput = burnInStreamIndex === null
     ? '[0:v:0]setpts=PTS-STARTPTS[subtitlePrepared]'
     : `[0:v:0]setpts=PTS-STARTPTS[videoBase];[0:${burnInStreamIndex}]setpts=PTS-STARTPTS[subtitleBase];[videoBase][subtitleBase]overlay=eof_action=pass:shortest=0[subtitlePrepared]`;
-  const inputLabel = sourceVideo.hdr && !preserveHdrRequested
-    ? '[subtitlePrepared]zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p[prepared]'
-    : '[subtitlePrepared]null[prepared]';
+  const videoColor = resolveVideoColorPipeline({
+    sourceIsHdr: sourceVideo.hdr !== null,
+    preserveHdr: preserveHdrRequested,
+  });
   const splitOutputs = renditions.map((_, index) => `[split${index}]`).join('');
   const scaleOutputs = renditions.map((rendition, index) =>
     `[split${index}]scale=w=${rendition.width}:h=${rendition.height}:force_original_aspect_ratio=decrease,pad=${rendition.width}:${rendition.height}:(ow-iw)/2:(oh-ih)/2[v${index}]`,
@@ -592,7 +594,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
   const audioOutputs = renditions.map((_, index) => `[a${index}]`).join('');
   const filterComplex = [
     subtitleInput,
-    inputLabel,
+    videoColor.filter,
     `[prepared]split=${renditions.length}${splitOutputs}`,
     ...scaleOutputs,
     ...(file.audioCodec
@@ -623,7 +625,8 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       `-b:v:${index}`, `${bitrateKbps}k`,
       `-maxrate:v:${index}`, `${bitrateKbps}k`,
       `-bufsize:v:${index}`, `${bitrateKbps * 2}k`,
-      `-pix_fmt:v:${index}`, preserveHdrRequested ? 'p010le' : 'yuv420p',
+      `-pix_fmt:v:${index}`, videoColor.outputPixelFormat,
+      ...buildSdrColorMetadataArguments(index, videoColor.toneMappedToSdr),
       `-force_key_frames:v:${index}`, 'expr:gte(t,n_forced*4)',
       ...(file.audioCodec ? [
         `-c:a:${index}`, 'aac',
