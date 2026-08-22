@@ -18,6 +18,7 @@ import {
   ScanSearch,
   ShieldCheck,
   Sparkles,
+  Radio,
   UserRound,
   Users,
 } from 'lucide-react';
@@ -48,6 +49,7 @@ const admin = [
   { label: 'Diagnostik', icon: HeartPulse, href: '/?admin=diagnostics' },
   { label: 'Backup', icon: HardDriveDownload, href: '/?admin=backups' },
   { label: 'Sonarr / Radarr', icon: SatelliteDish, href: '/?admin=servarr' },
+  { label: 'Live TV', icon: Radio, href: '/live-tv/admin' },
   { label: t.updates, icon: Sparkles, href: '/update' },
   { label: t.settings, icon: Settings, href: '/?admin=settings' },
 ];

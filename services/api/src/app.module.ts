@@ -19,6 +19,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { SetupModule } from './setup/setup.module';
 import { SystemModule } from './system/system.module';
 import { ClientServicesModule } from './client-services/client-services.module';
+import { LiveTvModule } from './live-tv/live-tv.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { ClientServicesModule } from './client-services/client-services.module';
     PreferencesModule,
     SystemModule,
     ClientServicesModule,
+    LiveTvModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

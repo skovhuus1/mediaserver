@@ -7,7 +7,10 @@ export type WorkerJobType =
   | 'playback.expire-leases'
   | 'playback.transcode'
   | 'offline.prepare'
-  | 'notification.push';
+  | 'notification.push'
+  | 'live-tv.import'
+  | 'live-tv.epg'
+  | 'live-tv.stream';
 
 export type WorkerConcurrencyLimits = {
   scans: number;
@@ -50,9 +53,9 @@ export function claimableWorkerJobTypes(input: {
   ).length;
 
   if (input.workerMode === 'transcode') {
-    const activeTranscodes = activeCount('playback.transcode') + activeCount('offline.prepare');
+    const activeTranscodes = activeCount('playback.transcode') + activeCount('offline.prepare') + activeCount('live-tv.stream');
     return activeTranscodes < input.limits.transcodes
-      ? ['playback.transcode', 'offline.prepare']
+      ? ['playback.transcode', 'offline.prepare', 'live-tv.stream']
       : [];
   }
 
@@ -66,5 +69,7 @@ export function claimableWorkerJobTypes(input: {
   if (activeCount('notification.push') < input.limits.notifications) {
     claimable.push('notification.push');
   }
+  if (activeCount('live-tv.import') < 1) claimable.push('live-tv.import');
+  if (activeCount('live-tv.epg') < 1) claimable.push('live-tv.epg');
   return claimable;
 }

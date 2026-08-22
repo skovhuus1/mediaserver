@@ -4,6 +4,7 @@ Dette indeks er den aktive dokumentationsindgang. Den tidligere append-baserede 
 
 | Dokument | Brug det til |
 | --- | --- |
+| [Live TV](live-tv.md) | M3U/XMLTV, kanalstyring, forbindelsespulje, afspilning, Chromecast og rollback |
 | [architecture.md](architecture.md) | Komponenter, dataejerskab, sikkerhedsgrænser og jobmodel |
 | [deployment.md](deployment.md) | Docker, direkte Linux, volumes, domæne og opdatering |
 | [domain-nginx-proxy-manager.md](domain-nginx-proxy-manager.md) | DNS, TLS, Range, WebSockets og NPM |
