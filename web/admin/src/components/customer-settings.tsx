@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, Eye, EyeOff } from 'lucide-react';
 import { api, type ApiFailure } from '../lib/api';
 import styles from './customer-settings.module.css';
 
@@ -19,7 +20,17 @@ type ProfileState = {
     subtitleMode: 'auto' | 'always' | 'forced' | 'off';
     autoplayNext: boolean;
     recommendationsEnabled: boolean;
+    homeRowOrder: HomeRowId[];
+    hiddenHomeRows: HomeRowId[];
   };
+};
+
+type HomeRowId = 'recommendations' | 'continue' | 'new_movies' | 'new_series';
+const HOME_ROW_LABELS: Record<HomeRowId, { title: string; description: string }> = {
+  recommendations: { title: 'Anbefalinger', description: 'Personlig hero og forslag fra din historik.' },
+  continue: { title: 'Fortsæt med at se', description: 'Film og episoder med gemt position.' },
+  new_movies: { title: 'Nye film', description: 'Senest tilføjede film på serveren.' },
+  new_series: { title: 'Nye serier', description: 'Senest tilføjede samleserier.' },
 };
 
 type DeviceState = {
@@ -94,6 +105,20 @@ export function CustomerSettings() {
     });
   const patchDevice = (patch: Partial<DeviceState['preferences']>) =>
     setDevice({ ...device, preferences: { ...device.preferences, ...patch } });
+  const moveHomeRow = (row: HomeRowId, direction: -1 | 1) => {
+    const order = [...profile.preferences.homeRowOrder];
+    const from = order.indexOf(row);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= order.length) return;
+    [order[from], order[to]] = [order[to]!, order[from]!];
+    patchProfilePrefs({ homeRowOrder: order });
+  };
+  const toggleHomeRow = (row: HomeRowId) => {
+    const hidden = profile.preferences.hiddenHomeRows.includes(row)
+      ? profile.preferences.hiddenHomeRows.filter((entry) => entry !== row)
+      : [...profile.preferences.hiddenHomeRows, row];
+    patchProfilePrefs({ hiddenHomeRows: hidden });
+  };
 
   async function saveProfile() {
     setBusy('profile');
@@ -192,6 +217,10 @@ export function CustomerSettings() {
       <SettingsCard title="Anbefalinger" description="Historik og feedback bruges kun mod dit lokale bibliotek." action="Gem anbefalinger" dirty={profileDirty} busy={busy === 'profile'} save={saveProfile}>
         <Toggle label="Personlige anbefalinger" checked={profile.preferences.recommendationsEnabled} change={(checked) => patchProfilePrefs({ recommendationsEnabled: checked })} />
         <button className={styles.secondary} disabled={Boolean(busy)} onClick={resetRecommendations}>{busy === 'reset' ? 'Nulstiller...' : 'Nulstil anbefalinger'}</button>
+        <div className={styles.rowManager}>
+          <header><strong>Forsidens rækkefølge</strong><span>Flyt og skjul rækker. Valget følger profilen på alle enheder.</span></header>
+          {profile.preferences.homeRowOrder.map((row, index) => { const hidden = profile.preferences.hiddenHomeRows.includes(row); const label = HOME_ROW_LABELS[row]; return <article className={hidden ? styles.hiddenRow : ''} key={row}><span><strong>{index + 1}. {label.title}</strong><small>{label.description}</small></span><div><button aria-label={`Flyt ${label.title} op`} disabled={index === 0} onClick={() => moveHomeRow(row, -1)}><ArrowUp /></button><button aria-label={`Flyt ${label.title} ned`} disabled={index === profile.preferences.homeRowOrder.length - 1} onClick={() => moveHomeRow(row, 1)}><ArrowDown /></button><button aria-label={hidden ? `Vis ${label.title}` : `Skjul ${label.title}`} onClick={() => toggleHomeRow(row)}>{hidden ? <Eye /> : <EyeOff />}</button></div></article>; })}
+        </div>
       </SettingsCard>
 
       <SettingsCard title="Sikkerhed" description="En beskyttet profil kræver nuværende PIN ved ændringer." action="Gem sikkerhed" dirty={profileDirty} busy={busy === 'profile'} save={saveProfile}>
