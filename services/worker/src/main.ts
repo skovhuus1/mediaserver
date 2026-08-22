@@ -36,6 +36,7 @@ const workerConcurrency = resolveWorkerConcurrency({
 });
 const transcodeMaxConcurrent = workerConcurrency.transcodes;
 const transcodeStatusKey = 'runtime.transcoder.status';
+const libraryWatcherStatusKey = 'runtime.library-watcher.status';
 let lastTranscoderHeartbeat = 0;
 
 function legacyLibraryPathCandidate(rootPath: string, configuredPath: string): string | null {
@@ -84,6 +85,24 @@ let lastLibraryScheduleCheck = 0;
 let lastLibraryWatchSync = 0;
 let libraryChangeDetector: LibraryChangeDetector | null = null;
 const libraryWatchConfig = resolveLibraryWatchConfig(process.env);
+type LibraryWatcherRuntime = {
+  enabled: boolean;
+  state: 'active' | 'degraded' | 'disabled' | 'idle';
+  mode: 'native' | 'polling';
+  watchedLibraryCount: number;
+  monitoredPaths: string[];
+  workerId: string;
+  pollIntervalMs: number;
+  writeStabilityMs: number;
+  debounceMs: number;
+  refreshIntervalMs: number;
+  lastHeartbeatAt: string;
+  lastSuccessfulSyncAt: string | null;
+  lastFileEvent: { libraryId: string; event: string; path: string; at: string; queuedScan: boolean } | null;
+  lastError: { libraryId: string | null; message: string; at: string } | null;
+};
+const libraryWatcherRuntime = new Map<string, LibraryWatcherRuntime>();
+const libraryWatcherAccountsByLibrary = new Map<string, string>();
 
 type ClaimedJob = SystemJob & { attemptNumber: number };
 type ProbeMetadata = {
@@ -1316,6 +1335,14 @@ async function syncLibraryChangeDetector(): Promise<void> {
   if (!libraryWatchConfig.enabled) {
     await libraryChangeDetector?.close();
     libraryChangeDetector = null;
+    const accounts = await prisma.account.findMany({ select: { id: true } });
+    await Promise.all(accounts.map(({ id }) => publishLibraryWatcherStatus(id, {
+      enabled: false,
+      state: 'disabled',
+      watchedLibraryCount: 0,
+      monitoredPaths: [],
+      lastSuccessfulSyncAt: new Date().toISOString(),
+    })));
     return;
   }
   libraryChangeDetector ??= new LibraryChangeDetector(
@@ -1326,6 +1353,15 @@ async function syncLibraryChangeDetector(): Promise<void> {
         'filesystem-watcher',
         change,
       );
+      await publishLibraryWatcherStatus(change.accountId, {
+        lastFileEvent: {
+          libraryId: change.libraryId,
+          event: change.event,
+          path: change.path.slice(0, 1_000),
+          at: new Date().toISOString(),
+          queuedScan: queued,
+        },
+      });
       if (queued) console.info(JSON.stringify({
         level: 'info',
         component: 'library-watcher',
@@ -1335,23 +1371,47 @@ async function syncLibraryChangeDetector(): Promise<void> {
         path: change.path,
       }));
     },
-    (error, libraryId) => console.warn(JSON.stringify({
-      level: 'warn',
-      component: 'library-watcher',
-      message: 'Library watcher reported an error; scheduled scanning remains active',
-      libraryId,
-      error: error instanceof Error ? error.message : 'Unknown watcher failure',
-    })),
+    (error, libraryId) => {
+      const message = error instanceof Error ? error.message : 'Unknown watcher failure';
+      const accountId = libraryWatcherAccountsByLibrary.get(libraryId);
+      if (accountId) void publishLibraryWatcherStatus(accountId, {
+        state: 'degraded',
+        lastError: { libraryId, message, at: new Date().toISOString() },
+      }).catch(() => undefined);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        component: 'library-watcher',
+        message: 'Library watcher reported an error; scheduled scanning remains active',
+        libraryId,
+        error: message,
+      }));
+    },
   );
-  const libraries = await prisma.library.findMany({
-    where: { autoScanEnabled: true },
-    select: { id: true, accountId: true, paths: { select: { path: true } } },
-  });
+  const [libraries, accounts] = await Promise.all([
+    prisma.library.findMany({
+      where: { autoScanEnabled: true },
+      select: { id: true, accountId: true, paths: { select: { path: true } } },
+    }),
+    prisma.account.findMany({ select: { id: true } }),
+  ]);
+  libraryWatcherAccountsByLibrary.clear();
+  for (const library of libraries) libraryWatcherAccountsByLibrary.set(library.id, library.accountId);
   const count = await libraryChangeDetector.sync(libraries.map((library) => ({
     id: library.id,
     accountId: library.accountId,
     paths: library.paths.map((path) => path.path),
   })));
+  const synchronizedAt = new Date().toISOString();
+  await Promise.all(accounts.map(({ id }) => {
+    const accountLibraries = libraries.filter((library) => library.accountId === id && library.paths.length > 0);
+    return publishLibraryWatcherStatus(id, {
+      enabled: true,
+      state: accountLibraries.length > 0 ? 'active' : 'idle',
+      watchedLibraryCount: accountLibraries.length,
+      monitoredPaths: accountLibraries.flatMap((library) => library.paths.map((entry) => entry.path)),
+      lastSuccessfulSyncAt: synchronizedAt,
+    });
+  }));
   console.info(JSON.stringify({
     level: 'info',
     component: 'library-watcher',
@@ -1359,6 +1419,38 @@ async function syncLibraryChangeDetector(): Promise<void> {
     watchedLibraries: count,
     usePolling: libraryWatchConfig.usePolling,
   }));
+}
+
+async function publishLibraryWatcherStatus(
+  accountId: string,
+  patch: Partial<LibraryWatcherRuntime>,
+): Promise<void> {
+  const current = libraryWatcherRuntime.get(accountId);
+  const now = new Date().toISOString();
+  const status: LibraryWatcherRuntime = {
+    enabled: libraryWatchConfig.enabled,
+    state: libraryWatchConfig.enabled ? 'idle' : 'disabled',
+    mode: libraryWatchConfig.usePolling ? 'polling' : 'native',
+    watchedLibraryCount: 0,
+    monitoredPaths: [],
+    pollIntervalMs: libraryWatchConfig.pollIntervalMs,
+    writeStabilityMs: libraryWatchConfig.writeStabilityMs,
+    debounceMs: libraryWatchConfig.debounceMs,
+    refreshIntervalMs: libraryWatchConfig.refreshIntervalMs,
+    lastSuccessfulSyncAt: null,
+    lastFileEvent: null,
+    lastError: null,
+    ...current,
+    ...patch,
+    workerId,
+    lastHeartbeatAt: now,
+  };
+  libraryWatcherRuntime.set(accountId, status);
+  await prisma.systemSetting.upsert({
+    where: { accountId_key: { accountId, key: libraryWatcherStatusKey } },
+    create: { accountId, key: libraryWatcherStatusKey, value: status },
+    update: { value: status },
+  });
 }
 
 async function rescheduleRecurringJob(job: ClaimedJob): Promise<void> {

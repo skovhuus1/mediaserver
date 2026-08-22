@@ -9,6 +9,7 @@ import { SetUpdateBranchDto, UpdateServerSettingsDto } from './system.dto';
 import { SaveMetadataSettingsDto } from './metadata-settings.dto';
 import { metadataSettingsStatus, saveMetadataSettings } from './metadata-settings';
 import { resolveTranscoderStatus } from './transcoder-status';
+import { inspectLibraryWatcherPaths, resolveLibraryWatcherStatus } from './library-watcher-status';
 import { jobPayload, jobReferences, presentJobProgress } from './system-jobs';
 import { collectDefaultMetrics, register } from 'prom-client';
 import { cpus, freemem, loadavg, totalmem, uptime } from 'node:os';
@@ -163,6 +164,64 @@ export class SystemController {
     });
     const count = (status: string) => items.filter((item) => item.status === status).length;
     return { summary: { total: items.length, queued: count('queued'), running: count('running'), completed: count('completed'), failed: count('failed') }, items, sampledAt: new Date().toISOString() };
+  }
+
+  @Get('library-watcher/status')
+  @Roles('admin', 'operator')
+  async libraryWatcherStatus(@CurrentUser() actor: AuthenticatedUser) {
+    const [persisted, libraries] = await Promise.all([
+      this.prisma.systemSetting.findUnique({
+        where: { accountId_key: { accountId: actor.accountId, key: 'runtime.library-watcher.status' } },
+        select: { value: true },
+      }),
+      this.prisma.library.findMany({
+        where: { accountId: actor.accountId },
+        select: {
+          id: true,
+          name: true,
+          autoScanEnabled: true,
+          scanIntervalMinutes: true,
+          lastScheduledScanAt: true,
+          paths: { select: { path: true } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+    return resolveLibraryWatcherStatus(persisted?.value, libraries);
+  }
+
+  @Post('library-watcher/test')
+  @Roles('admin')
+  async testLibraryWatcher(@CurrentUser() actor: AuthenticatedUser) {
+    const status = await this.libraryWatcherStatus(actor);
+    const paths = await inspectLibraryWatcherPaths(status.monitoredPaths);
+    const healthy = status.state === 'active' && paths.length > 0 && paths.every((entry) => entry.readable && entry.directory);
+    const testedAt = new Date().toISOString();
+    await this.prisma.auditLog.create({
+      data: {
+        accountId: actor.accountId,
+        userId: actor.sub,
+        profileId: actor.profileId,
+        correlationId: 'library-watcher-test',
+        action: 'system.library_watcher_tested',
+        outcome: healthy ? 'allowed' : 'denied',
+        code: healthy ? 'library_watcher_healthy' : 'library_watcher_unhealthy',
+        details: { state: status.state, configuredPaths: paths.length, failedPaths: paths.filter((entry) => entry.error).length, testedAt },
+      },
+    });
+    return {
+      healthy,
+      testedAt,
+      state: status.state,
+      message: healthy
+        ? `Watcheren er aktiv og kan læse ${paths.length} konfigurerede mapper.`
+        : paths.length === 0
+          ? 'Ingen mapper er aktiveret til automatisk scanning.'
+          : status.state !== 'active'
+            ? `Workerens watcher er ${status.state}. Kontroller workerstatus og miljøkonfiguration.`
+            : 'En eller flere mapper kan ikke læses fra API-containeren.',
+      paths,
+    };
   }
 
   @Get('errors')
