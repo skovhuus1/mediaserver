@@ -42,13 +42,15 @@ describe('worker job concurrency', () => {
       'media.playback-assets',
       'playback.expire-leases',
       'notification.push',
+      'live-tv.import',
+      'live-tv.epg',
     ]);
 
     expect(claimableWorkerJobTypes({
       workerMode: 'jobs',
       activeJobTypes: ['media.metadata', 'media.metadata', 'playback.expire-leases'],
       limits,
-    })).toEqual(['library.scan', 'media.playback-assets', 'notification.push']);
+    })).toEqual(['library.scan', 'media.playback-assets', 'notification.push', 'live-tv.import', 'live-tv.epg']);
   });
 
   it('isolates transcode workers from catalog jobs', () => {
@@ -57,7 +59,7 @@ describe('worker job concurrency', () => {
       workerMode: 'transcode',
       activeJobTypes: ['library.scan', 'playback.transcode'],
       limits,
-    })).toEqual(['playback.transcode', 'offline.prepare']);
+    })).toEqual(['playback.transcode', 'offline.prepare', 'live-tv.stream']);
     expect(claimableWorkerJobTypes({
       workerMode: 'transcode',
       activeJobTypes: ['playback.transcode', 'playback.transcode'],

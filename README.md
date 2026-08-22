@@ -1,5 +1,18 @@
 # BoltBytes Media Server
 
+## Live TV fra M3U
+
+BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde med krypterede M3U/XMLTV-kilder, kanalimport, dubletmatching, kildeprioritet, EPG, favoritter, atomisk forbindelsespulje, Direct Play, remux/transcoding, Chromecast-handoff og hurtigt kanalskift.
+
+- Opret og administrer udbydere, forbindelser, kanalrækkefølge og EPG under `Live TV` i administratorpanelet.
+- Kilde-URL'er krypteres med AES-256-GCM og returneres aldrig til browseren eller Chromecast-modtageren.
+- En PostgreSQL advisory lock reserverer forbindelser atomisk og håndhæver både abonnementets samlede streamgrænse, udbyderens brugergrænse og hver forbindelses kapacitet.
+- Afspilleren bruger Direct HLS, når kilden er kompatibel, ellers FFmpeg-remux og softwaretranscoding via den eksisterende worker/transcoder-arkitektur.
+- Kundeportalen viser kanalguide, nu/næste, favoritter og hurtig kanalnavigation på `/watch/live`.
+- Den stabile version før Live TV kan gendannes fra tagget `backup-pre-live-tv-20260823`.
+
+Den komplette drift-, sikkerheds- og rollbackvejledning findes i [Live TV-dokumentationen](docs/live-tv.md).
+
 BoltBytes er en selvhostet medieplatform med serverstyret adgang, biblioteksautomation, webafspiller, adminportal og Flutter-klienter til mobil og TV. Projektet prioriterer sikker drift, korrekt playback og synlig fejlsøgning frem for skjult klientlogik.
 
 > Aktiv udvikling. Centrale server-, web-, playback-, backup- og integrationsflows er implementeret. Betaling og offentlig app-store-udgivelse er fortsat separate leverancer.

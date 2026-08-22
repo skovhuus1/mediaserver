@@ -112,6 +112,13 @@ model Account {
   auditLogs            AuditLog[]
   settings             SystemSetting[]
   jobs                 SystemJob[]
+  liveTvProviders      LiveTvProvider[]
+  liveTvConnections    LiveTvConnection[]
+  liveTvChannels       LiveTvChannel[]
+  liveTvEpgSources     LiveTvEpgSource[]
+  liveTvPrograms       LiveTvProgram[]
+  liveTvLeases         LiveTvLease[]
+  liveTvFavorites      LiveTvFavorite[]
 
   @@map("accounts")
 }
@@ -136,6 +143,7 @@ model User {
   playbackSessions     PlaybackSession[]
   playbackHistory      PlaybackHistory[]
   auditLogs            AuditLog[]
+  liveTvLeases         LiveTvLease[]
 
   @@unique([accountId, email])
   @@index([accountId, status])
@@ -162,6 +170,8 @@ model Profile {
   watchlistEntries     WatchlistEntry[]
   offlineDownloads     OfflineDownload[]
   auditLogs            AuditLog[]
+  liveTvLeases         LiveTvLease[]
+  liveTvFavorites      LiveTvFavorite[]
 
   @@index([accountId, userId])
   @@index([accountId, userId, archivedAt])
@@ -234,6 +244,7 @@ model Device {
   offlineDownloads OfflineDownload[]
   refreshTokens    RefreshToken[]
   playbackSessions PlaybackSession[]
+  liveTvLeases     LiveTvLease[]
 
   @@unique([userId, fingerprint])
   @@index([accountId, userId])
@@ -932,4 +943,191 @@ model JobAttempt {
 
   @@unique([jobId, number])
   @@map("job_attempts")
+}
+
+model LiveTvProvider {
+  id                 String             @id @default(uuid())
+  accountId          String             @map("account_id")
+  name               String
+  enabled            Boolean            @default(true)
+  priority           Int                @default(100)
+  perUserStreamLimit Int                @default(1) @map("per_user_stream_limit")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  account            Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  connections        LiveTvConnection[]
+  epgSource          LiveTvEpgSource?
+  programs           LiveTvProgram[]
+
+  @@unique([accountId, name])
+  @@index([accountId, enabled, priority])
+  @@map("live_tv_providers")
+}
+
+model LiveTvConnection {
+  id                   String                @id @default(uuid())
+  accountId            String                @map("account_id")
+  providerId           String                @map("provider_id")
+  name                 String
+  playlistUrl          Json                  @map("playlist_url")
+  playlistFingerprint String                @map("playlist_fingerprint")
+  enabled              Boolean               @default(true)
+  priority             Int                   @default(100)
+  maxConcurrentStreams Int                   @default(1) @map("max_concurrent_streams")
+  healthStatus         String                @default("unknown") @map("health_status")
+  lastError            String?               @map("last_error")
+  lastImportedAt       DateTime?             @map("last_imported_at")
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
+  account              Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  provider             LiveTvProvider        @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  sources              LiveTvChannelSource[]
+  leases               LiveTvLease[]
+
+  @@unique([providerId, playlistFingerprint])
+  @@index([accountId, enabled, priority])
+  @@map("live_tv_connections")
+}
+
+model LiveTvChannel {
+  id             String                @id @default(uuid())
+  accountId      String                @map("account_id")
+  canonicalKey   String                @map("canonical_key")
+  tvgId          String?               @map("tvg_id")
+  name           String
+  number         Int?
+  logoUrl        String?               @map("logo_url")
+  groupName      String?               @map("group_name")
+  enabled        Boolean               @default(true)
+  isAdult        Boolean               @default(false) @map("is_adult")
+  metadataLocked Boolean               @default(false) @map("metadata_locked")
+  sortOrder      Int                   @default(0) @map("sort_order")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+  account        Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sources        LiveTvChannelSource[]
+  programs       LiveTvProgram[]
+  leases         LiveTvLease[]
+  favorites      LiveTvFavorite[]
+
+  @@unique([accountId, canonicalKey])
+  @@index([accountId, enabled, groupName, sortOrder])
+  @@index([accountId, tvgId])
+  @@map("live_tv_channels")
+}
+
+model LiveTvChannelSource {
+  id                 String           @id @default(uuid())
+  channelId          String           @map("channel_id")
+  connectionId       String           @map("connection_id")
+  externalId         String?          @map("external_id")
+  sourceName         String           @map("source_name")
+  encryptedStreamUrl Json             @map("encrypted_stream_url")
+  streamFingerprint  String           @map("stream_fingerprint")
+  streamFormat       String           @default("auto") @map("stream_format")
+  priority           Int              @default(100)
+  enabled            Boolean          @default(true)
+  lastSeenAt         DateTime         @default(now()) @map("last_seen_at")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  channel            LiveTvChannel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  connection         LiveTvConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  leases             LiveTvLease[]
+
+  @@unique([connectionId, streamFingerprint])
+  @@index([channelId, enabled, priority])
+  @@map("live_tv_channel_sources")
+}
+
+model LiveTvEpgSource {
+  id             String         @id @default(uuid())
+  accountId      String         @map("account_id")
+  providerId     String         @unique @map("provider_id")
+  encryptedUrl   Json           @map("encrypted_url")
+  enabled        Boolean        @default(true)
+  healthStatus   String         @default("unknown") @map("health_status")
+  lastError      String?        @map("last_error")
+  lastImportedAt DateTime?      @map("last_imported_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  account        Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  provider       LiveTvProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, enabled])
+  @@map("live_tv_epg_sources")
+}
+
+model LiveTvProgram {
+  id          String         @id @default(uuid())
+  accountId   String         @map("account_id")
+  providerId  String         @map("provider_id")
+  channelId   String         @map("channel_id")
+  startsAt    DateTime       @map("starts_at")
+  endsAt      DateTime       @map("ends_at")
+  title       String
+  subtitle    String?
+  description String?
+  category    String?
+  iconUrl     String?        @map("icon_url")
+  episode     String?
+  createdAt   DateTime       @default(now()) @map("created_at")
+  account     Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  provider    LiveTvProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  channel     LiveTvChannel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, channelId, startsAt, title])
+  @@index([accountId, channelId, startsAt, endsAt])
+  @@map("live_tv_programs")
+}
+
+model LiveTvLease {
+  id             String              @id @default(uuid())
+  accountId      String              @map("account_id")
+  userId         String              @map("user_id")
+  profileId      String              @map("profile_id")
+  deviceId       String              @map("device_id")
+  channelId      String              @map("channel_id")
+  sourceId       String              @map("source_id")
+  connectionId   String              @map("connection_id")
+  status         String              @default("preparing")
+  method         String
+  streamTokenHash String             @unique @map("stream_token_hash")
+  jobId          String?             @map("job_id")
+  isCastSession  Boolean             @default(false) @map("is_cast_session")
+  runtimeState   String              @default("starting") @map("runtime_state")
+  currentBitrate Int?                @map("current_bitrate")
+  bufferAheadMs  Int?                @map("buffer_ahead_ms")
+  stallCount     Int                 @default(0) @map("stall_count")
+  leaseExpiresAt DateTime            @map("lease_expires_at")
+  lastHeartbeatAt DateTime           @default(now()) @map("last_heartbeat_at")
+  startedAt      DateTime            @default(now()) @map("started_at")
+  endedAt        DateTime?           @map("ended_at")
+  lastError      String?             @map("last_error")
+  account        Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile        Profile             @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  device         Device              @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  channel        LiveTvChannel       @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  source         LiveTvChannelSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  connection     LiveTvConnection    @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, status, leaseExpiresAt])
+  @@index([userId, status, leaseExpiresAt])
+  @@index([connectionId, status, leaseExpiresAt])
+  @@map("live_tv_leases")
+}
+
+model LiveTvFavorite {
+  id        String        @id @default(uuid())
+  accountId String        @map("account_id")
+  profileId String        @map("profile_id")
+  channelId String        @map("channel_id")
+  createdAt DateTime      @default(now()) @map("created_at")
+  account   Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profile   Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  channel   LiveTvChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, channelId])
+  @@index([accountId, profileId])
+  @@map("live_tv_favorites")
 }

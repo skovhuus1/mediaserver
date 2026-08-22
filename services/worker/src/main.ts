@@ -19,6 +19,7 @@ import { deliverPushNotification, queueOfflineReadyNotification } from './push-n
 import { updateJobProgress, withJobProgress } from './job-progress.js';
 import { buildSdrColorMetadataArguments, resolveVideoColorPipeline } from './video-color.js';
 import { LibraryChangeDetector, resolveLibraryWatchConfig, type LibraryFileChange } from './library-change-detector.js';
+import { importLiveTvEpg, importLiveTvPlaylist, runLiveTvStream } from './live-tv.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -212,6 +213,15 @@ async function processJob(job: ClaimedJob): Promise<void> {
       return;
     case 'playback.expire-leases':
       await expirePlaybackLeases();
+      return;
+    case 'live-tv.import':
+      await importLiveTvPlaylist(prisma, job, () => renewJobLease(job.id));
+      return;
+    case 'live-tv.epg':
+      await importLiveTvEpg(prisma, job, () => renewJobLease(job.id));
+      return;
+    case 'live-tv.stream':
+      await runLiveTvStream(prisma, job, transcodeRoot, () => renewJobLease(job.id));
       return;
     default:
       throw new Error(`Unsupported job type: ${job.type}`);

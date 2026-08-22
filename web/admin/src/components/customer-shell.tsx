@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronLeft, Film, Home, LogOut, MonitorPlay, Tv, UserRound } from 'lucide-react';
+import { ChevronLeft, Film, Home, LogOut, MonitorPlay, Radio, Tv, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -21,6 +21,7 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
     { href: '/watch', label: 'Hjem', icon: Home },
     { href: '/watch?type=movie', label: 'Film', icon: Film },
     { href: '/watch?type=series', label: 'Serier', icon: Tv },
+    { href: '/watch/live', label: 'Live TV', icon: Radio },
     { href: '/watch?view=continue', label: 'Fortsæt', icon: MonitorPlay },
   ];
   const active = (href: string) => {
@@ -38,7 +39,7 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
     <div className={`watch-shell ${styles.shell}`}>
       <header className={`watch-header ${styles.header}`}>
         <Link aria-label="BoltBytes hjem" href="/watch"><Brand /></Link>
-        <nav aria-label="Kundenavigation" className={styles.nav}>{links.map(({ href, label, icon: Icon }) => {
+        <nav aria-label="Kundenavigation" className={styles.nav} style={{ gridTemplateColumns: 'repeat(5,minmax(0,1fr))' }}>{links.map(({ href, label, icon: Icon }) => {
           const isActive = active(href);
           return <Link aria-current={isActive ? 'page' : undefined} className={isActive ? 'active' : ''} href={href} key={href}><Icon size={16} />{label}</Link>;
         })}</nav>
