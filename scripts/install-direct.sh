@@ -139,4 +139,4 @@ nginx -t
 systemctl daemon-reload
 systemctl enable --now bb-media.target
 systemctl reload nginx
-echo "BoltBytes Media is available on port 5555."
+echo "BoltBytes Media is available on port 6555."
