@@ -70,6 +70,42 @@ describe('watchlist and watched state', () => {
     }));
   });
 
+  it('removes a resume position only inside the active account, user and profile', async () => {
+    const prisma = {
+      playbackHistory: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const service = new PlaybackHistoryService(prisma as never, {} as never);
+
+    await expect(service.removeFromContinueWatching(actor as never, 'media-id')).resolves.toEqual({
+      mediaId: 'media-id',
+      removed: true,
+    });
+    expect(prisma.playbackHistory.deleteMany).toHaveBeenCalledWith({
+      where: {
+        accountId: 'account-id',
+        userId: 'user-id',
+        profileId: 'profile-id',
+        mediaId: 'media-id',
+      },
+    });
+  });
+
+  it('keeps removal idempotent when no resume position exists', async () => {
+    const prisma = {
+      playbackHistory: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const service = new PlaybackHistoryService(prisma as never, {} as never);
+
+    await expect(service.removeFromContinueWatching(actor as never, 'missing-media')).resolves.toEqual({
+      mediaId: 'missing-media',
+      removed: false,
+    });
+  });
+
   it('rejects requests without an active profile and cross-account media', async () => {
     const prisma = {
       mediaItem: { findFirst: vi.fn().mockResolvedValue(null) },

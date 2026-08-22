@@ -162,6 +162,20 @@ export class PlaybackHistoryService {
     return entries.map((entry) => this.publicMedia(entry.media, progress.get(entry.mediaId)));
   }
 
+  async removeFromContinueWatching(actor: AuthenticatedUser, mediaId: string) {
+    const profileId = this.profileId(actor);
+    const result = await this.prisma.playbackHistory.deleteMany({
+      where: {
+        accountId: actor.accountId,
+        userId: actor.sub,
+        profileId,
+        mediaId,
+      },
+    });
+
+    return { mediaId, removed: result.count > 0 };
+  }
+
   async addToWatchlist(actor: AuthenticatedUser, mediaId: string) {
     const profileId = this.profileId(actor);
     await this.media(actor, mediaId);
