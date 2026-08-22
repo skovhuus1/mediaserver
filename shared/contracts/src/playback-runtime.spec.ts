@@ -21,6 +21,13 @@ describe('playback runtime policy', () => {
     ], ['da'], 'forced')).toBe('forced-da');
   });
 
+  it('falls back to first available WebVTT track when preferred language is missing in auto mode', () => {
+    expect(chooseDefaultWebVttSubtitle([
+      { id: 'webvtt-en', language: 'eng', label: 'English', delivery: 'webvtt' },
+      { id: 'webvtt-da', language: 'dan', label: 'Dansk', delivery: 'webvtt' },
+    ], ['fr'], 'auto')).toBe('webvtt-en');
+  });
+
   it('prefers a complete subtitle over forced and SDH tracks in the same language', () => {
     expect(chooseDefaultWebVttSubtitle([
       { id: 'forced-da', language: 'dan', label: 'Dansk (tvungen)', delivery: 'webvtt' },
