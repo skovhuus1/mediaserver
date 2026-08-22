@@ -8,6 +8,12 @@ import { promisify } from 'node:util';
 import { PrismaService } from '../prisma/prisma.service';
 import { classifyUpdateTransition, type UpdateTransition } from './update-transition';
 import {
+  inspectGitIndexLock,
+  findOpenFileOwnerPids,
+  recoverStaleGitIndexLock,
+  type GitIndexLockInspection,
+} from './git-index-lock';
+import {
   idleUpdateProgress,
   isActiveRunnerState,
   parseRunnerProgress,
@@ -64,6 +70,7 @@ export class UpdaterService {
         blockers: [!base.enabled ? 'Updateren er deaktiveret i Docker-konfigurationen.' : 'Git-worktree blev ikke fundet.'],
       };
     }
+    const repositoryLock = await this.inspectRepositoryLock();
     const [local, remote, currentBranchResult, dirtyResult] = await Promise.all([
       this.run('git', ['rev-parse', 'HEAD']),
       this.run('git', ['ls-remote', this.remote, `refs/heads/${branch}`]),
@@ -87,6 +94,7 @@ export class UpdaterService {
         : await this.inspectTransition(localCommit, remoteCommit);
     }
     const blockers = [
+      ...(['active', 'recent', 'unknown'].includes(repositoryLock.state) ? [repositoryLock.reason] : []),
       ...(dirty ? ['Tracked filer indeholder lokale ændringer.'] : []),
       ...(!remoteExists ? [`Branchen ${branch} findes ikke på ${this.remote}.`] : []),
       ...(remoteExists && !dirty && transition.mode === 'blocked' ? [transition.reason] : []),
@@ -102,6 +110,7 @@ export class UpdaterService {
       transitionMode: transition.mode,
       transitionReason: transition.reason,
       blockers,
+      repositoryLock,
     };
   }
 
@@ -182,6 +191,18 @@ export class UpdaterService {
         'Kontrollerer repository-ejerskab.',
       );
       await this.repairRepositoryOwnership();
+      await this.advanceProgress(accountId, runId, 10, 'git-lock', 'Kontrollerer Git checkout-lås.');
+      const repositoryLock = await this.recoverRepositoryLock();
+      if (repositoryLock.state === 'active' || repositoryLock.state === 'recent' || repositoryLock.state === 'unknown') {
+        throw new ConflictException({
+          code: 'update_git_lock_active',
+          message: repositoryLock.reason,
+          details: repositoryLock,
+        });
+      }
+      if (repositoryLock.state === 'removed') {
+        await this.advanceProgress(accountId, runId, 11, 'git-lock-recovered', 'En efterladt Git-lås blev fjernet sikkert.');
+      }
       before = (await this.run('git', ['rev-parse', 'HEAD'])).stdout.trim();
       await this.advanceProgress(accountId, runId, 12, 'worktree', 'Kontrollerer lokale ændringer.', { previousCommit: before });
       const dirty = (await this.run('git', ['status', '--porcelain', '--untracked-files=no'])).stdout.trim();
@@ -446,6 +467,35 @@ export class UpdaterService {
       `${uid}:${gid}`,
       this.repositoryPath,
     ], 120_000);
+  }
+
+  private async inspectRepositoryLock(): Promise<GitIndexLockInspection> {
+    return inspectGitIndexLock(this.repositoryPath, {
+      findOwnerPids: (lockPath) => this.repositoryLockOwnerPids(lockPath),
+    });
+  }
+
+  private async recoverRepositoryLock(): Promise<GitIndexLockInspection> {
+    return recoverStaleGitIndexLock(this.repositoryPath, {
+      findOwnerPids: (lockPath) => this.repositoryLockOwnerPids(lockPath),
+    });
+  }
+
+  private async repositoryLockOwnerPids(lockPath: string): Promise<number[]> {
+    if (this.restartMode !== 'docker-compose') return findOpenFileOwnerPids(lockPath);
+    const containerId = process.env.HOSTNAME;
+    if (!containerId) throw new Error('API container identity is unavailable');
+    const image = (await this.run('docker', ['inspect', '--format={{.Image}}', containerId])).stdout.trim();
+    if (!image) throw new Error('API image is unavailable');
+    const script = 'target="$1"; for fd in /proc/[0-9]*/fd/*; do linked="$(readlink "$fd" 2>/dev/null || true)"; if [ "$linked" = "$target" ] || [ "$linked" = "$target (deleted)" ]; then pid="${fd#/proc/}"; echo "${pid%%/*}"; fi; done';
+    const result = await this.run('docker', [
+      'run', '--rm', '--pid', 'host', '--user', '0:0',
+      '--volume', `${this.repositoryPath}:${this.repositoryPath}:ro`,
+      '--entrypoint', 'sh', image, '-lc', script, 'git-lock-scan', lockPath,
+    ], 30_000);
+    return result.stdout.split(/\r?\n/)
+      .map((value) => Number.parseInt(value.trim(), 10))
+      .filter((value) => Number.isInteger(value) && value > 0);
   }
 
   private async dockerRunnerProgress(): Promise<Partial<UpdateProgress> | null> {
