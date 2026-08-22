@@ -1035,6 +1035,15 @@ Physical acceptance still requires an Android phone and Chromecast on the same W
 - `pg_restore` bruger `--single-transaction --clean --if-exists --exit-on-error`; en PostgreSQL-fejl ruller hele restore tilbage. Efter succes stoppes snapshot-aktive streams/jobs, refresh-tokens tilbagekaldes og Redis-cachen ryddes.
 - Standardretention er 12 filer i Docker-volumen `application_data:/app/data/backups`. Justér med `BB_MEDIA_BACKUP_RETENTION`; uploadgrænsen styres af `BB_MEDIA_BACKUP_MAX_BYTES` og er 20 GiB som standard.
 - Bevar altid den tilhørende `.env`/`ENCRYPTION_KEY` separat. Uden den oprindelige nøgle kan en backup med vilje ikke dekrypteres. Ved import gennem Nginx Proxy Manager skal proxyens `client_max_body_size` og timeouts tillade backupfilens størrelse.
+
+## Sonarr og Radarr - 2026-08-22
+
+- Adminsiden **Sonarr / Radarr** konfigurerer en intern HTTP/HTTPS-URL, en krypteret API-nøgle, BoltBytes-bibliotek, Servarr root folder og kvalitetsprofil separat for hver provider. Operators kan se status, men alle ændringer er admin-only.
+- Forbindelsen valideres mod Servarrs `/api/v3/system/status`, før credentials gemmes. Redirects følges ikke, alle kald har timeout, og API-nøgler sendes aldrig tilbage til browseren.
+- Admin kan søge via Sonarrs serie-lookup eller Radarrs film-lookup og tilføje en titel som overvåget med automatisk søgning. Serveren gentager lookup på provider-id'et, så browserdata ikke anvendes som betroet add-payload.
+- Webhooks bruger Basic-password eller `X-BoltBytes-Webhook-Secret`. Hemmeligheden genereres kryptografisk, vises kun ved oprettelse/rotation og gemmes krypteret. En godkendt import-webhook sætter kun det bibliotek i kø, som provideren er bundet til; aktive scans deduplikeres med den eksisterende advisory-lock-kontrakt.
+- I Sonarr/Radarr oprettes en Webhook/Connect med URL'en fra adminpanelet, username `boltbytes` og det engangsvist viste password. Eventtypen `Test` validerer forbindelsen uden at starte scan.
+- Implementeringen følger de officielle [Sonarr API v3](https://github.com/Sonarr/Sonarr/blob/develop/src/Sonarr.Api.V3/openapi.json)- og [Radarr API v3](https://github.com/Radarr/Radarr/blob/develop/src/Radarr.Api.V3/openapi.json)-kontrakter.
 # Native Android playback, TV controls and signed updates
 
 The Flutter client now shares one server-side playback model across Android mobile, Android TV and Chromecast. Series playback uses `/playback/history/series-next`, profile `autoplayNext`, and real timeline markers for intro, recap and credits actions. A ten-second credits countdown can advance to the next local episode and can be cancelled by the viewer.
