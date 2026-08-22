@@ -67,4 +67,21 @@ describe('Chromecast heartbeat', () => {
       response: expect.objectContaining({ code: 'cast_session_required' }),
     });
   });
+
+  it('releases the reservation when the signed receiver ends playback', async () => {
+    const token = 'cast-release-token';
+    const prisma = {
+      playbackSession: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'session-3', status: 'active', runtimeState: 'playing', isCastSession: true, streamTokenHash: createHash('sha256').update(token).digest('hex') }),
+        update: vi.fn().mockReturnValue({ operation: 'session-update' }),
+      },
+      streamReservation: { updateMany: vi.fn().mockReturnValue({ operation: 'reservation-update' }) },
+      $transaction: vi.fn().mockResolvedValue([]),
+    };
+    const service = Object.assign(Object.create(StreamReservationService.prototype), { prisma, leaseSeconds: 90 }) as StreamReservationService;
+    await expect(service.releaseWithToken('session-3', token, 'media_finished')).resolves.toEqual({ released: true, status: 'user_stopped' });
+    expect(prisma.playbackSession.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'session-3' }, data: expect.objectContaining({ status: 'user_stopped', endedAt: expect.any(Date) }) }));
+    expect(prisma.streamReservation.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reason: 'media_finished', releasedAt: expect.any(Date) }) }));
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+  });
 });

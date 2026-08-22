@@ -160,6 +160,7 @@ type CastHandoff = {
   subtitleTracks: SubtitleTrack[];
   tokenExpiresAt: string;
   heartbeatUrl: string;
+  releaseUrl: string;
 };
 
 type CastMediaInfo = {
@@ -169,11 +170,16 @@ type CastMediaInfo = {
   duration?: number;
   customData?: {
     heartbeatUrl: string;
+    releaseUrl: string;
     timelineOffsetMs: number;
     fullDurationMs: number | null;
     currentBitrate: number | null;
     currentHeight: number | null;
     subtitleTrack: string | null;
+    title: string;
+    subtitle: string;
+    posterUrl: string | null;
+    methodLabel: string;
   };
 };
 type CastTrack = {
@@ -1124,11 +1130,16 @@ export function WebPlayer() {
       mediaInfo.streamType = mediaApi.StreamType.BUFFERED;
       mediaInfo.customData = {
         heartbeatUrl: handoff.heartbeatUrl,
+        releaseUrl: handoff.releaseUrl,
         timelineOffsetMs: Math.max(0, Math.round(timelineOffsetRef.current * 1000)),
         fullDurationMs: media.file?.durationMs ?? null,
         currentBitrate: authorization.videoProfile.source.bitrate,
         currentHeight: authorization.videoProfile.output.height ?? authorization.videoProfile.source.height,
         subtitleTrack: authorization.subtitleTracks.find((track) => track.id === activeSubtitleRef.current)?.label ?? null,
+        title: media.seriesTitle ?? media.title,
+        subtitle: media.seriesTitle ? episodeLabel(media) : status,
+        posterUrl: media.posterPath ? (/^https:\/\//i.test(media.posterPath) ? media.posterPath : `https://image.tmdb.org/t/p/w780${media.posterPath}`) : null,
+        methodLabel: authorization.method === 'direct_play' ? 'Direct Play' : authorization.method === 'direct_stream' ? 'Direct Stream' : 'Transcoding',
       };
       if (media.file?.durationMs) {
         mediaInfo.duration = Math.max(0, media.file.durationMs / 1000 - timelineOffsetRef.current);

@@ -51,6 +51,12 @@ export class PlaybackController {
     return this.reservations.heartbeatWithToken(id, token, dto);
   }
 
+  @Delete('sessions/:id/cast-heartbeat')
+  @Public()
+  releaseCast(@Param('id') id: string, @Query('token') token: string | undefined) {
+    return this.reservations.releaseWithToken(id, token, 'cast_receiver_stopped');
+  }
+
   @Delete('sessions/:id')
   stop(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.reservations.release(actor, id);

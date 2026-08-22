@@ -1014,6 +1014,16 @@ Physical acceptance still requires an Android phone and Chromecast on the same W
 - `GET/PATCH /api/v1/profiles/me/preferences` eksponerer `homeRowOrder` og `hiddenHomeRows`. DTO-validering afviser ukendte række-id'er og mere end fire rækker.
 - Ældre profiler migreres til den dokumenterede standardrækkefølge. Serveren normaliserer dubletter og udfylder manglende standardrækker uden at kassere et gyldigt brugerdefineret valg.
 - Hvis kunden skjuler alle rækker, vises en konkret tom-state med link tilbage til forsideindstillingerne i stedet for en tom eller defekt portal.
+
+## Branded Chromecast Custom Web Receiver - 2026-08-22
+
+- `https://media.boltbytes.com/cast/receiver` er nu en rigtig BoltBytes Custom Web Receiver bygget på Googles anbefalede CAF `cast-media-player`, ikke en statisk splash-side.
+- Receiveren viser branded idle-, loading-, buffering-, paused-, ended- og error-state samt titel, episode, artwork, Direct Play/Direct Stream/transcode, opløsning, dynamisk bitrate, aktiv undertekst og afspilningsposition.
+- CAF-events for load, play, pause, buffering, seek, bitrate, tracks, fejl, stop og afslutning opdaterer både TV-UI og serverens femsekunders QoE-heartbeat. Bufferkanter tælles kun én gang pr. overgang.
+- Web- og Android-senderen leverer samme receiver-contract gennem `customData`; alle stream-, subtitle-, heartbeat- og release-URL'er er fortsat kortlivede, HTTPS-baserede og serverunderskrevne.
+- Receiveren kalder det nye tokenbeskyttede `DELETE /api/v1/playback/sessions/:id/cast-heartbeat` ved stop/afslutning, så reservationen frigives deterministisk uden at kræve, at senderappen stadig er åben.
+- Receiveren bruger CAF's normale produktions-idle-timeout og ét segments auto-resume. Den gamle globale `disableIdleTimeout` er fjernet.
+- Google anbefaler `cast-media-player` til Custom Web Receivers og kræver registrering af HTTPS-receiver-URL og samme Application ID i senderne: [Custom Web Receiver core features](https://developers.google.com/cast/docs/web_receiver/core_features) og [Web Receiver overview](https://developers.google.com/cast/docs/web_receiver).
 # Native Android playback, TV controls and signed updates
 
 The Flutter client now shares one server-side playback model across Android mobile, Android TV and Chromecast. Series playback uses `/playback/history/series-next`, profile `autoplayNext`, and real timeline markers for intro, recap and credits actions. A ten-second credits countdown can advance to the next local episode and can be cancelled by the viewer.

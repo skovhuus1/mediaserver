@@ -105,17 +105,19 @@ export class StreamReservationService {
   }
 
   async heartbeatWithToken(sessionId: string, token: string | undefined, input: PlaybackHeartbeatDto = {}) {
-    if (!token) throw new UnauthorizedException({ code: 'stream_token_required', message: 'Stream token is required' });
-    const session = await this.prisma.playbackSession.findUnique({ where: { id: sessionId } });
-    if (!session) throw new NotFoundException({ code: 'session_not_found', message: 'Playback session was not found' });
-    const streamToken = resolveStreamToken(sessionId, token, process.env.JWT_SECRET ?? '');
-    if (!streamToken || !streamTokenMatches(streamToken, session.streamTokenHash)) {
-      throw new UnauthorizedException({ code: 'stream_token_invalid', message: 'Stream token is invalid' });
-    }
-    if (!session.isCastSession) {
-      throw new ForbiddenException({ code: 'cast_session_required', message: 'The playback session is not assigned to Chromecast' });
-    }
+    const session = await this.castSessionWithToken(sessionId, token);
     return this.writeHeartbeat(session, input);
+  }
+
+  async releaseWithToken(sessionId: string, token: string | undefined, reason = 'cast_receiver_stopped') {
+    const session = await this.castSessionWithToken(sessionId, token);
+    if (!['reserving', 'active', 'paused'].includes(session.status)) return { released: false, status: session.status };
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.playbackSession.update({ where: { id: session.id }, data: { status: 'user_stopped', runtimeState: 'paused', endedAt: now, leaseExpiresAt: now } }),
+      this.prisma.streamReservation.updateMany({ where: { playbackSessionId: session.id, releasedAt: null }, data: { releasedAt: now, reason } }),
+    ]);
+    return { released: true, status: 'user_stopped' };
   }
 
   private async writeHeartbeat(
@@ -153,6 +155,20 @@ export class StreamReservationService {
     });
     if (result.count !== 1) throw new BadRequestException({ code: 'heartbeat_conflict', message: 'The session changed while heartbeat was processed' });
     return { accepted: true, leaseSeconds: this.leaseSeconds };
+  }
+
+  private async castSessionWithToken(sessionId: string, token: string | undefined) {
+    if (!token) throw new UnauthorizedException({ code: 'stream_token_required', message: 'Stream token is required' });
+    const session = await this.prisma.playbackSession.findUnique({ where: { id: sessionId } });
+    if (!session) throw new NotFoundException({ code: 'session_not_found', message: 'Playback session was not found' });
+    const streamToken = resolveStreamToken(sessionId, token, process.env.JWT_SECRET ?? '');
+    if (!streamToken || !streamTokenMatches(streamToken, session.streamTokenHash)) {
+      throw new UnauthorizedException({ code: 'stream_token_invalid', message: 'Stream token is invalid' });
+    }
+    if (!session.isCastSession) {
+      throw new ForbiddenException({ code: 'cast_session_required', message: 'The playback session is not assigned to Chromecast' });
+    }
+    return session;
   }
 
   async release(actor: AuthenticatedUser, sessionId: string, reason = 'user_stopped') {

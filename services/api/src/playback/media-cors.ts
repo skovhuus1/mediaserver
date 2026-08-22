@@ -17,7 +17,7 @@ export function applyMediaCors(response: Response, origin: string | undefined): 
     response.setHeader('Access-Control-Allow-Origin', allowedOrigin);
     response.setHeader('Vary', 'Origin');
   }
-  response.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, PATCH, DELETE, OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'Range, Accept-Encoding, Content-Type');
   response.setHeader('Access-Control-Expose-Headers', 'Accept-Ranges, Content-Length, Content-Range, Content-Type');
   response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
