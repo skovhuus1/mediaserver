@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { playbackJobMediaId, validateManualPlaybackMarkers } from './playback-analysis';
+import { playbackIntroAnalysis, playbackJobMediaId, validateManualPlaybackMarkers } from './playback-analysis';
 
 describe('playback analysis policy', () => {
   it('accepts ordered manual markers inside the media duration', () => {
@@ -28,5 +28,24 @@ describe('playback analysis policy', () => {
     expect(playbackJobMediaId({ mediaId: 'media-1' })).toBe('media-1');
     expect(playbackJobMediaId({ mediaId: 42 })).toBeNull();
     expect(playbackJobMediaId(null)).toBeNull();
+  });
+
+  it('exposes only validated intro-analysis diagnostics from manifests', () => {
+    expect(playbackIntroAnalysis({ analysis: { intro: {
+      state: 'pending',
+      reason: 'insufficient_references',
+      referenceCount: 1,
+      supportCount: 0,
+      usableFrameRatio: 0.74,
+      confidence: null,
+    } } })).toEqual({
+      state: 'pending',
+      reason: 'insufficient_references',
+      referenceCount: 1,
+      supportCount: 0,
+      usableFrameRatio: 0.74,
+      confidence: null,
+    });
+    expect(playbackIntroAnalysis({ analysis: { intro: { state: 'ready', reason: 'guessed' } } })).toBeNull();
   });
 });
