@@ -121,6 +121,18 @@ export class UpdaterService {
     return { selected: await this.selectedBranch(accountId), branches };
   }
 
+  async diagnostics(accountId: string) {
+    return {
+      enabled: this.enabled,
+      configured: this.isConfigured(),
+      repositoryPath: this.repositoryPath,
+      remote: this.remote,
+      branch: await this.selectedBranch(accountId),
+      restartMode: this.restartMode,
+      progress: await this.progress(accountId),
+    };
+  }
+
   async selectBranch(accountId: string, requestedBranch: string) {
     const branch = validateBranch(requestedBranch);
     const available = await this.branches(accountId);

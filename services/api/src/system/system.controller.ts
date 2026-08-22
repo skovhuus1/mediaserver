@@ -12,6 +12,7 @@ import { resolveTranscoderStatus } from './transcoder-status';
 import { inspectLibraryWatcherPaths, resolveLibraryWatcherStatus } from './library-watcher-status';
 import { jobPayload, jobReferences, presentJobProgress } from './system-jobs';
 import { collectDefaultMetrics, register } from 'prom-client';
+import { DiagnosticsService } from './diagnostics.service';
 import { cpus, freemem, loadavg, totalmem, uptime } from 'node:os';
 
 type CpuSnapshot = { idle: number; total: number };
@@ -64,6 +65,7 @@ export class SystemController {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly updater: UpdaterService,
+    private readonly diagnosticsService: DiagnosticsService,
   ) {}
 
   @Public()
@@ -87,6 +89,12 @@ export class SystemController {
   @Header('content-type', register.contentType)
   metrics() {
     return register.metrics();
+  }
+
+  @Get('diagnostics')
+  @Roles('admin', 'operator')
+  diagnostics(@CurrentUser() actor: AuthenticatedUser) {
+    return this.diagnosticsService.snapshot(actor.accountId);
   }
 
   @Get('stats')
