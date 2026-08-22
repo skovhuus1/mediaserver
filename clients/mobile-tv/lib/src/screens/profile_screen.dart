@@ -150,8 +150,8 @@ class _ProfileTileState extends State<_ProfileTile> {
               shape: BoxShape.circle,
               gradient: LinearGradient(
                 colors: widget.profile.isChildProfile
-                    ? const [Color(0xFF43E7C4), Color(0xFF0D7F91)]
-                    : const [Color(0xFFB67AFF), Color(0xFF5830A7)],
+                    ? const [Color(0xFF62C9A7), Color(0xFF176A60)]
+                    : const [Color(0xFFF0C06F), Color(0xFF9A5D20)],
               ),
             ),
             child: Center(

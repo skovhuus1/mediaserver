@@ -22,17 +22,17 @@ class BoltBytesApp extends StatelessWidget {
     const surface = Color(0xFF0B1018);
     const panel = Color(0xFF111A24);
     const rail = Color(0xFF0D151F);
-    const violet = Color(0xFF8E66FF);
-    const mint = Color(0xFF40DFC2);
+    const amber = Color(0xFFE4AA52);
+    const jade = Color(0xFF62C9A7);
 
     final scheme =
         ColorScheme.fromSeed(
-          seedColor: violet,
+          seedColor: amber,
           brightness: Brightness.dark,
           surface: surface,
         ).copyWith(
-          primary: violet,
-          secondary: mint,
+          primary: amber,
+          secondary: jade,
           error: const Color(0xFFFF717C),
           surface: surface,
           onSurface: Colors.white,
@@ -52,7 +52,7 @@ class BoltBytesApp extends StatelessWidget {
         colorScheme: scheme,
         scaffoldBackgroundColor: background,
         visualDensity: VisualDensity.adaptivePlatformDensity,
-        fontFamily: 'Inter',
+        fontFamily: 'sans-serif',
         splashFactory: NoSplash.splashFactory,
         pageTransitionsTheme: const PageTransitionsTheme(
           builders: {
@@ -63,18 +63,18 @@ class BoltBytesApp extends StatelessWidget {
         ),
         textTheme: TextTheme(
           headlineLarge: const TextStyle(
-            fontFamily: 'Inter',
+            fontFamily: 'sans-serif-condensed',
             fontWeight: FontWeight.w800,
             letterSpacing: -1.1,
             height: 1,
           ),
           headlineMedium: const TextStyle(
-            fontFamily: 'Inter',
+            fontFamily: 'sans-serif-condensed',
             fontWeight: FontWeight.w800,
             letterSpacing: -0.45,
           ),
           headlineSmall: const TextStyle(
-            fontFamily: 'Inter',
+            fontFamily: 'sans-serif-condensed',
             fontWeight: FontWeight.w700,
           ),
           titleLarge: const TextStyle(fontWeight: FontWeight.w700),
@@ -145,8 +145,8 @@ class BoltBytesApp extends StatelessWidget {
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
             elevation: 0,
-            backgroundColor: violet,
-            foregroundColor: Colors.white,
+            backgroundColor: amber,
+            foregroundColor: const Color(0xFF171008),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
             textStyle: const TextStyle(
               fontWeight: FontWeight.w800,
@@ -170,11 +170,11 @@ class BoltBytesApp extends StatelessWidget {
         ),
         floatingActionButtonTheme: const FloatingActionButtonThemeData(
           foregroundColor: Colors.black,
-          backgroundColor: mint,
+          backgroundColor: amber,
         ),
         navigationBarTheme: const NavigationBarThemeData(
           backgroundColor: Color(0xF20A0E13),
-          indicatorColor: Color(0xFF38205E),
+          indicatorColor: Color(0xFF49351E),
           iconTheme: WidgetStatePropertyAll(
             IconThemeData(color: Color(0xFFDCE3EC)),
           ),
@@ -197,12 +197,12 @@ class BoltBytesApp extends StatelessWidget {
             color: Color(0xFF8D98A5),
             fontWeight: FontWeight.w600,
           ),
-          indicatorColor: Color(0xFF221F47),
+          indicatorColor: Color(0xFF3B2C1B),
           useIndicator: true,
         ),
         focusColor: const Color(0x3345E7C4),
         hoverColor: const Color(0x1AFFFFFF),
-        progressIndicatorTheme: const ProgressIndicatorThemeData(color: mint),
+        progressIndicatorTheme: const ProgressIndicatorThemeData(color: amber),
         chipTheme: ChipThemeData(
           backgroundColor: const Color(0xC40A121B),
           side: const BorderSide(color: Color(0xFF26313A)),
@@ -228,8 +228,8 @@ class BoltBytesApp extends StatelessWidget {
           ),
         ),
         sliderTheme: const SliderThemeData(
-          thumbColor: mint,
-          activeTrackColor: mint,
+          thumbColor: amber,
+          activeTrackColor: amber,
           inactiveTrackColor: Color(0xFF29323D),
           overlayShape: RoundSliderOverlayShape(overlayRadius: 18),
           valueIndicatorTextStyle: TextStyle(

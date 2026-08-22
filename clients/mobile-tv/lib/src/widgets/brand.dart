@@ -85,7 +85,7 @@ class _BrandPainter extends CustomPainter {
     final gradient = const LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [Color(0xFFB780FF), Color(0xFF6E3BC7), Color(0xFF43E7C4)],
+      colors: [Color(0xFFF0C06F), Color(0xFFB57429), Color(0xFF62C9A7)],
     ).createShader(Offset.zero & size);
     canvas.drawPath(shell, Paint()..shader = gradient);
     canvas.drawPath(

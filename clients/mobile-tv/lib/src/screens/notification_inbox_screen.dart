@@ -117,7 +117,7 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
                     unread
                         ? Icons.notifications_active
                         : Icons.notifications_none,
-                    color: unread ? const Color(0xFF43E7C4) : Colors.white38,
+                    color: unread ? const Color(0xFF62C9A7) : Colors.white38,
                   ),
                   title: Text(
                     item['title']?.toString() ?? 'BoltBytes Media',
