@@ -2,7 +2,16 @@
 
 import { ChevronLeft, ChevronRight, Film, FolderOpen, Play, SearchX, Tv, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { type FormEvent, useEffect, useState } from 'react';
+import {
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type WheelEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import styles from './catalog-view.module.css';
 import { api } from '@/lib/api';
 import { requestPlayback } from './web-player';
 import { PosterQualityBadges } from './poster-quality-badges';
@@ -101,6 +110,68 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const categoryRailRef = useRef<HTMLDivElement>(null);
+  const [categoryEdges, setCategoryEdges] = useState({ left: false, right: false });
+
+  const syncCategoryEdges = useCallback(() => {
+    const rail = categoryRailRef.current;
+    if (!rail) return;
+
+    const maximum = Math.max(0, rail.scrollWidth - rail.clientWidth);
+    setCategoryEdges({ left: rail.scrollLeft > 2, right: rail.scrollLeft < maximum - 2 });
+  }, []);
+
+  useEffect(() => {
+    const rail = categoryRailRef.current;
+    if (!rail) return;
+
+    const frame = window.requestAnimationFrame(syncCategoryEdges);
+    const observer = new ResizeObserver(syncCategoryEdges);
+    observer.observe(rail);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [catalog.facets.categories.length, syncCategoryEdges]);
+
+  const scrollCategories = (direction: -1 | 1) => {
+    const rail = categoryRailRef.current;
+    if (!rail) return;
+
+    rail.scrollBy({ left: direction * Math.max(280, rail.clientWidth * 0.72), behavior: 'smooth' });
+  };
+
+  const handleCategoryWheel = (event: WheelEvent<HTMLDivElement>) => {
+    const rail = categoryRailRef.current;
+    if (!rail || rail.scrollWidth <= rail.clientWidth) return;
+
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    const canMove = (delta < 0 && categoryEdges.left) || (delta > 0 && categoryEdges.right);
+    if (!canMove) return;
+
+    event.preventDefault();
+    rail.scrollLeft += delta;
+  };
+
+  const handleCategoryKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const rail = categoryRailRef.current;
+    if (!rail || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+
+    const buttons = [...rail.querySelectorAll<HTMLButtonElement>('button')];
+    const currentIndex = Math.max(0, buttons.indexOf(document.activeElement as HTMLButtonElement));
+    const targetIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? buttons.length - 1
+        : Math.min(buttons.length - 1, Math.max(0, currentIndex + (event.key === 'ArrowRight' ? 1 : -1)));
+    const target = buttons[targetIndex];
+    if (!target) return;
+
+    event.preventDefault();
+    target.focus();
+    target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  };
   const adminMode = basePath !== '/watch';
 
   useEffect(() => {
@@ -199,11 +270,36 @@ export function CatalogView({ basePath = '/' }: { basePath?: string }) {
             <option value="year">Nyeste årstal</option>
           </select>
         </label>
-        <div className="category-filters">
-          <button className={!searchParams.get('category') ? 'active' : ''} onClick={() => updateFilter('category', null)}>Alle</button>
-          {catalog.facets.categories.map((category) => (
-            <button className={searchParams.get('category') === category ? 'active' : ''} onClick={() => updateFilter('category', category)} key={category}>{category}</button>
-          ))}
+        <div className={styles.categoryShell}>
+          <div className={styles.categoryHeading}>
+            <div>
+              <span>Overordnede genrer</span>
+              <small>Rul vandret, eller brug pilene, for at se alle genrer.</small>
+            </div>
+            <div className={styles.categoryControls} aria-label="Rul gennem genrer">
+              <button aria-label="Rul genrer til venstre" disabled={!categoryEdges.left} onClick={() => scrollCategories(-1)} type="button">
+                <ChevronLeft aria-hidden="true" size={18} />
+              </button>
+              <button aria-label="Rul genrer til højre" disabled={!categoryEdges.right} onClick={() => scrollCategories(1)} type="button">
+                <ChevronRight aria-hidden="true" size={18} />
+              </button>
+            </div>
+          </div>
+          <div className={`${styles.categoryRailFrame} ${categoryEdges.left ? styles.canScrollLeft : ''} ${categoryEdges.right ? styles.canScrollRight : ''}`}>
+            <div
+              className={`category-filters ${styles.categoryRail}`}
+              data-horizontal-scroller
+              onKeyDown={handleCategoryKeyboard}
+              onScroll={syncCategoryEdges}
+              onWheel={handleCategoryWheel}
+              ref={categoryRailRef}
+            >
+              <button className={!searchParams.get('category') ? 'active' : ''} onClick={() => updateFilter('category', null)} type="button">Alle</button>
+              {catalog.facets.categories.map((category) => (
+                <button className={searchParams.get('category') === category ? 'active' : ''} onClick={() => updateFilter('category', category)} key={category} type="button">{category}</button>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
       {error && <div className="form-error">{error}</div>}
