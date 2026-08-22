@@ -997,6 +997,15 @@ BB_MEDIA_CAST_RECEIVER_APP_ID=YOUR_REGISTERED_CAST_APP_ID
 Create the repository Actions variable `BB_MEDIA_CAST_RECEIVER_APP_ID` before building the APK. The server's public receiver URL is `https://media.boltbytes.com/cast/receiver`; register that HTTPS URL in the Google Cast SDK Developer Console and register the physical Chromecast as a test device while the receiver is unpublished. If the variable is absent, Android deliberately falls back to Google's Default Media Receiver (`CC1AD845`) and the diagnostic dialog shows that fallback.
 
 Physical acceptance still requires an Android phone and Chromecast on the same Wi-Fi: discovery must list the device, handoff must start media, subtitles must switch, navigation away from the player must leave playback running, the global mini player must control the receiver, and stop/logout must release the server session.
+
+## Global kundesøgning - 2026-08-22
+
+- Kundeheaderens søgefelt er nu en serverdrevet combobox, der søger på tværs af lokale afspillelige film, samleserier, personer og genrer.
+- Episodefiler kollapses til én serie i resultaterne. Søgeresultater sender derfor kunden til den samlede sæson- og episodeoplevelse frem for en vilkårlig episode.
+- Søgningen er accent- og tegnsætningsuafhængig for dansk tekst, scorer eksakte og begyndende titelmatch højest og matcher også beskrivelser, credits og genrer.
+- Resultaterne er account-scopede og indeholder aldrig provider-titler, der ikke findes som afspillelige filer på den lokale server.
+- UI'et understøtter debounce, stale-response-beskyttelse, tastaturvalg med pil op/ned, Enter og Escape, seneste lokale søgninger samt direkte navigation til titel-, person- og genresider.
+- `GET /api/v1/experience/search?q=<tekst>` returnerer grupperne `titles`, `people` og `genres`; forespørgsler under to tegn returnerer et tomt resultat uden katalogscan.
 # Native Android playback, TV controls and signed updates
 
 The Flutter client now shares one server-side playback model across Android mobile, Android TV and Chromecast. Series playback uses `/playback/history/series-next`, profile `autoplayNext`, and real timeline markers for intro, recap and credits actions. A ten-second credits countdown can advance to the next local episode and can be cancelled by the viewer.
