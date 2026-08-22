@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@boltbytes/contracts": "file:../../shared/contracts",
-    "@prisma/client": "5.22.0"
+    "@prisma/client": "5.22.0",
+    "chokidar": "4.0.3"
   },
   "devDependencies": {
     "@types/node": "22.19.15",

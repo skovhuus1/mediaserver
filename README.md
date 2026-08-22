@@ -424,6 +424,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart 
 - Vedvarende worker-kø med `FOR UPDATE SKIP LOCKED`, jobforsøg, retry/backoff og lease-cleanup.
 - Manuel biblioteksscanning via durable `library.scan` jobs med sikker realpath-kontrol, symlink-afvisning, `ffprobe`-metadata og markering af manglende filer uden automatisk sletning.
 - Valgfri planlagt biblioteksscanning pr. bibliotek fra hvert 5. minut til hver 7. dag. Workeren bruger durable jobs og PostgreSQL advisory locks, så parallelle workerinstanser ikke opretter dobbelte scanninger.
+- Eventbaseret filesystem watching køer en inkrementel scan efter nye, ændrede eller slettede mediefiler. Store filer afventes til størrelsen er stabil, eventbursts samles pr. bibliotek, og samme advisory lock forhindrer dubletter på tværs af workers.
 - Inkrementel ændringsdetektion sammenligner filstørrelse og ændringstid og genbruger eksisterende probe-data for uændrede filer. Nye, ændrede og tidligere manglende filer analyseres fortsat med `ffprobe`.
 - Direkte medielevering med HTTP `HEAD`, single-range `GET`, `206 Partial Content`, suffix ranges og hash-valideret session-token; query strings udelades fra API-logs, og stream-access logs er deaktiveret i nginx.
 - Integreret fuldskærms-webafspiller med egen tidslinje, play/pause, 10-sekunders hop, lydstyrke, hastighed, lydspor, faktiske undertekstspor, kvalitetsvalg, information, tastaturstyring og responsivt mobillayout. Server-side authorize, kortlivet stream-token, 30-sekunders lease-heartbeat, fremdriftslagring hvert 10. sekund og sikker frigivelse af stream-plads ved stop er bevaret.
@@ -500,7 +501,7 @@ Bibliotekssletning blokeres også, mens et medie har en aktiv, ikke-udløbet pla
 
 Biblioteksscanneren klassificerer filer deterministisk før ekstern metadataopslag. Film får renset titel, årstal og kategori fra mappestrukturen. Serie- og mixed-biblioteker genkender `S01E02`, `1x02`, `Season 01`, `Sæson 01` og `S01`, og gemmer kategori, serienavn, sæson og episode server-side. CI verificerer klassifikationen gennem en rigtig scannet MP4 og unit tests dækker film, serier og mixed-biblioteker.
 
-Automatisk scanning aktiveres under `Biblioteker > Rediger bibliotek`. Intervallet gemmes i databasen, og bibliotekssiden opdaterer queued/running/completed/failed-status hvert tredje sekund. Schedulerens kontrol kører hvert 30. sekund, men opretter først et job, når bibliotekets valgte interval er udløbet. En schedulerfejl logges isoleret og stopper ikke workerens øvrige jobbehandling.
+Automatisk scanning aktiveres under `Biblioteker > Rediger bibliotek`. Intervallet gemmes i databasen, og bibliotekssiden opdaterer queued/running/completed/failed-status hvert tredje sekund. Schedulerens kontrol kører hvert 30. sekund, men opretter først et job, når bibliotekets valgte interval er udløbet. Den samme indstilling aktiverer filesystem watching, som normalt køer en scan cirka 25 sekunder efter en færdig filændring. Watcher- eller schedulerfejl logges isoleret og stopper ikke workerens øvrige jobbehandling.
 
 Manuel metadata-matchning åbnes fra en titel i admin-katalogets detaljepanel. `GET /api/v1/media/:id/metadata/matches?q=...` udfører kun søgning, mens `POST /api/v1/media/:id/metadata/match` validerer provider-id'et, opretter eller erstatter den varige binding, låser de berørte katalogposter og opretter et durable `media.metadata`-job. Kun administratorer har adgang; valg, omfang, provider-id, job-id og antal berørte katalogposter gemmes i auditloggen. Oplåsning bevarer bindingen, men tillader automatiske metadataopdateringer fra den samme valgte provider.
 
@@ -519,7 +520,7 @@ Manuel metadata-matchning åbnes fra en titel i admin-katalogets detaljepanel. `
 - iOS og øvrige native klienter samt signerede Android-release artifacts. Android/Android TV-fundamentet findes nu i `clients/mobile-tv`.
 - Backup/restore-automatisering og release artifacts.
 
-Scannerens titel er i denne fase afledt af filnavnet. Scanning startes manuelt fra API/admin; automatisk filesystem watching og planlagte scanninger er endnu ikke implementeret. De øvrige punkter må ikke betragtes som implementeret, selv om fundamentet er forberedt.
+Scannerens titel starter fortsat fra filnavnet og beriges derefter af metadataflowet. Manuel, planlagt og eventbaseret scanning er implementeret; mounts uden pålidelige fil-events dækkes fortsat af det valgte planlagte scaninterval.
 
 ## Udvikling
 
@@ -849,9 +850,17 @@ Kapaciteten konfigureres i `.env`:
 ```env
 BB_MEDIA_SCAN_MAX_CONCURRENT=2
 BB_MEDIA_METADATA_MAX_CONCURRENT=2
+BB_MEDIA_WATCH_ENABLED=true
+BB_MEDIA_WATCH_USE_POLLING=false
+BB_MEDIA_WATCH_POLL_INTERVAL_MS=10000
+BB_MEDIA_WATCH_WRITE_STABILITY_MS=20000
+BB_MEDIA_WATCH_DEBOUNCE_MS=5000
+BB_MEDIA_WATCH_REFRESH_INTERVAL_MS=60000
 ```
 
 Scan- og metadata-grænser accepterer `1-8`. Start med `2`, også på en kraftig server, og hæv først til `3` eller `4`, når disk-I/O, PostgreSQL og TMDB/TVDB-rate limits er observeret under en fuld scanning. En høj CPU-kapacitet fjerner ikke disk- eller providerbegrænsninger.
+
+Native filesystem-events er standard og har lavest belastning. Hvis biblioteket ligger på NFS, SMB, FUSE eller et andet mount uden stabile events, kan `BB_MEDIA_WATCH_USE_POLLING=true` aktiveres. Pollingintervallet bør normalt være mindst `10000` ms på store biblioteker; det planlagte scaninterval forbliver fallback, hvis mountet hverken leverer events eller tåler polling.
 
 Validering:
 

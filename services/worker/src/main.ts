@@ -18,6 +18,7 @@ import { prepareOfflineDownload } from './offline-downloads.js';
 import { deliverPushNotification, queueOfflineReadyNotification } from './push-notifications.js';
 import { updateJobProgress, withJobProgress } from './job-progress.js';
 import { buildSdrColorMetadataArguments, resolveVideoColorPipeline } from './video-color.js';
+import { LibraryChangeDetector, resolveLibraryWatchConfig, type LibraryFileChange } from './library-change-detector.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -80,6 +81,9 @@ async function resolveConfiguredLibraryPath(
 }
 let stopping = false;
 let lastLibraryScheduleCheck = 0;
+let lastLibraryWatchSync = 0;
+let libraryChangeDetector: LibraryChangeDetector | null = null;
+const libraryWatchConfig = resolveLibraryWatchConfig(process.env);
 
 type ClaimedJob = SystemJob & { attemptNumber: number };
 type ProbeMetadata = {
@@ -1265,7 +1269,16 @@ async function queueDueLibraryScans(): Promise<void> {
   for (const library of libraries) {
     const last = library.lastScheduledScanAt ?? library.scans[0]?.createdAt ?? null;
     if (last && now.getTime() - last.getTime() < library.scanIntervalMinutes * 60_000) continue;
-    await prisma.$transaction(async (tx) => {
+    await queueLibraryScanIfIdle(library, 'scheduler');
+  }
+}
+
+async function queueLibraryScanIfIdle(
+  library: { id: string; accountId: string },
+  requestedBy: 'scheduler' | 'filesystem-watcher',
+  change?: LibraryFileChange,
+): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
       await tx.$queryRaw`
         SELECT pg_advisory_xact_lock(
           hashtext('bbmedia:library-scan'),
@@ -1275,7 +1288,7 @@ async function queueDueLibraryScans(): Promise<void> {
       const active = await tx.libraryScan.findFirst({
         where: { libraryId: library.id, status: { in: ['queued', 'running'] } },
       });
-      if (active) return;
+      if (active) return false;
       const scan = await tx.libraryScan.create({
         data: { accountId: library.accountId, libraryId: library.id, status: 'queued' },
       });
@@ -1284,14 +1297,68 @@ async function queueDueLibraryScans(): Promise<void> {
           accountId: library.accountId,
           type: 'library.scan',
           status: 'queued',
-          payload: { libraryId: library.id, scanId: scan.id, requestedBy: 'scheduler' },
+          payload: {
+            libraryId: library.id,
+            scanId: scan.id,
+            requestedBy,
+            ...(change ? { triggerEvent: change.event, triggerPath: change.path.slice(0, 1_000) } : {}),
+          },
           maxAttempts: 3,
         },
       });
       await tx.libraryScan.update({ where: { id: scan.id }, data: { jobId: job.id } });
-      await tx.library.update({ where: { id: library.id }, data: { lastScheduledScanAt: now } });
+      await tx.library.update({ where: { id: library.id }, data: { lastScheduledScanAt: new Date() } });
+      return true;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
+async function syncLibraryChangeDetector(): Promise<void> {
+  if (!libraryWatchConfig.enabled) {
+    await libraryChangeDetector?.close();
+    libraryChangeDetector = null;
+    return;
   }
+  libraryChangeDetector ??= new LibraryChangeDetector(
+    libraryWatchConfig,
+    async (change) => {
+      const queued = await queueLibraryScanIfIdle(
+        { id: change.libraryId, accountId: change.accountId },
+        'filesystem-watcher',
+        change,
+      );
+      if (queued) console.info(JSON.stringify({
+        level: 'info',
+        component: 'library-watcher',
+        message: 'Queued library scan after filesystem change',
+        libraryId: change.libraryId,
+        event: change.event,
+        path: change.path,
+      }));
+    },
+    (error, libraryId) => console.warn(JSON.stringify({
+      level: 'warn',
+      component: 'library-watcher',
+      message: 'Library watcher reported an error; scheduled scanning remains active',
+      libraryId,
+      error: error instanceof Error ? error.message : 'Unknown watcher failure',
+    })),
+  );
+  const libraries = await prisma.library.findMany({
+    where: { autoScanEnabled: true },
+    select: { id: true, accountId: true, paths: { select: { path: true } } },
+  });
+  const count = await libraryChangeDetector.sync(libraries.map((library) => ({
+    id: library.id,
+    accountId: library.accountId,
+    paths: library.paths.map((path) => path.path),
+  })));
+  console.info(JSON.stringify({
+    level: 'info',
+    component: 'library-watcher',
+    message: 'Synchronized library filesystem watchers',
+    watchedLibraries: count,
+    usePolling: libraryWatchConfig.usePolling,
+  }));
 }
 
 async function rescheduleRecurringJob(job: ClaimedJob): Promise<void> {
@@ -1341,7 +1408,11 @@ async function executeClaimedJob(job: ClaimedJob): Promise<void> {
 
 async function loop(): Promise<void> {
   await prisma.$connect();
-  if (workerMode === 'jobs') await ensureRecurringLeaseJob();
+  if (workerMode === 'jobs') {
+    await ensureRecurringLeaseJob();
+    await syncLibraryChangeDetector();
+    lastLibraryWatchSync = Date.now();
+  }
   const activeJobs = new Map<string, { type: string; promise: Promise<void> }>();
   console.info(JSON.stringify({
     level: 'info',
@@ -1378,6 +1449,20 @@ async function loop(): Promise<void> {
         }));
       }
     }
+    if (workerMode === 'jobs' && Date.now() - lastLibraryWatchSync >= libraryWatchConfig.refreshIntervalMs) {
+      lastLibraryWatchSync = Date.now();
+      try {
+        await syncLibraryChangeDetector();
+      } catch (error) {
+        console.error(JSON.stringify({
+          level: 'error',
+          component: 'library-watcher',
+          workerId,
+          message: 'Unable to synchronize library watchers; scheduled scanning remains active',
+          error: error instanceof Error ? error.message : 'Unknown watcher synchronization failure',
+        }));
+      }
+    }
     const allowedTypes = claimableWorkerJobTypes({
       workerMode,
       activeJobTypes: [...activeJobs.values()].map((active) => active.type),
@@ -1395,6 +1480,7 @@ async function loop(): Promise<void> {
     ]);
   }
   await Promise.allSettled([...activeJobs.values()].map((active) => active.promise));
+  await libraryChangeDetector?.close();
   await prisma.$disconnect();
 }
 
@@ -1413,6 +1499,7 @@ void loop().catch(async (error: unknown) => {
     workerId,
     error: error instanceof Error ? error.message : 'Unknown worker startup failure',
   }));
+  await libraryChangeDetector?.close();
   await prisma.$disconnect();
   process.exitCode = 1;
 });
