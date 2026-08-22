@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Header, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Put, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +14,9 @@ import { jobPayload, jobReferences, presentJobProgress } from './system-jobs';
 import { collectDefaultMetrics, register } from 'prom-client';
 import { DiagnosticsService } from './diagnostics.service';
 import { cpus, freemem, loadavg, totalmem, uptime } from 'node:os';
+import type { Request, Response } from 'express';
+import { BackupService } from './backup.service';
+import { RestoreBackupDto } from './system.dto';
 
 type CpuSnapshot = { idle: number; total: number };
 
@@ -66,6 +69,7 @@ export class SystemController {
     private readonly redis: RedisService,
     private readonly updater: UpdaterService,
     private readonly diagnosticsService: DiagnosticsService,
+    private readonly backups: BackupService,
   ) {}
 
   @Public()
@@ -131,6 +135,52 @@ export class SystemController {
       ...serverStatsSnapshot(),
       transcoder: resolveTranscoderStatus(persistedStatus?.value, { running, queued }, now),
     };
+  }
+
+  @Get('backups')
+  @Roles('admin')
+  backupsList(@CurrentUser() actor: AuthenticatedUser) {
+    return this.backups.list(actor);
+  }
+
+  @Post('backups')
+  @Roles('admin')
+  createBackup(@CurrentUser() actor: AuthenticatedUser) {
+    return this.backups.create(actor);
+  }
+
+  @Post('backups/import')
+  @Roles('admin')
+  importBackup(@CurrentUser() actor: AuthenticatedUser, @Req() request: Request, @Headers('content-length') contentLength: string | undefined) {
+    return this.backups.import(actor, request, contentLength);
+  }
+
+  @Get('backups/:filename/download')
+  @Roles('admin')
+  async downloadBackup(@CurrentUser() actor: AuthenticatedUser, @Param('filename') filename: string, @Res() response: Response) {
+    const file = await this.backups.download(actor, filename);
+    response.setHeader('Content-Type', 'application/vnd.boltbytes.backup');
+    response.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    response.setHeader('Content-Length', String(file.size));
+    file.stream.pipe(response);
+  }
+
+  @Delete('backups/:filename')
+  @Roles('admin')
+  deleteBackup(@CurrentUser() actor: AuthenticatedUser, @Param('filename') filename: string) {
+    return this.backups.remove(actor, filename);
+  }
+
+  @Post('backups/:filename/restore-plan')
+  @Roles('admin')
+  restorePlan(@CurrentUser() actor: AuthenticatedUser, @Param('filename') filename: string) {
+    return this.backups.restorePlan(actor, filename);
+  }
+
+  @Post('backups/:filename/restore')
+  @Roles('admin')
+  restoreBackup(@CurrentUser() actor: AuthenticatedUser, @Param('filename') filename: string, @Body() input: RestoreBackupDto) {
+    return this.backups.restore(actor, filename, input.challengeToken, input.confirmation);
   }
 
   @Get('jobs')

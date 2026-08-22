@@ -27,3 +27,13 @@ export class UpdateServerSettingsDto {
   @Length(1, 100)
   timezone?: string;
 }
+
+export class RestoreBackupDto {
+  @IsString()
+  @Length(20, 4096)
+  challengeToken!: string;
+
+  @IsString()
+  @Length(10, 260)
+  confirmation!: string;
+}

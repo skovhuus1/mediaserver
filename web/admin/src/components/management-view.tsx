@@ -7,6 +7,7 @@ import { api, type ApiFailure } from '@/lib/api';
 import { PlaybackAnalysis } from './playback-analysis';
 import { OperationsCenter } from './operations-center';
 import { DiagnosticsCenter } from './diagnostics-center';
+import { BackupManager } from './backup-manager';
 
 type Root = { id: string; label: string; mountPath: string; isReadOnly: boolean };
 type Scan = { id: string; status: string; filesSeen: number; filesCreated: number; errors: number; error: string | null };
@@ -75,6 +76,7 @@ export function ManagementView({ view }: { view: string }) {
   if (view === 'tasks') return <OperationsCenter />;
   if (view === 'playback-analysis') return <PlaybackAnalysis />;
   if (view === 'diagnostics') return <DiagnosticsCenter />;
+  if (view === 'backups') return <BackupManager />;
   if (view === 'libraries') return <LibrariesView />;
   if (view === 'users') return <UsersView />;
   if (view === 'plans') return <PlansView />;
