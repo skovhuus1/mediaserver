@@ -37,8 +37,11 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
     <div className={`watch-shell ${styles.shell}`}>
       <header className={`watch-header ${styles.header}`}>
         <Link aria-label="BoltBytes hjem" href="/watch"><Brand /></Link>
-        <nav className={styles.nav}>{links.map(({ href, label, icon: Icon }) => <Link className={active(href) ? 'active' : ''} href={href} key={href}><Icon size={16} />{label}</Link>)}</nav>
-        <form className={`watch-search ${styles.search}`} action="/watch"><Search size={16} /><input name="q" defaultValue={searchParams.get('q') ?? ''} placeholder="Søg i dit bibliotek" /></form>
+        <nav aria-label="Kundenavigation" className={styles.nav}>{links.map(({ href, label, icon: Icon }) => {
+          const isActive = active(href);
+          return <Link aria-current={isActive ? 'page' : undefined} className={isActive ? 'active' : ''} href={href} key={href}><Icon size={16} />{label}</Link>;
+        })}</nav>
+        <form className={`watch-search ${styles.search}`} action="/watch"><Search size={16} /><input aria-label="Søg i dit bibliotek" name="q" type="search" defaultValue={searchParams.get('q') ?? ''} placeholder="Søg i dit bibliotek" /></form>
         <div className={`watch-account ${styles.account}`}>
           {isAdmin && <Link className={`admin-return ${styles.accountLink}`} href="/"><ChevronLeft size={15} />Admin</Link>}
           <Link className={`admin-return ${styles.accountLink}`} href="/watch/settings">Indstillinger</Link>

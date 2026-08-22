@@ -294,6 +294,8 @@ export function WebPlayer() {
   const qualitySelectionRef = useRef(-1);
   const deferredAutoLevelCapRef = useRef(-1);
   const timelineOffsetRef = useRef(0);
+  const pendingStreamSeekRef = useRef<number | null>(null);
+  const restartStreamAtRef = useRef<(targetSeconds: number) => void>(() => undefined);
   const seekProgressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const upscaleUnlockedRef = useRef(false);
   const completedTransitionRef = useRef(false);
@@ -469,6 +471,7 @@ export function WebPlayer() {
     setNextEpisodeCountdown(null);
     creditsAutoplaySuppressedRef.current = false;
     timelineOffsetRef.current = 0;
+    pendingStreamSeekRef.current = null;
     upscaleUnlockedRef.current = false;
     deferredAutoLevelCapRef.current = -1;
     setUpscaleUnlocked(false);
@@ -492,6 +495,7 @@ export function WebPlayer() {
   }, []);
 
   const restartStreamAt = useCallback(async (targetSeconds: number) => {
+    pendingStreamSeekRef.current = targetSeconds;
     const currentAuthorization = authorization;
     const video = videoRef.current;
     if (
@@ -500,11 +504,13 @@ export function WebPlayer() {
       || currentAuthorization.method === 'direct_play'
       || streamRestartingRef.current
     ) return;
+    const requestedTarget = pendingStreamSeekRef.current;
+    pendingStreamSeekRef.current = null;
     streamRestartingRef.current = true;
     const fullDuration = mediaRef.current?.file?.durationMs
       ? mediaRef.current.file.durationMs / 1000
       : duration;
-    const target = Math.max(0, Math.min(Math.max(0, fullDuration - 1), targetSeconds));
+    const target = Math.max(0, Math.min(Math.max(0, fullDuration - 1), requestedTarget));
     const activeTrack = currentAuthorization.subtitleTracks.find(
       (track) => track.id === activeSubtitleRef.current,
     );
@@ -525,7 +531,10 @@ export function WebPlayer() {
       });
       const ready = await waitForTranscode(
         configuration.transcodeStatusUrl,
-        () => sessionRef.current === currentAuthorization.sessionId,
+        () => (
+          sessionRef.current === currentAuthorization.sessionId
+          && pendingStreamSeekRef.current === null
+        ),
       );
       if (!ready) return;
       timelineOffsetRef.current = target;
@@ -542,12 +551,28 @@ export function WebPlayer() {
       setStatus(`${configuration.method === 'direct_stream' ? 'Direct Stream' : 'Transcoding'} · HLS · fra ${formatTime(target)}`);
       setSourceReady(true);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Den valgte position kunne ikke forberedes.');
-      setStatus('');
+      if (pendingStreamSeekRef.current === null) {
+        setError(reason instanceof Error ? reason.message : 'Den valgte position kunne ikke forberedes.');
+        setStatus('');
+      }
     } finally {
       streamRestartingRef.current = false;
+      const pendingTarget = pendingStreamSeekRef.current;
+      if (
+        pendingTarget !== null
+        && sessionRef.current === currentAuthorization.sessionId
+      ) {
+        pendingStreamSeekRef.current = null;
+        window.setTimeout(() => restartStreamAtRef.current(pendingTarget), 0);
+      }
     }
   }, [authorization, duration, saveProgress]);
+
+  useEffect(() => {
+    restartStreamAtRef.current = (targetSeconds) => {
+      void restartStreamAt(targetSeconds);
+    };
+  }, [restartStreamAt]);
 
   const recoverWithTranscode = useCallback(async (
     currentAuthorization: Authorization,
@@ -603,8 +628,6 @@ export function WebPlayer() {
       ? mediaRef.current.file.durationMs / 1000
       : timelineOffsetRef.current + (video.duration || Number.MAX_SAFE_INTEGER);
     const target = Math.max(0, Math.min(fullDuration, targetSeconds));
-    resumeRef.current = Math.round(target * 1_000);
-    resumeAppliedRef.current = false;
     const localTarget = target - timelineOffsetRef.current;
     if (
       authorization?.method === 'direct_play'
@@ -621,6 +644,9 @@ export function WebPlayer() {
       }, 250);
       return;
     }
+    resumeRef.current = 0;
+    resumeAppliedRef.current = true;
+    setCurrentTime(target);
     void restartStreamAt(target);
   }, [authorization?.method, restartStreamAt]);
 
@@ -648,6 +674,8 @@ export function WebPlayer() {
         const currentRequest = ++requestNumber.current;
         setMedia(request.media);
         mediaRef.current = request.media;
+        timelineOffsetRef.current = 0;
+        pendingStreamSeekRef.current = null;
         resumeRef.current = request.resumePositionMs;
         resumeAppliedRef.current = false;
         fallbackAttemptedRef.current = false;
@@ -657,6 +685,8 @@ export function WebPlayer() {
         setQualitySelection(-1);
         setCurrentQuality(-1);
         setQualitySwitching(null);
+        setCurrentTime(Math.max(0, request.resumePositionMs / 1_000));
+        setDuration(request.media.file?.durationMs ? request.media.file.durationMs / 1_000 : 0);
         setError('');
         setCastNotice('');
         setSubtitleCue('');
@@ -784,7 +814,7 @@ export function WebPlayer() {
       const target = playbackResumeTargetSeconds(resumeRef.current, video.duration);
       if (target !== null) {
         video.currentTime = target;
-        setCurrentTime(target);
+        setCurrentTime(timelineOffsetRef.current + target);
       }
       resumeAppliedRef.current = true;
       return true;
