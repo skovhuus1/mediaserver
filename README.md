@@ -9,6 +9,7 @@ BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde me
 - En PostgreSQL advisory lock reserverer forbindelser atomisk og håndhæver både abonnementets samlede streamgrænse, udbyderens brugergrænse og hver forbindelses kapacitet.
 - Afspilleren bruger Direct HLS, når kilden er kompatibel, ellers FFmpeg-remux og softwaretranscoding via den eksisterende worker/transcoder-arkitektur.
 - Kundeportalen viser kanalguide, nu/næste, favoritter og hurtig kanalnavigation på `/watch/live`.
+- TV-drift på `/live-tv/operations` automatiserer M3U/XMLTV, viser linjehealth, jobs og aktive streams samt giver sikker admin-afbrydelse.
 - Den stabile version før Live TV kan gendannes fra tagget `backup-pre-live-tv-20260823`.
 
 Den komplette drift-, sikkerheds- og rollbackvejledning findes i [Live TV-dokumentationen](docs/live-tv.md).

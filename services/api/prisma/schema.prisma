@@ -952,6 +952,11 @@ model LiveTvProvider {
   enabled            Boolean            @default(true)
   priority           Int                @default(100)
   perUserStreamLimit Int                @default(1) @map("per_user_stream_limit")
+  autoRefreshEnabled Boolean            @default(true) @map("auto_refresh_enabled")
+  playlistRefreshMinutes Int            @default(60) @map("playlist_refresh_minutes")
+  epgRefreshMinutes      Int            @default(360) @map("epg_refresh_minutes")
+  lastPlaylistQueuedAt   DateTime?      @map("last_playlist_queued_at")
+  lastEpgQueuedAt        DateTime?      @map("last_epg_queued_at")
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
   account            Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -961,6 +966,7 @@ model LiveTvProvider {
 
   @@unique([accountId, name])
   @@index([accountId, enabled, priority])
+  @@index([accountId, enabled, autoRefreshEnabled])
   @@map("live_tv_providers")
 }
 

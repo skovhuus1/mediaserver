@@ -50,6 +50,7 @@ const admin = [
   { label: 'Backup', icon: HardDriveDownload, href: '/?admin=backups' },
   { label: 'Sonarr / Radarr', icon: SatelliteDish, href: '/?admin=servarr' },
   { label: 'Live TV', icon: Radio, href: '/live-tv/admin' },
+  { label: 'TV-drift', icon: Radio, href: '/live-tv/operations' },
   { label: t.updates, icon: Sparkles, href: '/update' },
   { label: t.settings, icon: Settings, href: '/?admin=settings' },
 ];

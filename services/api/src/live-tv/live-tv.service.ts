@@ -243,12 +243,17 @@ export class LiveTvService {
   }
 
   private async queueUnique(actor: AuthenticatedUser, type: string, providerId: string) {
-    const pending = await this.prisma.systemJob.findMany({ where: { accountId: actor.accountId, type, status: { in: ['queued', 'running'] } }, take: 100 });
-    const existing = pending.find((job) => (job.payload as Record<string, unknown>)?.providerId === providerId);
-    if (existing) return existing;
-    const job = await this.prisma.systemJob.create({ data: { accountId: actor.accountId, type, status: 'queued', payload: { providerId } } });
-    await this.audit(actor, `${type}.queue`, job.id, { providerId });
-    return job;
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('bbmedia:live-tv-maintenance'), hashtext(CAST(${actor.accountId} AS text)))::text AS lock_result`;
+      const pending = await tx.systemJob.findMany({ where: { accountId: actor.accountId, type, status: { in: ['queued', 'running'] } }, take: 100 });
+      const existing = pending.find((job) => (job.payload as Record<string, unknown>)?.providerId === providerId);
+      if (existing) return { job: existing, created: false };
+      const job = await tx.systemJob.create({ data: { accountId: actor.accountId, type, status: 'queued', maxAttempts: 3, payload: { providerId, requestedBy: actor.sub, trigger: 'manual' } } });
+      await tx.liveTvProvider.updateMany({ where: { id: providerId, accountId: actor.accountId }, data: type === 'live-tv.import' ? { lastPlaylistQueuedAt: new Date() } : { lastEpgQueuedAt: new Date() } });
+      return { job, created: true };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    if (result.created) await this.audit(actor, `${type}.queue`, result.job.id, { providerId });
+    return result.job;
   }
 
   private provider(actor: AuthenticatedUser, id: string) {

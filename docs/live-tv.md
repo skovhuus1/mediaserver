@@ -66,6 +66,10 @@ M3U er som standard begrænset til 50 MiB og XMLTV til 200 MiB. Workerens eksist
 
 ## Drift og fejlsøgning
 
+TV-driftssiden på `/live-tv/operations` viser schedulerstatus, linjehealth, de seneste M3U/XMLTV-jobs og aktive leases med metode, bitrate, buffer og stall-tæller. Administratorer kan afbryde en defekt session; operators har read-only adgang.
+
+Hver aktiv udbyder kan automatisk opdatere M3U og XMLTV med separate intervaller. Schedulerens PostgreSQL advisory lock og aktive-job-deduplikering gør den sikker ved flere API-replikaer. Udløbne leases markeres og deres streamjob annulleres, mens EPG-poster ældre end 48 timer ryddes automatisk.
+
 - Manglende kanaler: kontrollér importjobbet og udbyderens seneste fejl i Live TV-panelet.
 - Manglende guide: kontrollér XMLTV-URL, tidszone og kanalernes XMLTV-id-match.
 - Ingen ledig forbindelse: kontrollér aktive leases, `perUserStreamLimit`, `maxStreams` og planens samlede streamloft.
