@@ -1,4 +1,4 @@
-import { selectMetadataCandidate, type MetadataCandidate } from '@boltbytes/contracts';
+import { metadataOverrideMapKey, resolveMetadataOverrideData, selectMetadataCandidate, type MetadataCandidate, type ScopedMetadataOverride } from '@boltbytes/contracts';
 import type { PrismaClient } from '@prisma/client';
 import { decryptSecret } from './secret-value.js';
 import { normalizeTvdbEpisodeOrder, tvdbSeasonTypePriority } from './tvdb-episode-order.js';
@@ -83,6 +83,13 @@ export async function enrichLibraryMetadata(
   const bindingMap = new Map(bindings.map((binding) => [
     `${binding.libraryId}:${binding.mediaType}:${binding.localKey}`,
     binding,
+  ]));
+  const metadataOverrides = await prisma.metadataOverride.findMany({
+    where: { accountId: input.accountId, ...(input.libraryId ? { libraryId: input.libraryId } : {}) },
+  });
+  const overrideMap = new Map(metadataOverrides.map((override) => [
+    metadataOverrideMapKey(override.libraryId, override.seriesKey, override.scopeKey),
+    override satisfies ScopedMetadataOverride,
   ]));
   let matched = 0;
   let unmatched = 0;
@@ -303,6 +310,12 @@ export async function enrichLibraryMetadata(
     });
     matched += 1;
     await reportProgress();
+  }
+  for (const item of items) {
+    const overrideData = resolveMetadataOverrideData(item, overrideMap);
+    if (Object.keys(overrideData).length > 0) {
+      await prisma.mediaItem.update({ where: { id: item.id }, data: overrideData });
+    }
   }
   return { inspected: items.length, matched, unmatched };
 }

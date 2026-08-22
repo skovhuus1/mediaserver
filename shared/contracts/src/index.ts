@@ -59,3 +59,5 @@ export type ApiError = {
   correlationId: string;
   details?: unknown;
 };
+
+export * from './metadata-overrides.js';
