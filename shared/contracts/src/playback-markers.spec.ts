@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildTrickplayCues,
+  analyzeRepeatedIntro,
   chapterTimelineMarkers,
   creditsMarkerFromBlackSegments,
   detectRepeatedIntro,
@@ -40,6 +41,27 @@ describe('playback markers and trickplay', () => {
   it('does not turn static black frames into an intro', () => {
     const fingerprint = { intervalSeconds: 5, offsetSeconds: 15, hashes: Array(20).fill('0000000000000000') };
     expect(detectRepeatedIntro(fingerprint, [fingerprint])).toBeNull();
+  });
+
+  it('requires consensus from two episodes for production intro analysis', () => {
+    const repeated = Array.from({ length: 18 }, (_, index) => (0x100000n + BigInt(index * 7919)).toString(16).padStart(16, '0'));
+    const primary: FrameFingerprint = { version: 2, intervalSeconds: 5, offsetSeconds: 15, hashes: ['abc0000000000001', ...repeated], quality: Array(19).fill(0.8) };
+    const first: FrameFingerprint = { version: 2, intervalSeconds: 5, offsetSeconds: 15, hashes: ['def0000000000002', ...repeated], quality: Array(19).fill(0.7) };
+    const second: FrameFingerprint = { version: 2, intervalSeconds: 5, offsetSeconds: 15, hashes: ['fed0000000000003', ...repeated], quality: Array(19).fill(0.9) };
+    expect(analyzeRepeatedIntro(primary, [first])).toMatchObject({ state: 'pending', reason: 'insufficient_references' });
+    expect(analyzeRepeatedIntro(primary, [first, second])).toMatchObject({
+      state: 'detected',
+      reason: 'detected',
+      referenceCount: 2,
+      supportCount: 2,
+      marker: { kind: 'intro', source: 'automatic' },
+    });
+  });
+
+  it('rejects visually empty fingerprints even when their hashes happen to vary', () => {
+    const hashes = Array.from({ length: 20 }, (_, index) => (0x2000n + BigInt(index)).toString(16).padStart(16, '0'));
+    const dark: FrameFingerprint = { version: 2, intervalSeconds: 5, offsetSeconds: 15, hashes, quality: Array(20).fill(0.02) };
+    expect(analyzeRepeatedIntro(dark, [dark, dark])).toMatchObject({ state: 'not-detected', reason: 'low_information' });
   });
 
   it('accepts only a late black transition as automatic credits evidence', () => {

@@ -1,5 +1,20 @@
 # BoltBytes Media Server
 
+## Playback-analyse v2: repræsentative previews og sikker intro-konsensus
+
+Playback Lab analyserer nu serier på tværs af episoder i stedet for at gætte ud fra én enkelt fil:
+
+- Workeren opretter et separat `preview.jpg` med FFmpegs repræsentative frame-udvælgelse, så adminpanelet ikke blot viser seriens sorte åbningsframe.
+- Fingerprint-format v2 gemmer både perceptuelle hashes og en eksponerings-/kontrastscore pr. frame. Sorte, hvide og visuelt tomme frames tæller ikke som introbevis.
+- Automatisk intro kræver som standard konsensus fra mindst to andre analyserede episoder. En ny episode genanalyserer samtidigt tidligere episoder, så de første episoder kan få markøren, når serien har nok data.
+- Eksisterende manuelle markører og kapitelmarkører har altid forrang og overskrives ikke af den automatiske analyse.
+- Playback Lab viser repræsentativt preview, visuel markørtidslinje, referenceantal, brugbare frames og en konkret årsag: fundet, afventer episoder, for mørkt/ensartet eller ingen sikker gentagelse.
+- API-previewet resolver asset-stier under `TRANSCODE_PATH` og afviser stier uden for denne rod.
+
+Eksisterende playback-assets opgraderes ved at vælge **Genopbyg analyse** på en titel eller **Analysér manglende** i Playback Lab. Bedst serie-resultat kræver mindst tre analyserede episoder med samme serieidentitet. Manuel kontrol er fortsat nødvendig for serier med bevidst varierende, meget korte eller næsten helt sorte introsekvenser.
+
+Valideret 22. august 2026 med grøn `npm run ci` (lint, typecheck, 46 API-testfiler/153 tests, 8 worker-testfiler/15 tests og alle builds) samt separat grøn fingerprint-kontrakttest med 7 tests. Den resterende driftsgate er real-media-verifikation i servercontaineren med mindst tre episoder fra samme serie.
+
 ## Leverance 2026-08-22: Plex-lignende kundeportal og samlet opgavecenter
 
 - Kundeportalen bruger nu den personlige anbefaling som reel filmisk hero med korrekt TMDB/TVDB-billedsti, skarpere navigation, kompakte bibliotekstal og vandrette mediehylder med egne pile uden native scrollbars.

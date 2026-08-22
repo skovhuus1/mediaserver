@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { isPrivileged } from '../common/auth';
 import { correlationId } from '../common/request-context';
@@ -20,7 +20,7 @@ import {
   PlaybackAnalysisQueryDto,
   UpdatePlaybackMarkersDto,
 } from './administration.dto';
-import { playbackJobMediaId, validateManualPlaybackMarkers } from './playback-analysis';
+import { playbackIntroAnalysis, playbackJobMediaId, validateManualPlaybackMarkers } from './playback-analysis';
 
 @Injectable()
 export class AdministrationService {
@@ -655,6 +655,7 @@ export class AdministrationService {
         playbackAsset: {
           select: {
             status: true,
+            manifest: true,
             intervalSeconds: true,
             frameCount: true,
             sheetCount: true,
@@ -682,7 +683,17 @@ export class AdministrationService {
       fileStatus: item.file?.status ?? 'missing',
       durationMs: item.file?.durationMs ?? item.playbackAsset?.durationMs ?? null,
       status: item.playbackAsset?.status ?? 'missing',
-      asset: item.playbackAsset,
+      asset: item.playbackAsset ? {
+        status: item.playbackAsset.status,
+        intervalSeconds: item.playbackAsset.intervalSeconds,
+        frameCount: item.playbackAsset.frameCount,
+        sheetCount: item.playbackAsset.sheetCount,
+        durationMs: item.playbackAsset.durationMs,
+        generatedAt: item.playbackAsset.generatedAt,
+        updatedAt: item.playbackAsset.updatedAt,
+        error: item.playbackAsset.error,
+      } : null,
+      introAnalysis: playbackIntroAnalysis(item.playbackAsset?.manifest),
       markers: item.timelineMarkers,
       updatedAt: item.playbackAsset?.updatedAt ?? item.updatedAt,
     }));
@@ -740,6 +751,7 @@ export class AdministrationService {
         error: media.playbackAsset.error,
       } : null,
       markers: media.timelineMarkers,
+      introAnalysis: playbackIntroAnalysis(media.playbackAsset?.manifest),
       latestJob,
       previewDataUrl: await this.playbackPreview(media.playbackAsset?.spriteDirectory ?? null),
     };
@@ -860,11 +872,15 @@ export class AdministrationService {
   private async playbackPreview(spriteDirectory: string | null) {
     if (!spriteDirectory) return null;
     try {
-      const names = (await readdir(spriteDirectory)).filter((name) => /\.(?:jpe?g|png)$/i.test(name)).sort();
-      if (!names[0]) return null;
-      const data = await readFile(join(spriteDirectory, names[0]));
+      const transcodeRoot = resolve(process.env.TRANSCODE_PATH?.trim() || '/transcode');
+      const directory = resolve(transcodeRoot, spriteDirectory);
+      if (directory !== transcodeRoot && !directory.startsWith(`${transcodeRoot}${sep}`)) return null;
+      const names = (await readdir(directory)).filter((name) => /\.(?:jpe?g|png)$/i.test(name)).sort();
+      const previewName = names.find((name) => name.toLowerCase() === 'preview.jpg') ?? names[0];
+      if (!previewName) return null;
+      const data = await readFile(join(directory, previewName));
       if (data.byteLength > 2_500_000) return null;
-      const mime = extname(names[0]).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
+      const mime = extname(previewName).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
       return `data:${mime};base64,${data.toString('base64')}`;
     } catch {
       return null;
