@@ -262,8 +262,12 @@ const subtitleColors: Array<{ value: SubtitleColor; label: string; hex: string }
 ];
 
 export function requestPlayback(media: PlayableMedia, resumePositionMs = 0) {
+  const normalizedMedia = {
+    ...media,
+    title: sanitizeMediaTitle(media.title) ?? media.title,
+  };
   window.dispatchEvent(new CustomEvent<PlaybackRequest>(requestEvent, {
-    detail: { media, resumePositionMs },
+    detail: { media: normalizedMedia, resumePositionMs },
   }));
 }
 
@@ -288,7 +292,9 @@ export function WebPlayer() {
   const lastProgressAt = useRef(0);
   const requestNumber = useRef(0);
   const qualitySelectionRef = useRef(-1);
+  const deferredAutoLevelCapRef = useRef(-1);
   const timelineOffsetRef = useRef(0);
+  const seekProgressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const upscaleUnlockedRef = useRef(false);
   const completedTransitionRef = useRef(false);
   const hlsNetworkRecoveriesRef = useRef(0);
@@ -450,6 +456,7 @@ export function WebPlayer() {
     setSubtitleCue('');
     setSubtitleError('');
     setQualities([]);
+    qualitySelectionRef.current = -1;
     setQualitySelection(-1);
     setCurrentQuality(-1);
     setQualitySwitching(null);
@@ -463,7 +470,12 @@ export function WebPlayer() {
     creditsAutoplaySuppressedRef.current = false;
     timelineOffsetRef.current = 0;
     upscaleUnlockedRef.current = false;
+    deferredAutoLevelCapRef.current = -1;
     setUpscaleUnlocked(false);
+    if (seekProgressTimerRef.current) {
+      clearTimeout(seekProgressTimerRef.current);
+      seekProgressTimerRef.current = null;
+    }
     streamRestartingRef.current = false;
     fallbackAttemptedRef.current = false;
   }, [saveProgress]);
@@ -591,6 +603,8 @@ export function WebPlayer() {
       ? mediaRef.current.file.durationMs / 1000
       : timelineOffsetRef.current + (video.duration || Number.MAX_SAFE_INTEGER);
     const target = Math.max(0, Math.min(fullDuration, targetSeconds));
+    resumeRef.current = Math.round(target * 1_000);
+    resumeAppliedRef.current = false;
     const localTarget = target - timelineOffsetRef.current;
     if (
       authorization?.method === 'direct_play'
@@ -598,6 +612,13 @@ export function WebPlayer() {
     ) {
       video.currentTime = localTarget;
       setCurrentTime(target);
+      resumeRef.current = 0;
+      resumeAppliedRef.current = true;
+      if (seekProgressTimerRef.current) clearTimeout(seekProgressTimerRef.current);
+      seekProgressTimerRef.current = setTimeout(() => {
+        seekProgressTimerRef.current = null;
+        void saveProgress(false).catch(() => undefined);
+      }, 250);
       return;
     }
     void restartStreamAt(target);
@@ -632,6 +653,7 @@ export function WebPlayer() {
         fallbackAttemptedRef.current = false;
         streamRestartingRef.current = false;
         setQualities([]);
+        qualitySelectionRef.current = -1;
         setQualitySelection(-1);
         setCurrentQuality(-1);
         setQualitySwitching(null);
@@ -715,8 +737,24 @@ export function WebPlayer() {
             preparedAuthorization.playbackPreferences.preferredSubtitleLanguages,
             preparedAuthorization.playbackPreferences.subtitleMode,
           );
-          activeSubtitleRef.current = defaultSubtitle;
-          setActiveSubtitle(defaultSubtitle);
+          const subtitlesEnabled = preparedAuthorization.playbackPreferences.subtitleMode !== 'off';
+          const defaultTrack = subtitlesEnabled
+            ? (defaultSubtitle
+              ? preparedAuthorization.subtitleTracks.find(
+                (track) => track.id === defaultSubtitle && track.delivery === 'webvtt' && Boolean(track.src),
+              )
+              : null)
+            : null;
+          const fallbackTrack = preparedAuthorization.playbackPreferences.subtitleMode === 'always'
+            ? preparedAuthorization.subtitleTracks.find(
+              (track) => track.delivery === 'webvtt' && Boolean(track.src),
+            )
+            : null;
+          const resolvedDefaultSubtitle = subtitlesEnabled
+            ? (defaultTrack ? defaultTrack.id : fallbackTrack ? fallbackTrack.id : null)
+            : null;
+          activeSubtitleRef.current = resolvedDefaultSubtitle;
+          setActiveSubtitle(resolvedDefaultSubtitle);
           setStatus(`${preparedAuthorization.method === 'direct_play' ? 'Direkte afspilning' : preparedAuthorization.method === 'direct_stream' ? 'Direct Stream · HLS' : 'Transcoding · HLS'}${formatVideoProfile(preparedAuthorization) ? ` · ${formatVideoProfile(preparedAuthorization)}` : ''}`);
           setSourceReady(true);
         } catch (caught) {
@@ -818,7 +856,8 @@ export function WebPlayer() {
         const hasDeferredUpscale = lastSourceLevel >= 0;
         upscaleUnlockedRef.current = !hasDeferredUpscale;
         setUpscaleUnlocked(!hasDeferredUpscale);
-        hls.autoLevelCapping = hasDeferredUpscale ? Math.max(0, lastSourceLevel) : -1;
+        deferredAutoLevelCapRef.current = hasDeferredUpscale ? Math.max(0, lastSourceLevel) : -1;
+        hls.autoLevelCapping = deferredAutoLevelCapRef.current;
         const preferredSelection = normalizePlaybackQualitySelection(qualitySelectionRef.current, hls.levels.length);
         const initialSelection = preferredSelection >= 0
           ? preferredSelection
@@ -853,16 +892,11 @@ export function WebPlayer() {
       hls.on(Hls.Events.BUFFER_APPENDED, start);
       hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => {
         const selected = qualitySelectionRef.current;
-        if (selected >= 0) {
-          setQualitySwitching(data.level === selected ? null : data.level);
-        } else {
-          setQualitySwitching(null);
-        }
+        setQualitySwitching(selected >= 0 && data.level !== selected ? selected : null);
       });
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         setCurrentQuality(data.level);
-        const selected = qualitySelectionRef.current;
-        setQualitySwitching(selected >= 0 && data.level !== selected ? selected : null);
+        setQualitySwitching(null);
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
@@ -925,7 +959,8 @@ export function WebPlayer() {
       ) {
         upscaleUnlockedRef.current = true;
         setUpscaleUnlocked(true);
-        hls.autoLevelCapping = -1;
+        deferredAutoLevelCapRef.current = -1;
+        if (qualitySelectionRef.current === -1) hls.autoLevelCapping = -1;
       }
       const remoteState = remote?.playerState?.toLowerCase();
       void api(`/playback/sessions/${authorization.sessionId}/heartbeat`, {
@@ -1149,11 +1184,18 @@ export function WebPlayer() {
     const selected = normalizePlaybackQualitySelection(requestedLevel, hls.levels.length);
     qualitySelectionRef.current = selected;
     setQualitySelection(selected);
-    setQualitySwitching(selected >= 0 && selected === hls.currentLevel ? null : selected >= 0 ? selected : null);
-    hls.autoLevelEnabled = selected === -1;
+    if (selected === -1) {
+      hls.autoLevelCapping = deferredAutoLevelCapRef.current;
+      hls.nextLevel = -1;
+      hls.loadLevel = -1;
+      setQualitySwitching(null);
+      return;
+    }
+
+    hls.autoLevelCapping = -1;
+    setQualitySwitching(hls.currentLevel === selected ? null : selected);
     hls.currentLevel = selected;
     hls.nextLevel = selected;
-    hls.loadLevel = selected;
   }, []);
 
   const selectQuality = (index: number) => {
@@ -1220,39 +1262,51 @@ export function WebPlayer() {
       setSubtitleCue('');
       return;
     }
-
-    const selectedTrack = authorization.subtitleTracks.find(
-      (track) => track.id === activeSubtitle && track.delivery === 'webvtt' && Boolean(track.src),
-    );
-    if (!selectedTrack?.src) {
+    const activeTrack = authorization.subtitleTracks.find((track) => track.id === activeSubtitle);
+    if (activeTrack?.delivery !== 'webvtt') {
       subtitleCuesRef.current = [];
       setSubtitleCue('');
       return;
     }
 
     const controller = new AbortController();
-    void fetch(selectedTrack.src, { cache: 'no-store', signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.text();
-      })
-      .then((body) => {
-        if (controller.signal.aborted || activeSubtitleRef.current !== selectedTrack.id) return;
-        const cues = parseWebVttCues(body);
-        if (!cues.length) throw new Error('Undertekstfilen indeholder ingen gyldige WebVTT-cues.');
-        subtitleCuesRef.current = cues;
-        setSubtitleCue(webVttCueTextAt(
-          cues,
-          timelineOffsetRef.current + video.currentTime,
-          subtitleOffsetRef.current,
-        ));
-      })
-      .catch((reason: unknown) => {
-        if (controller.signal.aborted) return;
-        subtitleCuesRef.current = [];
-        setSubtitleCue('');
-        setSubtitleError(`Underteksten kunne ikke indlæses: ${errorMessage(reason)}`);
-      });
+    const selectedTrack = authorization.subtitleTracks.find(
+      (track) => track.id === activeSubtitle && track.delivery === 'webvtt' && Boolean(track.src),
+    );
+    const subtitleSource = selectedTrack?.src;
+    if (!subtitleSource) {
+      subtitleCuesRef.current = [];
+      setSubtitleCue('');
+      setSubtitleError('Det valgte undertekstspor er ikke tilgængeligt.');
+      return () => controller.abort();
+    }
+    const loadTrack = () => {
+      void fetch(subtitleSource, { cache: 'no-store', signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.text();
+        })
+        .then((body) => {
+          if (controller.signal.aborted || activeSubtitleRef.current !== selectedTrack.id) return;
+          const cues = parseWebVttCues(body);
+          if (!cues.length) throw new Error('Undertekstfilen indeholder ingen gyldige WebVTT-cues.');
+          subtitleCuesRef.current = cues;
+          setSubtitleCue(webVttCueTextAt(
+            cues,
+            timelineOffsetRef.current + video.currentTime,
+            subtitleOffsetRef.current,
+          ));
+          setSubtitleError('');
+        })
+        .catch((reason: unknown) => {
+          if (controller.signal.aborted) return;
+          subtitleCuesRef.current = [];
+          setSubtitleCue('');
+          setSubtitleError(`Underteksten kunne ikke indlæses: ${errorMessage(reason)}`);
+        });
+    };
+
+    void loadTrack();
 
     return () => controller.abort();
   }, [activeSubtitle, authorization, sourceReady]);
@@ -1443,6 +1497,18 @@ export function WebPlayer() {
     >
       <video
         onSeeking={() => setControlsVisible(true)}
+        onSeeked={() => {
+          resumeAppliedRef.current = true;
+          resumeRef.current = 0;
+          if (seekProgressTimerRef.current) {
+            clearTimeout(seekProgressTimerRef.current);
+            seekProgressTimerRef.current = null;
+          }
+          seekProgressTimerRef.current = setTimeout(() => {
+            seekProgressTimerRef.current = null;
+            void saveProgress(false).catch(() => undefined);
+          }, 250);
+        }}
         className={styles.video}
         ref={videoRef}
         playsInline
@@ -1592,7 +1658,7 @@ export function WebPlayer() {
           {menu === 'playlist' && (
             <button className={styles.menuRow}>
               <ListVideo size={18} />
-              <span><strong>{media.title}</strong><small>Aktuel afspilning</small></span>
+              <span><strong>{sanitizeMediaTitle(media.title) || media.title}</strong><small>Aktuel afspilning</small></span>
               <Check size={17} />
             </button>
           )}
@@ -1613,7 +1679,7 @@ export function WebPlayer() {
                     : 'Videoen vises uden undertekster'}
                 </small>
               </div>
-              {authorization?.method !== 'direct_stream' && <button
+              <button
                 className={`${styles.menuRow} ${styles.subtitleRow} ${activeSubtitle === null ? styles.subtitleSelected : ''}`}
                 aria-pressed={activeSubtitle === null}
                 onClick={() => selectSubtitle(null)}
@@ -1623,7 +1689,7 @@ export function WebPlayer() {
                   <span><strong>Fra</strong><small>Vis ingen undertekster</small></span>
                 </span>
                 {activeSubtitle === null && <Check size={18} />}
-              </button>}
+              </button>
               {authorization?.method === 'direct_stream' && (
                 <div className={styles.emptyMenu}>Original video remuxes uden videokodning. Lavere kvaliteter kræver en transcoding-session.</div>
               )}
@@ -1778,7 +1844,7 @@ export function WebPlayer() {
           )}
           {menu === 'info' && (
             <dl className={styles.infoGrid}>
-              <dt>Titel</dt><dd>{media.title}</dd>
+              <dt>Titel</dt><dd>{sanitizeMediaTitle(media.title) || media.title}</dd>
               <dt>År</dt><dd>{media.releaseYear ?? 'Ukendt'}</dd>
               <dt>Type</dt><dd>{media.type ?? 'Ukendt'}</dd>
               <dt>Kategori</dt><dd>{media.category ?? 'Ikke angivet'}</dd>
