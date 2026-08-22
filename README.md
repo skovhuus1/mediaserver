@@ -15,6 +15,13 @@ Eksisterende playback-assets opgraderes ved at vælge **Genopbyg analyse** på e
 
 Valideret 22. august 2026 med grøn `npm run ci` (lint, typecheck, 46 API-testfiler/153 tests, 8 worker-testfiler/15 tests og alle builds) samt separat grøn fingerprint-kontrakttest med 7 tests. Den resterende driftsgate er real-media-verifikation i servercontaineren med mindst tre episoder fra samme serie.
 
+## Leverance 2026-08-22: Samlet systemdiagnostik
+
+- Adminpanelet har nu en dedikeret `Diagnostik`-fane med 10-sekunders live-opdatering og manuel genmåling af hele serverens driftskæde.
+- `GET /api/v1/system/diagnostics` måler PostgreSQL- og Redis-latency, CPU/RAM/load, storage-root læseadgang og fri plads, watcher/transcoder-heartbeats, jobkø og leases, stream-reservationer, HTTPS/CORS/Cast, hemmeligheder og updater-konfiguration.
+- Resultatet er account-scopet og severity-baseret med konkrete fejlårsager og rå driftsdetaljer. Diagnostikken er read-only og udfører hverken Git-fetch, jobændringer eller writes i mediemounts.
+- Storage advarer under 20 GB eller 90 procent forbrug og fejler under 2 GB eller 98 procent. Udløbne worker-leases og en transcode-kø uden worker markeres som kritiske fejl.
+
 ## Leverance 2026-08-22: Synlig og testbar bibliotek-watcher
 
 - Workerens filesystem-watcher publicerer nu account-scopet heartbeat, native/polling-mode, overvågede biblioteker og mapper, seneste filhændelse, automatisk scan og seneste fejl i den eksisterende runtime-ledger.
