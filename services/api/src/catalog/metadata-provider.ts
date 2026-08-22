@@ -15,7 +15,10 @@ export type MetadataMatchCandidate = {
   releaseYear: number | null;
   overview: string | null;
   posterPath: string | null;
+  episodeOrders?: TvdbEpisodeOrder[];
 };
+
+export type TvdbEpisodeOrder = { key: string; label: string };
 
 export async function searchMetadataProviders(
   settings: ProviderSettings,
@@ -58,6 +61,45 @@ export async function validateMetadataSelection(
   }
   if (!settings.tvdbApiKey) throw new ConflictException({ code: 'metadata_provider_disabled', message: 'TVDB er ikke konfigureret.' });
   return getTvdb(settings.tvdbApiKey, settings.tvdbPin, settings.language, providerId);
+}
+
+export async function listTvdbEpisodeOrders(
+  settings: ProviderSettings,
+  providerId: string,
+): Promise<TvdbEpisodeOrder[]> {
+  if (!settings.tvdbApiKey) throw new ConflictException({ code: 'metadata_provider_disabled', message: 'TVDB er ikke konfigureret.' });
+  const candidate = await getTvdb(settings.tvdbApiKey, settings.tvdbPin, settings.language, providerId);
+  return candidate.episodeOrders ?? [{ key: 'default', label: 'Seriens standardorden' }];
+}
+
+export function parseTvdbEpisodeOrders(value: unknown): TvdbEpisodeOrder[] {
+  const orders = new Map<string, TvdbEpisodeOrder>();
+  orders.set('default', { key: 'default', label: 'Seriens standardorden' });
+  for (const entry of Array.isArray(value) ? value : []) {
+    const record = asObject(entry);
+    const key = text(record.type)?.toLowerCase();
+    if (!key || !/^[a-z0-9_-]{1,40}$/.test(key) || key === 'default' || orders.has(key)) continue;
+    orders.set(key, {
+      key,
+      label: text(record.name) ?? text(record.alternateName) ?? key,
+    });
+  }
+  return [...orders.values()];
+}
+
+export function resolveTvdbEpisodeOrder(
+  available: TvdbEpisodeOrder[] | undefined,
+  requested: string | undefined,
+): string {
+  const key = requested?.trim().toLowerCase() || 'default';
+  const choices = available ?? [{ key: 'default', label: 'Seriens standardorden' }];
+  if (!choices.some((choice) => choice.key === key)) {
+    throw new BadRequestException({
+      code: 'metadata_episode_order_invalid',
+      message: 'Den valgte episodeorden findes ikke for denne TVDB-serie.',
+    });
+  }
+  return key;
 }
 
 async function searchTmdb(token: string, language: string, kind: 'movie' | 'series', query: string) {
@@ -124,6 +166,7 @@ async function getTvdb(apikey: string, pin: string | null, language: string, pro
     releaseYear: integer(record.year),
     overview: text(record.overview),
     posterPath: tvdbImage(record.image),
+    episodeOrders: parseTvdbEpisodeOrders(record.seasonTypes),
   };
 }
 

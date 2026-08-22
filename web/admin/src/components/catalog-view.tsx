@@ -73,6 +73,8 @@ type MetadataMatchCandidate = {
   overview: string | null;
   posterPath: string | null;
 };
+type TvdbEpisodeOrder = { key: string; label: string };
+type CurrentMetadataBinding = { provider: string; providerId: string; episodeOrder: string };
 
 const emptyCatalog: CatalogResponse = {
   items: [],
@@ -241,6 +243,10 @@ function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: 
   const [matchOpen, setMatchOpen] = useState(false);
   const [matchQuery, setMatchQuery] = useState(item.seriesTitle ?? item.title);
   const [matchCandidates, setMatchCandidates] = useState<MetadataMatchCandidate[]>([]);
+  const [selectedMatch, setSelectedMatch] = useState<string | null>(null);
+  const [episodeOrders, setEpisodeOrders] = useState<TvdbEpisodeOrder[]>([]);
+  const [episodeOrder, setEpisodeOrder] = useState('default');
+  const [currentBinding, setCurrentBinding] = useState<CurrentMetadataBinding | null>(null);
 
   async function refreshMetadata() {
     setMetadataBusy(true);
@@ -275,10 +281,13 @@ function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: 
     setMetadataBusy(true);
     setMetadataMessage('');
     try {
-      const result = await api<{ candidates: MetadataMatchCandidate[] }>(
+      const result = await api<{ candidates: MetadataMatchCandidate[]; currentBinding: CurrentMetadataBinding | null }>(
         `/media/${encodeURIComponent(item.id)}/metadata/matches?q=${encodeURIComponent(matchQuery.trim())}`,
       );
       setMatchCandidates(result.candidates);
+      setCurrentBinding(result.currentBinding);
+      setSelectedMatch(null);
+      setEpisodeOrders([]);
       if (!result.candidates.length) setMetadataMessage('Ingen match blev fundet. Prøv en anden titel.');
     } catch (failure) {
       setMetadataMessage(errorMessage(failure));
@@ -287,17 +296,43 @@ function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: 
     }
   }
 
-  async function applyMatch(candidate: MetadataMatchCandidate) {
+  async function prepareMatch(candidate: MetadataMatchCandidate) {
+    if (candidate.provider !== 'tvdb') {
+      await applyMatch(candidate, 'default');
+      return;
+    }
+    setMetadataBusy(true);
+    setMetadataMessage('');
+    try {
+      const result = await api<{ orders: TvdbEpisodeOrder[] }>(
+        `/media/${encodeURIComponent(item.id)}/metadata/episode-orders?providerId=${encodeURIComponent(candidate.providerId)}`,
+      );
+      const savedOrder = currentBinding?.provider === 'tvdb' && currentBinding.providerId === candidate.providerId
+        ? currentBinding.episodeOrder
+        : 'default';
+      setEpisodeOrders(result.orders);
+      setEpisodeOrder(result.orders.some((order) => order.key === savedOrder) ? savedOrder : 'default');
+      setSelectedMatch(`${candidate.provider}:${candidate.providerId}`);
+    } catch (failure) {
+      setMetadataMessage(errorMessage(failure));
+    } finally {
+      setMetadataBusy(false);
+    }
+  }
+
+  async function applyMatch(candidate: MetadataMatchCandidate, selectedEpisodeOrder: string) {
     setMetadataBusy(true);
     setMetadataMessage('');
     try {
       const result = await api<{ affectedItems: number }>(`/media/${encodeURIComponent(item.id)}/metadata/match`, {
         method: 'POST',
-        body: JSON.stringify({ provider: candidate.provider, providerId: candidate.providerId, locked: true }),
+        body: JSON.stringify({ provider: candidate.provider, providerId: candidate.providerId, locked: true, episodeOrder: selectedEpisodeOrder }),
       });
       setMetadataLocked(true);
       setMatchOpen(false);
       setMatchCandidates([]);
+      setSelectedMatch(null);
+      setEpisodeOrders([]);
       setMetadataMessage(`Match til "${candidate.title}" er gemt og ${result.affectedItems} katalogpost(er) er sat i kø til opdatering.`);
     } catch (failure) {
       setMetadataMessage(errorMessage(failure));
@@ -329,7 +364,11 @@ function DetailContent({ detail, adminMode }: { detail: DetailState; adminMode: 
             {matchCandidates.map((candidate) => <article key={`${candidate.provider}:${candidate.providerId}`}>
               <span className="metadata-match-poster" style={imageStyle(candidate.posterPath, 'w500')} />
               <div><strong>{candidate.title}</strong><small>{candidate.provider.toUpperCase()} #{candidate.providerId}{candidate.releaseYear ? ` · ${candidate.releaseYear}` : ''}</small>{candidate.originalTitle && candidate.originalTitle !== candidate.title && <small>{candidate.originalTitle}</small>}<p>{candidate.overview ?? 'Ingen beskrivelse fra provideren.'}</p></div>
-              <button disabled={metadataBusy} onClick={() => void applyMatch(candidate)}>Vælg match</button>
+              <button disabled={metadataBusy} onClick={() => void prepareMatch(candidate)}>{candidate.provider === 'tvdb' ? 'Vælg orden' : 'Vælg match'}</button>
+              {selectedMatch === `${candidate.provider}:${candidate.providerId}` && <div className="metadata-order-picker">
+                <label>Episodeorden<select value={episodeOrder} onChange={(event) => setEpisodeOrder(event.target.value)}>{episodeOrders.map((order) => <option key={order.key} value={order.key}>{order.label}</option>)}</select></label>
+                <button disabled={metadataBusy} onClick={() => void applyMatch(candidate, episodeOrder)}>Gem TVDB-match</button>
+              </div>}
             </article>)}
           </div>
         </div>}

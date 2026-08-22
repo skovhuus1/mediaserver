@@ -1,6 +1,7 @@
 import { selectMetadataCandidate, type MetadataCandidate } from '@boltbytes/contracts';
 import type { PrismaClient } from '@prisma/client';
 import { decryptSecret } from './secret-value.js';
+import { normalizeTvdbEpisodeOrder, tvdbSeasonTypePriority } from './tvdb-episode-order.js';
 
 type ProviderCandidate = MetadataCandidate & {
   provider: 'tmdb' | 'tvdb';
@@ -109,10 +110,11 @@ export async function enrichLibraryMetadata(
     if (binding?.provider === 'tvdb') {
       if (movie) throw new Error('manual_metadata_binding_invalid: TVDB cannot be used for movies');
       if (!tvdbToken) throw new Error('manual_metadata_provider_disabled: TVDB is required by the saved match');
-      const cacheKey = `manual:${binding.providerId}`;
+      const episodeOrder = normalizeTvdbEpisodeOrder(binding.episodeOrder);
+      const cacheKey = `manual:${binding.providerId}:${episodeOrder}`;
       let pending = tvdbCache.get(cacheKey);
       if (!pending) {
-        pending = getTvdbSeriesById(tvdbToken, settings.language, Number.parseInt(binding.providerId, 10));
+        pending = getTvdbSeriesById(tvdbToken, settings.language, Number.parseInt(binding.providerId, 10), undefined, episodeOrder);
         tvdbCache.set(cacheKey, pending);
       }
       const match = await pending;
@@ -521,6 +523,7 @@ async function getTvdbSeriesById(
   language: string,
   seriesId: number,
   selected?: ProviderCandidate,
+  episodeOrder = 'default',
 ): Promise<TvdbSeriesMatch | null> {
   if (!Number.isInteger(seriesId) || seriesId < 1) return null;
   const response = await requestTvdb(`/series/${seriesId}/extended?short=false`, token);
@@ -555,8 +558,13 @@ async function getTvdbSeriesById(
     releaseDate,
     releaseYear: releaseDate?.getUTCFullYear() ?? integerValue(extended.year) ?? fallback.releaseYear ?? null,
   };
-  const seasons = parseTvdbSeasons(extended.seasons);
-  const episodes = await fetchTvdbEpisodes(seriesId, token, language);
+  const normalizedEpisodeOrder = normalizeTvdbEpisodeOrder(episodeOrder);
+  const seasons = parseTvdbSeasons(
+    extended.seasons,
+    normalizedEpisodeOrder,
+    integerValue(extended.defaultSeasonType),
+  );
+  const episodes = await fetchTvdbEpisodes(seriesId, token, language, normalizedEpisodeOrder);
   return { series, seasons, episodes };
 }
 
@@ -598,12 +606,13 @@ async function fetchTvdbEpisodes(
   seriesId: number,
   token: string,
   language: string,
+  episodeOrder: string,
 ): Promise<Map<string, TvdbEpisodeMetadata>> {
   const episodes = new Map<string, TvdbEpisodeMetadata>();
   for (let page = 0; page < 100; page += 1) {
     const params = new URLSearchParams({ page: String(page) });
     const response = await requestTvdb(
-      `/series/${seriesId}/episodes/default/${tvdbLanguage(language)}?${params}`,
+      `/series/${seriesId}/episodes/${encodeURIComponent(episodeOrder)}/${tvdbLanguage(language)}?${params}`,
       token,
     );
     const payload = await response.json() as {
@@ -631,15 +640,23 @@ async function fetchTvdbEpisodes(
   return episodes;
 }
 
-function parseTvdbSeasons(value: unknown): Map<number, TvdbSeasonMetadata> {
+function parseTvdbSeasons(
+  value: unknown,
+  episodeOrder: string,
+  defaultSeasonTypeId: number | null,
+): Map<number, TvdbSeasonMetadata> {
   const records = (Array.isArray(value) ? value : []).flatMap((entry) => {
     const season = asObject(entry);
     const id = integerValue(season.id);
     const number = integerValue(season.number);
     if (id === null || number === null) return [];
     const type = asObject(season.type);
-    const typeName = `${stringValue(type.name) ?? ''} ${stringValue(type.type) ?? ''}`.toLowerCase();
-    const priority = typeName.includes('aired') || typeName.includes('official') || typeName.includes('default') ? 2 : 1;
+    const priority = tvdbSeasonTypePriority({
+      requestedOrder: episodeOrder,
+      seasonTypeId: integerValue(type.id),
+      defaultSeasonTypeId,
+      descriptors: [stringValue(type.name), stringValue(type.type), stringValue(type.alternateName)],
+    });
     return [{
       id,
       number,

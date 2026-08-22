@@ -538,6 +538,7 @@ model MetadataBinding {
   provider      String
   providerId    String   @map("provider_id")
   providerTitle String   @map("provider_title")
+  episodeOrder  String   @default("default") @map("episode_order")
   locked        Boolean  @default(true)
   matchedBy     String?  @map("matched_by")
   createdAt     DateTime @default(now()) @map("created_at")

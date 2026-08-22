@@ -15,7 +15,7 @@ import { resolveStorageBrowsePath } from '../setup/storage-path';
 import { ApplyMetadataMatchDto, BrowseLibraryDirectoriesDto, CatalogQueryDto, CreateLibraryDto, CreateMediaDto, QueueMetadataDto, QueuePlaybackAssetsBatchDto, UpdateLibraryDto, UpdateTimelineMarkersDto } from './catalog.dto';
 import { resolveLibraryPath } from './path-policy';
 import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metadata-settings';
-import { searchMetadataProviders, validateMetadataSelection } from './metadata-provider';
+import { listTvdbEpisodeOrders, resolveTvdbEpisodeOrder, searchMetadataProviders, validateMetadataSelection } from './metadata-provider';
 
 @Injectable()
 export class CatalogService {
@@ -805,15 +805,49 @@ export class CatalogService {
   async searchMetadataMatches(actor: AuthenticatedUser, mediaId: string, query: string) {
     const media = await this.prisma.mediaItem.findFirst({
       where: { id: mediaId, accountId: actor.accountId },
-      select: { id: true, type: true },
+      select: { id: true, type: true, libraryId: true, seriesTitle: true },
     });
     if (!media) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
     const kind = media.type === 'movie' ? 'movie' as const : 'series' as const;
     const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
+    const localKey = kind === 'movie'
+      ? media.id
+      : media.seriesTitle?.normalize('NFKC').trim().toLocaleLowerCase('en-US');
+    const binding = localKey
+      ? await this.prisma.metadataBinding.findUnique({
+          where: {
+            accountId_libraryId_mediaType_localKey: {
+              accountId: actor.accountId,
+              libraryId: media.libraryId,
+              mediaType: kind,
+              localKey,
+            },
+          },
+          select: { provider: true, providerId: true, episodeOrder: true },
+        })
+      : null;
     return {
       mediaId,
       kind,
+      currentBinding: binding,
       candidates: await searchMetadataProviders(settings, kind, query),
+    };
+  }
+
+  async listMetadataEpisodeOrders(actor: AuthenticatedUser, mediaId: string, providerId: string) {
+    const media = await this.prisma.mediaItem.findFirst({
+      where: { id: mediaId, accountId: actor.accountId },
+      select: { id: true, type: true },
+    });
+    if (!media) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
+    if (media.type === 'movie') {
+      throw new BadRequestException({ code: 'metadata_episode_order_not_supported', message: 'Episodeorden kan kun vælges for serier.' });
+    }
+    const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
+    return {
+      mediaId,
+      providerId,
+      orders: await listTvdbEpisodeOrders(settings, providerId),
     };
   }
 
@@ -829,6 +863,16 @@ export class CatalogService {
     }
     const settings = await resolveMetadataSettings(this.prisma, actor.accountId);
     const selected = await validateMetadataSelection(settings, kind, dto.provider, dto.providerId);
+    const requestedEpisodeOrder = dto.episodeOrder ?? 'default';
+    const episodeOrder = selected.provider === 'tvdb'
+      ? resolveTvdbEpisodeOrder(selected.episodeOrders, requestedEpisodeOrder)
+      : 'default';
+    if (selected.provider !== 'tvdb' && requestedEpisodeOrder !== 'default') {
+      throw new BadRequestException({
+        code: 'metadata_episode_order_not_supported',
+        message: 'En alternativ episodeorden kræver et TVDB-seriematch.',
+      });
+    }
     const localKey = kind === 'movie'
       ? media.id
       : media.seriesTitle!.normalize('NFKC').trim().toLocaleLowerCase('en-US');
@@ -871,6 +915,7 @@ export class CatalogService {
           provider: selected.provider,
           providerId: selected.providerId,
           providerTitle: selected.title,
+          episodeOrder,
           locked: dto.locked,
           matchedBy: actor.sub,
         },
@@ -878,6 +923,7 @@ export class CatalogService {
           provider: selected.provider,
           providerId: selected.providerId,
           providerTitle: selected.title,
+          episodeOrder,
           locked: dto.locked,
           matchedBy: actor.sub,
         },
@@ -912,6 +958,7 @@ export class CatalogService {
             provider: selected.provider,
             providerId: selected.providerId,
             providerTitle: selected.title,
+            episodeOrder,
             affectedItems: affected.count,
             jobId: job.id,
           },

@@ -205,6 +205,17 @@ export class ApplyMetadataMatchDto {
   @IsOptional()
   @IsBoolean()
   locked = true;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9_-]{1,40}$/)
+  episodeOrder?: string = 'default';
+}
+
+export class MetadataEpisodeOrdersQueryDto {
+  @IsString()
+  @Matches(/^\d{1,12}$/)
+  providerId!: string;
 }
 
 export class QueuePlaybackAssetsBatchDto {
