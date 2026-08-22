@@ -1,0 +1,129 @@
+.categoryShell {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.categoryHeading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.categoryHeading > div:first-child {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.categoryHeading span {
+  color: var(--text-primary, #f4f5f2);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.categoryHeading small {
+  color: var(--text-muted, #9ba39e);
+  font-size: 0.76rem;
+}
+
+.categoryControls {
+  display: flex;
+  gap: 0.42rem;
+  flex: 0 0 auto;
+}
+
+.categoryControls button {
+  width: 2.15rem;
+  height: 2.15rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+  background: rgba(24, 29, 31, 0.94);
+  color: #f4f5f2;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, opacity 160ms ease;
+}
+
+.categoryControls button:hover:not(:disabled),
+.categoryControls button:focus-visible {
+  border-color: rgba(244, 176, 56, 0.76);
+  background: rgba(244, 176, 56, 0.14);
+  outline: none;
+}
+
+.categoryControls button:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.categoryRailFrame {
+  position: relative;
+  min-width: 0;
+}
+
+.categoryRailFrame::before,
+.categoryRailFrame::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0.45rem;
+  width: 3rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.categoryRailFrame::before {
+  left: 0;
+  background: linear-gradient(90deg, #080b0c 10%, transparent);
+}
+
+.categoryRailFrame::after {
+  right: 0;
+  background: linear-gradient(270deg, #080b0c 10%, transparent);
+}
+
+.canScrollLeft::before,
+.canScrollRight::after {
+  opacity: 1;
+}
+
+.categoryRail {
+  display: flex !important;
+  grid-column: auto !important;
+  min-width: 0;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.08rem 0.15rem 0.55rem;
+  overscroll-behavior-inline: contain;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  touch-action: pan-x;
+}
+
+.categoryRail button {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+@media (max-width: 680px) {
+  .categoryHeading small {
+    display: none;
+  }
+
+  .categoryControls {
+    display: none;
+  }
+
+  .categoryRailFrame::before,
+  .categoryRailFrame::after {
+    width: 1.8rem;
+  }
+}

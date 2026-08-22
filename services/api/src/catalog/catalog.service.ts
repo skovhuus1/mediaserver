@@ -20,6 +20,8 @@ import { resolveLibraryPath } from './path-policy';
 import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metadata-settings';
 import { listTvdbEpisodeOrders, resolveTvdbEpisodeOrder, searchMetadataProviders, validateMetadataSelection } from './metadata-provider';
 
+import { buildCatalogCategoryFacets, catalogCategoryAliases } from './catalog-categories';
+
 @Injectable()
 export class CatalogService {
   constructor(
@@ -236,7 +238,9 @@ export class CatalogService {
       }),
     ]);
     const facets = {
-      categories: categories.flatMap(({ category }) => category ? [category] : []),
+      categories: buildCatalogCategoryFacets(
+        categories.flatMap(({ category }) => (category ? [category] : [])),
+      ),
       libraries,
     };
 
@@ -1257,7 +1261,9 @@ export class CatalogService {
       accountId: actor.accountId,
       file: { is: { status: 'ready' } },
       ...(query.libraryId ? { libraryId: query.libraryId } : {}),
-      ...(query.category ? { category: { equals: query.category, mode: 'insensitive' } } : {}),
+      ...(query.category
+        ? { category: { in: catalogCategoryAliases(query.category), mode: 'insensitive' } }
+        : {}),
       ...(query.seriesTitle ? { seriesTitle: { equals: query.seriesTitle, mode: 'insensitive' } } : {}),
       ...(query.seriesDisplayTitle ? { seriesDisplayTitle: { equals: query.seriesDisplayTitle, mode: 'insensitive' } } : {}),
       ...(query.seriesMetadataProviderId ? { seriesMetadataProviderId: query.seriesMetadataProviderId } : {}),
