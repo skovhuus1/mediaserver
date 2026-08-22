@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { api, type ApiFailure } from '@/lib/api';
 import { WatchTitlePage } from './watch-title-page';
+import { AuthenticatedCustomerShell } from './authenticated-customer-shell';
 import styles from './title-experience-page.module.css';
 
 type Person = { key: string; name: string; role: string | null; profilePath: string | null };
@@ -41,13 +42,13 @@ export function TitleExperiencePage() {
 
   const selectedSeason = useMemo(() => experience?.series?.seasons.find((entry) => entry.number === season) ?? experience?.series?.seasons[0] ?? null, [experience, season]);
   if (legacyPlayback) return <WatchTitlePage />;
-  if (error) return <section className={styles.state}><Film size={28} /><strong>Titlen kunne ikke åbnes</strong><p>{error}</p><Link href="/watch">Tilbage til biblioteket</Link></section>;
-  if (!experience) return <section className={styles.state} aria-busy="true"><Sparkles size={28} /><strong>Samler titeloplevelsen...</strong></section>;
+  if (error) return <AuthenticatedCustomerShell><section className={styles.state}><Film size={28} /><strong>Titlen kunne ikke åbnes</strong><p>{error}</p><Link href="/watch">Tilbage til biblioteket</Link></section></AuthenticatedCustomerShell>;
+  if (!experience) return <AuthenticatedCustomerShell><section className={styles.state} aria-busy="true"><Sparkles size={28} /><strong>Samler titeloplevelsen...</strong></section></AuthenticatedCustomerShell>;
   if (experience.mode !== 'series' || !experience.series) return <><DiscoveryStrip discovery={experience.discovery} /><WatchTitlePage /></>;
 
   const resume = experience.series.resumeEpisode;
   return (
-    <article className={styles.seriesPage}>
+    <AuthenticatedCustomerShell><article className={styles.seriesPage}>
       <section className={styles.hero} style={backdrop(experience.title.backdropPath)}>
         <div className={styles.heroShade} />
         <div className={styles.heroContent}>
@@ -70,7 +71,7 @@ export function TitleExperiencePage() {
           {!selectedSeason?.episodes.some((episode) => !episode.watched) && <p>Hele sæsonen er set.</p>}
         </aside>
       </div>
-    </article>
+    </article></AuthenticatedCustomerShell>
   );
 }
 

@@ -729,7 +729,7 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                       if (episode.watched)
                         const Icon(
                           Icons.check_circle,
-                          color: Color(0xFF43E7C4),
+                          color: Color(0xFF62C9A7),
                         ),
                     ],
                   ),

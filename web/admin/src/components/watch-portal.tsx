@@ -21,11 +21,32 @@ export function WatchPortal() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [movies, setMovies] = useState<WatchItem[]>([]);
   const [series, setSeries] = useState<WatchItem[]>([]);
+  const [catalogError, setCatalogError] = useState('');
   const browse = Boolean(Array.from(searchParams.keys()).some((key) => key !== 'view'));
   const continueOnly = searchParams.get('view') === 'continue';
-  useEffect(() => { void api<SessionUser>('/auth/me').then((session) => { setUser(session); return Promise.all([api<CatalogResponse>('/media/catalog?type=movie&pageSize=18&sort=newest'), api<CatalogResponse>('/media/catalog?type=series&pageSize=18&sort=newest')]); }).then(([movieCatalog, seriesCatalog]) => { setMovies(movieCatalog.items); setSeries(seriesCatalog.items); }).catch(() => { clearSession(); router.replace('/login'); }); }, [router]);
+  useEffect(() => {
+    let active = true;
+    void api<SessionUser>('/auth/me').then(async (session) => {
+      if (!active) return;
+      setUser(session);
+      const [movieResult, seriesResult] = await Promise.allSettled([
+        api<CatalogResponse>('/media/catalog?type=movie&pageSize=18&sort=newest'),
+        api<CatalogResponse>('/media/catalog?type=series&pageSize=18&sort=newest'),
+      ]);
+      if (!active) return;
+      if (movieResult.status === 'fulfilled') setMovies(movieResult.value.items);
+      if (seriesResult.status === 'fulfilled') setSeries(seriesResult.value.items);
+      if (movieResult.status === 'rejected' || seriesResult.status === 'rejected') {
+        setCatalogError('En del af biblioteket kunne ikke hentes. Resten af portalen er stadig tilgængelig.');
+      }
+    }).catch(() => {
+      clearSession();
+      router.replace('/login');
+    });
+    return () => { active = false; };
+  }, [router]);
   if (!user) return <main className="watch-loading" aria-busy="true" />;
-  return <CustomerShell user={user}><div className={styles.portal}>{continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : <><PersonalizedRecommendations /><section className={styles.libraryBar}><div><Library size={22} /><strong>Dit BoltBytes-bibliotek</strong><span>{movies.length}+ film · {series.length}+ serier klar til afspilning</span></div><nav><Link href="/watch?type=movie"><Film size={14} />Film</Link><Link href="/watch?type=series"><Tv size={14} />Serier</Link></nav></section><ContinueWatching /><DiscoveryRow title="Nye film" items={movies} allHref="/watch?type=movie" /><DiscoveryRow title="Nye serier" items={series} allHref="/watch?type=series" /></>}</div></CustomerShell>;
+  return <CustomerShell user={user}><div className={styles.portal}>{catalogError && <p className={styles.catalogNotice}>{catalogError}</p>}{continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : <><PersonalizedRecommendations /><section className={styles.libraryBar}><div><Library size={22} /><strong>Dit BoltBytes-bibliotek</strong><span>{movies.length}+ film · {series.length}+ serier klar til afspilning</span></div><nav><Link href="/watch?type=movie"><Film size={14} />Film</Link><Link href="/watch?type=series"><Tv size={14} />Serier</Link></nav></section><ContinueWatching /><DiscoveryRow title="Nye film" items={movies} allHref="/watch?type=movie" /><DiscoveryRow title="Nye serier" items={series} allHref="/watch?type=series" /></>}</div></CustomerShell>;
 }
 
 function DiscoveryRow({ title, items, allHref }: { title: string; items: WatchItem[]; allHref: string }) {

@@ -72,7 +72,7 @@ class _CastMiniPlayerState extends State<CastMiniPlayer> {
                           ),
                           child: const Icon(
                             Icons.cast_connected,
-                            color: Color(0xFF43E7C4),
+                            color: Color(0xFF62C9A7),
                           ),
                         ),
                         const SizedBox(width: 11),

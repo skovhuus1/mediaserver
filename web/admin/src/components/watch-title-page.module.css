@@ -34,3 +34,5 @@
 .progress i { background: #68e1be; }
 .error { padding: 60px; color: #ff9f9f; }
 @media (max-width:700px) { .hero { min-height: 470px; padding: 34px 20px; } .hero a { margin-bottom: 42px; } .seasonSummary { align-items: flex-start; flex-direction: column; gap: 7px; } .episode { grid-template-columns: 110px minmax(0,1fr); } .episode > svg { display:none; } }
+
+.hero span,.seasonSummary span,.episode .episodeMeta,.episode>svg{color:#efbd6c}.hero button{color:#171008;background:linear-gradient(135deg,#f1c477,#d4933b)}.episodes nav .active{color:#171008;border-color:#e4aa52;background:#e4aa52}.episode:hover{border-color:#e4aa5266}.progress{color:#efbd6c}.progress i{background:#e4aa52}

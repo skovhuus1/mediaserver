@@ -26,7 +26,7 @@ class PushMessageBanner extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(18, 14, 8, 14),
             decoration: BoxDecoration(
               color: const Color(0xF51A2028),
-              border: Border.all(color: const Color(0xFF43E7C4)),
+              border: Border.all(color: const Color(0xFF62C9A7)),
               borderRadius: BorderRadius.circular(16),
               boxShadow: const [
                 BoxShadow(color: Colors.black54, blurRadius: 24),
@@ -36,7 +36,7 @@ class PushMessageBanner extends StatelessWidget {
               children: [
                 const Icon(
                   Icons.notifications_active_outlined,
-                  color: Color(0xFF43E7C4),
+                  color: Color(0xFF62C9A7),
                 ),
                 const SizedBox(width: 12),
                 Expanded(

@@ -444,7 +444,7 @@ class _LibraryHeader extends StatelessWidget {
               padding: const EdgeInsets.all(6),
               child: CircleAvatar(
                 radius: compact ? 18 : 20,
-                backgroundColor: const Color(0xFFB67AFF),
+                backgroundColor: const Color(0xFFF0C06F),
                 child: Text(
                   (controller.activeProfile?.name ?? 'B').characters.first
                       .toUpperCase(),

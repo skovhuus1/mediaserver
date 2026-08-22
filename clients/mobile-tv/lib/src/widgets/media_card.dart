@@ -52,7 +52,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
     final focusRing = _focused
         ? <BoxShadow>[
             BoxShadow(
-              color: const Color(0x9963F2D7),
+              color: const Color(0x99E4AA52),
               blurRadius: 22,
               spreadRadius: 1,
               offset: const Offset(0, 8),
@@ -92,7 +92,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
             onFocusChange: _setFocus,
             child: InkWell(
               onTap: widget.onPressed,
-              autofocus: widget.isTv,
+              autofocus: false,
               borderRadius: BorderRadius.circular(18),
               focusColor: Colors.transparent,
               highlightColor: Colors.transparent,

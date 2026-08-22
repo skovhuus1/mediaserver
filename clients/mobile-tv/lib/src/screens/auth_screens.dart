@@ -24,11 +24,13 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordFocus = FocusNode();
   final _loginButtonFocus = FocusNode();
   bool _showPassword = false;
+  bool _editServer = false;
 
   @override
   void initState() {
     super.initState();
     _server = TextEditingController(text: widget.controller.serverUrl);
+    _editServer = _server.text.trim().isEmpty;
   }
 
   @override
@@ -139,40 +141,82 @@ class _LoginScreenState extends State<LoginScreen> {
               style: TextStyle(color: Colors.white60, height: 1.5),
             ),
             const SizedBox(height: 28),
-            Focus(
-              onKeyEvent: tv
-                  ? (node, event) => _handleUpDown(event, _emailFocus, null)
-                  : null,
-              child: TextFormField(
-                controller: _server,
-                focusNode: _serverFocus,
-                autofocus: tv,
-                textInputAction: TextInputAction.next,
-                keyboardType: TextInputType.text,
-                autocorrect: false,
-                textCapitalization: TextCapitalization.none,
-                inputFormatters: [
-                  FilteringTextInputFormatter.deny(RegExp(r'\s')),
-                ],
-                decoration: const InputDecoration(
-                  labelText: 'Server',
-                  hintText: 'fx media.boltbytes.com:6555',
-                  prefixIcon: Icon(Icons.dns_outlined),
-                  helperText: 'Du kan indsætte https://... direkte.',
+            if (_editServer)
+              Focus(
+                onKeyEvent: tv
+                    ? (node, event) => _handleUpDown(event, _emailFocus, null)
+                    : null,
+                child: TextFormField(
+                  controller: _server,
+                  focusNode: _serverFocus,
+                  autofocus: false,
+                  textInputAction: TextInputAction.next,
+                  keyboardType: TextInputType.text,
+                  autocorrect: false,
+                  textCapitalization: TextCapitalization.none,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'Server',
+                    hintText: 'fx media.boltbytes.com:6555',
+                    prefixIcon: Icon(Icons.dns_outlined),
+                    helperText: 'Du kan indsætte https://... direkte.',
+                  ),
+                  validator: _validateServerInput,
+                  onFieldSubmitted: (_) => _emailFocus.requestFocus(),
                 ),
-                validator: _validateServerInput,
-                onFieldSubmitted: (_) => _emailFocus.requestFocus(),
               ),
-            ),
+            if (!_editServer)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF11171E),
+                  border: Border.all(color: const Color(0xFF29323D)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.verified_user_outlined),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'BoltBytes-server',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          Text(
+                            _server.text,
+                            style: const TextStyle(color: Colors.white60),
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => setState(() => _editServer = true),
+                      child: const Text('Skift'),
+                    ),
+                  ],
+                ),
+              ),
             const SizedBox(height: 14),
             Focus(
               onKeyEvent: tv
-                  ? (node, event) =>
-                        _handleUpDown(event, _passwordFocus, _serverFocus)
+                  ? (node, event) => _handleUpDown(
+                      event,
+                      _passwordFocus,
+                      _editServer ? _serverFocus : null,
+                    )
                   : null,
               child: TextFormField(
                 controller: _email,
                 focusNode: _emailFocus,
+                autofocus: tv,
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 onFieldSubmitted: (_) => _passwordFocus.requestFocus(),

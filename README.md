@@ -973,3 +973,36 @@ BB_MEDIA_ANDROID_KEY_PASSWORD
 ```
 
 Also configure the repository variable `BB_MEDIA_CAST_RECEIVER_APP_ID`. The release workflow refuses to publish without both a stable signing identity and a registered Cast receiver ID. Android requires every update for an installed package to use the same signing certificate; back up the keystore outside GitHub and never rotate it casually.
+
+## UI completion - 2026-08-22
+
+Denne leverance samler kundeportal, titeloplevelse, webplayer, administration og Flutter-klienter i et fælles BoltBytes-design med grafit, rav og jade som gennemgaende visuelle signaler.
+
+### Implementeret
+
+- Kundeportalens header, navigation, sokning, profiler, rails, anbefalinger, settings, person-, collection- og seriesider bruger nu samme responsive shell.
+- Mobilnavigationen er en fast bundnavigation, mens desktop og TV bevarer tydelig topnavigation og tastatur-/fjernbetjeningsfokus.
+- Delvise katalogfejl logger ikke længere kunden ud. Film og serier indlaeses uafhaengigt, og fejl vises med en konkret status uden at blokere resten af portalen.
+- Anbefalinger har nu en rigtig fejl- og retry-state, og relative TMDB-posterstier omsaettes til gyldige billed-URL'er.
+- Serieoplevelsen har en samlet hero, faner, episodekort, ko-status og ensartede loading-, empty- og error-states.
+- Webplayeren har et roligere fuldskaerms-overlay, tydelig tidslinje, kvalitetsmenu, undertekststatus, Cast-status, trickplay og mobile kontrolflader. Den eksisterende seek-, subtitle-, quality- og Cast-logik er bevaret.
+- Adminpanelet har et samlet kontrolrumsdesign med tydeligere formularer, tabeller, task center, playback-analyse, statuskort og en responsiv bundnavigation pa sma skaerme.
+- Den dekorative admin-playerbar er fjernet, fordi rigtig afspilning foregar i webplayeren.
+- Flutter mobil/TV bruger samme rav/jade-identitet, forbedrede fokusmarkeringer og konsistente kort, profiler, notifikationer, titel- og Cast-flader.
+- Login viser den konfigurerede BoltBytes-server som et betroet valg. Server-URL'en er skjult som standard og kan kun aendres via `Skift`, sa fjernbetjeningsnavigation starter direkte pa e-mailfeltet.
+- Mediekort konkurrerer ikke laengere om automatisk TV-fokus; fokusoverdragelse styres af skaermens navigation.
+
+### Verificeret
+
+- `npm run ci`: bestaaet inklusive lint, typecheck, 153 API-tests, 17 worker-tests, contracts build, API build, worker build og Next.js production build.
+- `flutter analyze`: bestaaet uden fund.
+- `flutter test`: 19 af 19 tests bestaaet.
+- Mobil debug-APK: [download fra GitHub Release](https://github.com/skovhuus1/mediaserver/releases/download/ui-completion-2026-08-22/boltbytes-media-mobile-ui-debug.apk). Binære APK'er lagres som release-assets og ikke i Git-historikken.
+- Mobil SHA-256: `E988367DCC2AAD501542CDB997FA7CE09F1D2CE726E224B5D35A5415EB7DA7C6`.
+- TV debug-APK: [download fra GitHub Release](https://github.com/skovhuus1/mediaserver/releases/download/ui-completion-2026-08-22/boltbytes-media-tv-ui-debug.apk). Binære APK'er lagres som release-assets og ikke i Git-historikken.
+- TV SHA-256: `9F534F4EE115C151C3B5E734712C13D7338AFD90E7069FA59521AC650176AD8B`.
+
+### Fysiske release-gates
+
+- Visuel kontrol pa den rigtige `media.boltbytes.com`-installation kraever adgang til den deployede konto og dens faktiske katalogdata.
+- Fjernbetjeningsfokus, overscan og Cast-dialog skal fortsat smoke-testes pa den konkrete Android TV-enhed og Chromecast-hardware, fordi emulator- og widgettests ikke kan bevise hardwareadfaerd.

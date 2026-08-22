@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { EyeOff, Info, Play, ThumbsDown, ThumbsUp } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import styles from './personalized-recommendations.module.css';
 
@@ -27,10 +27,18 @@ type RecommendationResponse = {
 
 export function PersonalizedRecommendations() {
   const [data, setData] = useState<RecommendationResponse | null>(null);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    api<RecommendationResponse>('/media/recommendations').then(setData).catch(() => undefined);
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      setData(await api<RecommendationResponse>('/media/recommendations'));
+    } catch {
+      setError('Anbefalingerne kunne ikke hentes lige nu. Dit bibliotek virker stadig.');
+    }
   }, []);
+
+  useEffect(() => { void load(); }, [load]);
 
   async function feedback(mediaId: string, type: 'like' | 'dislike' | 'hidden') {
     await api(`/media/${mediaId}/recommendation-feedback`, {
@@ -49,6 +57,7 @@ export function PersonalizedRecommendations() {
     }
   }
 
+  if (error) return <section className={styles.errorState}><strong>Personlige anbefalinger holder en kort pause</strong><p>{error}</p><button onClick={() => void load()}>Prøv igen</button></section>;
   if (!data) return <section className={styles.loading} aria-label="Henter personlige anbefalinger"><i /><div><i /><i /><i /></div></section>;
   const controls = (item: Card) => (
     <>
@@ -81,7 +90,7 @@ export function PersonalizedRecommendations() {
             {section.items.map((item) => (
               <article className={styles.card} key={item.id}>
                 <Link href={`/watch/title/${item.id}`}>
-                  {item.posterPath ? <img src={item.posterPath} alt="" /> : <div className={styles.placeholder} />}
+                  {recommendationPoster(item.posterPath) ? <img src={recommendationPoster(item.posterPath)!} alt="" /> : <div className={styles.placeholder} />}
                   <strong>{item.title}</strong><small>{item.reason}</small>
                 </Link>
                 <div className={styles.feedback}>{controls(item)}</div>
@@ -98,4 +107,10 @@ function recommendationImage(path: string | null): string | null {
   if (!path) return null;
   if (/^https:\/\//i.test(path)) return path;
   return `https://image.tmdb.org/t/p/original${path}`;
+}
+
+function recommendationPoster(path: string | null): string | null {
+  if (!path) return null;
+  if (/^https:\/\//i.test(path)) return path;
+  return `https://image.tmdb.org/t/p/w500${path}`;
 }

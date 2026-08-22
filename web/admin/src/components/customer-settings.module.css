@@ -20,3 +20,5 @@
 .error { border-color:rgba(248,113,113,.45); color:#fecaca; }
 .notice { border-color:rgba(66,211,173,.35); color:#a7f3d0; }
 @media (max-width:720px) { .page{padding:24px 16px 64px}.heading,.card>header{align-items:stretch;flex-direction:column}.grid{grid-template-columns:1fr} }
+
+.page{min-height:auto;padding:38px 0 80px;background:transparent}.heading span{color:#efbd6c}.heading h1{font-family:var(--font-display)}.heading a,.card button{border-radius:10px}.heading a:hover,.card button:hover:not(:disabled){border-color:#e6ac5466;background:#d4933b12}.card,.error,.notice{border-color:#ffffff10;border-radius:18px;background:linear-gradient(145deg,#131917,#0d1210);box-shadow:0 22px 60px #0003}.grid input,.grid select{min-height:46px;border-radius:10px;background:#080c0b}.grid input:focus,.grid select:focus{border-color:#e4aa5266;outline:none;box-shadow:0 0 0 3px #d4933b17}.toggle input{accent-color:#e4aa52}.notice{border-color:#65c9a544;color:#b8ecd9}.error{border-color:#ef79634d}.card>header button{color:#171008;border-color:#e4aa52;background:#e4aa52;font-weight:850}
