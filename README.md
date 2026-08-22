@@ -15,6 +15,13 @@ Eksisterende playback-assets opgraderes ved at vælge **Genopbyg analyse** på e
 
 Valideret 22. august 2026 med grøn `npm run ci` (lint, typecheck, 46 API-testfiler/153 tests, 8 worker-testfiler/15 tests og alle builds) samt separat grøn fingerprint-kontrakttest med 7 tests. Den resterende driftsgate er real-media-verifikation i servercontaineren med mindst tre episoder fra samme serie.
 
+## Leverance 2026-08-22: Samlet film- og serieoplevelse
+
+- `/watch/title/:id` bruger nu én moderne title experience for både film og serier. Den gamle `?play=1`-omvej og det dobbelte detail-/shell-fetch er fjernet.
+- Film viser rigtig hero, poster, varighed, opløsning, HDR, codecs, rating, genrer og profilens fortsæt-position. Afspilning starter direkte i webplayeren med det serverreturnerede resume-offset.
+- Serier samles i sæsoner med episodebilleder, set-status, progress, varighed, intro/recap/credits-markører, næste episode og direkte afspilningskø. Episoder vises ikke som løse filmkort.
+- API'et returnerer en minimal playable payload pr. film/episode og rangerer lokale relaterede titler på provider-similaritet, medvirkende, genre, kategori og rating. Intet eksternt medie kan dukke op uden en afspillelig lokal fil.
+
 ## Leverance 2026-08-22: Samlet systemdiagnostik
 
 - Adminpanelet har nu en dedikeret `Diagnostik`-fane med 10-sekunders live-opdatering og manuel genmåling af hele serverens driftskæde.

@@ -18,7 +18,26 @@ export type SeriesEpisodeInput = {
   posterPath: string | null;
   durationMs: number | null;
   markers: Array<{ kind: string; startMs: number; endMs: number; source: string }>;
+  playback: Record<string, unknown>;
 };
+
+export type RelatedTitleSignal = {
+  providerId: string | null;
+  category: string | null;
+  genres: string[];
+  people: string[];
+  rating: number | null;
+};
+
+export function scoreRelatedTitle(source: RelatedTitleSignal, candidate: RelatedTitleSignal, similarProviderIds: Set<string>) {
+  const providerSimilar = Boolean(candidate.providerId && similarProviderIds.has(candidate.providerId));
+  const sharedPeople = candidate.people.filter((key) => source.people.includes(key)).length;
+  const sharedGenres = candidate.genres.filter((genre) => source.genres.some((sourceGenre) => sourceGenre.toLocaleLowerCase('da') === genre.toLocaleLowerCase('da'))).length;
+  const sameCategory = Boolean(source.category && candidate.category && source.category === candidate.category);
+  const score = (providerSimilar ? 60 : 0) + Math.min(50, sharedPeople * 25) + Math.min(36, sharedGenres * 12) + (sameCategory ? 8 : 0) + Math.max(0, Math.min(10, candidate.rating ?? 0));
+  const reason = providerSimilar ? 'Lignende titel' : sharedPeople > 0 ? 'Med samme medvirkende' : sharedGenres > 0 ? `Fordi du kan lide ${candidate.genres.find((genre) => source.genres.some((sourceGenre) => sourceGenre.toLocaleLowerCase('da') === genre.toLocaleLowerCase('da')))}` : sameCategory ? 'Samme kategori' : 'Populær på din server';
+  return { score, reason };
+}
 
 export type SeriesHistoryInput = {
   mediaId: string;
