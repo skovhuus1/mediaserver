@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { AuthenticatedUser } from '@boltbytes/contracts';
+import { detectVideoSignalProfile, type AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   buildSeriesSeasons,
@@ -8,6 +8,7 @@ import {
   readLocalCredits,
   readLocalGenres,
   readSimilarProviderIds,
+  scoreRelatedTitle,
   slugifyDiscovery,
 } from './experience-utils';
 
@@ -34,7 +35,12 @@ const mediaSelect = Prisma.validator<Prisma.MediaItemSelect>()({
   genres: true,
   credits: true,
   similarProviderIds: true,
-  file: { select: { status: true, durationMs: true, width: true, height: true } },
+  codec: true,
+  container: true,
+  bitrate: true,
+  width: true,
+  height: true,
+  file: { select: { status: true, durationMs: true, width: true, height: true, bitrate: true, container: true, videoCodec: true, audioCodec: true, probe: true } },
   timelineMarkers: {
     select: { kind: true, startMs: true, endMs: true, source: true },
     orderBy: { startMs: 'asc' },
@@ -58,7 +64,11 @@ export class ExperienceService {
     const isSeries = Boolean(seriesName) && (anchor.type === 'episode' || anchor.type === 'series' || anchor.category === 'series');
     const base = this.titleSummary(anchor, seriesName);
     if (!isSeries || !seriesName) {
-      return { mode: 'title', title: base, discovery: this.discovery(anchor, null) };
+      const [history, related] = await Promise.all([
+        actor.profileId ? this.prisma.playbackHistory.findUnique({ where: { profileId_mediaId: { profileId: actor.profileId, mediaId: anchor.id } }, select: { positionMs: true, completed: true, updatedAt: true } }) : null,
+        this.relatedTitles(actor.accountId, anchor, null),
+      ]);
+      return { mode: 'title', title: base, playback: this.playbackSummary(anchor, history), discovery: this.discovery(anchor, null), related };
     }
 
     const candidates: Prisma.MediaItemWhereInput[] = [];
@@ -90,8 +100,10 @@ export class ExperienceService {
       posterPath: episode.seasonPosterPath ?? episode.posterPath,
       durationMs: episode.file?.durationMs ?? null,
       markers: episode.timelineMarkers,
+      playback: this.playbackMedia(episode),
     })), histories, anchor.id);
     const representative = playableEpisodes[0] ?? anchor;
+    const related = await this.relatedTitles(actor.accountId, representative, seriesName);
     return {
       mode: 'series',
       title: {
@@ -103,6 +115,7 @@ export class ExperienceService {
       },
       series,
       discovery: this.discovery(representative, seriesName),
+      related,
     };
   }
 
@@ -177,6 +190,14 @@ export class ExperienceService {
       posterPath: item.posterPath,
       backdropPath: item.backdropPath,
       genres: readLocalGenres(item.genres),
+      durationMs: item.file?.durationMs ?? null,
+      width: item.file?.width ?? item.width,
+      height: item.file?.height ?? item.height,
+      bitrate: item.file?.bitrate ?? item.bitrate,
+      container: item.file?.container ?? item.container,
+      videoCodec: item.file?.videoCodec ?? item.codec,
+      audioCodec: item.file?.audioCodec ?? null,
+      hdr: detectVideoSignalProfile(item.file?.probe).hdr,
     };
   }
 
@@ -192,6 +213,41 @@ export class ExperienceService {
     ];
     return { people: readLocalCredits(item.credits).slice(0, 15), collections };
   }
+
+  private playbackMedia(item: MediaRecord) {
+    return { id: item.id, title: cleanLocalTitle(item.title), type: item.type, seriesTitle: item.seriesTitle, seriesDisplayTitle: item.seriesDisplayTitle, seriesMetadataProviderId: item.seriesMetadataProviderId, seasonNumber: item.seasonNumber, episodeNumber: item.episodeNumber, releaseYear: item.releaseYear, category: item.category, overview: item.overview, posterPath: item.posterPath, backdropPath: item.backdropPath, width: item.file?.width ?? item.width, height: item.file?.height ?? item.height, hdr: detectVideoSignalProfile(item.file?.probe).hdr, file: { durationMs: item.file?.durationMs ?? null } };
+  }
+
+  private playbackSummary(item: MediaRecord, history: { positionMs: number; completed: boolean; updatedAt: Date } | null) {
+    const durationMs = item.file?.durationMs ?? null;
+    const completed = Boolean(history?.completed) || Boolean(durationMs && history && history.positionMs / durationMs >= 0.9);
+    const positionMs = completed ? 0 : history?.positionMs ?? 0;
+    return { media: this.playbackMedia(item), positionMs, completed, progressPercent: durationMs && positionMs ? Math.max(0, Math.min(100, Math.round((positionMs / durationMs) * 100))) : 0, lastPlayedAt: history?.updatedAt.toISOString() ?? null };
+  }
+
+  private async relatedTitles(accountId: string, source: MediaRecord, seriesName: string | null) {
+    const media = (await this.localCatalog(accountId)).filter(playable);
+    const sourceSignal = relatedSignal(source);
+    const similarIds = new Set(readSimilarProviderIds(source.similarProviderIds));
+    const groups = new Map<string, MediaRecord[]>();
+    for (const item of media) {
+      if (item.id === source.id) continue;
+      const itemSeries = item.seriesDisplayTitle ?? item.seriesTitle;
+      if (seriesName && itemSeries?.toLocaleLowerCase('da') === seriesName.toLocaleLowerCase('da')) continue;
+      const key = item.type === 'episode' && itemSeries ? `series:${item.seriesMetadataProviderId ?? slugifyDiscovery(itemSeries)}` : `title:${item.id}`;
+      groups.set(key, [...(groups.get(key) ?? []), item]);
+    }
+    return [...groups.values()].flatMap((items) => {
+      const ranked = items.map((item) => ({ item, ...scoreRelatedTitle(sourceSignal, relatedSignal(item), similarIds) })).sort((left, right) => right.score - left.score)[0];
+      if (!ranked || ranked.score <= 0) return [];
+      const collapsed = collapseTitles(items)[0];
+      return collapsed ? [{ ...collapsed, reason: ranked.reason, score: ranked.score }] : [];
+    }).sort((left, right) => right.score - left.score || (right.rating ?? 0) - (left.rating ?? 0)).slice(0, 12);
+  }
+}
+
+function relatedSignal(item: MediaRecord) {
+  return { providerId: item.seriesMetadataProviderId ?? item.metadataProviderId, category: item.category, genres: readLocalGenres(item.genres), people: readLocalCredits(item.credits).map((person) => person.key), rating: item.rating };
 }
 
 function collapseTitles(media: MediaRecord[]) {

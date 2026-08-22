@@ -5,6 +5,7 @@ import {
   readLocalCredits,
   readLocalGenres,
   readSimilarProviderIds,
+  scoreRelatedTitle,
   slugifyDiscovery,
 } from './experience-utils';
 
@@ -22,9 +23,9 @@ describe('experience utilities', () => {
 
   it('builds ordered seasons, resume state and the next unwatched episode', () => {
     const episodes = [
-      { id: 'e2', title: 'To', overview: null, seasonNumber: 1, episodeNumber: 2, releaseYear: 2024, stillPath: null, posterPath: null, durationMs: 1_000, markers: [] },
-      { id: 'e1', title: 'En', overview: null, seasonNumber: 1, episodeNumber: 1, releaseYear: 2024, stillPath: null, posterPath: null, durationMs: 1_000, markers: [] },
-      { id: 'e3', title: 'Tre', overview: null, seasonNumber: 2, episodeNumber: 1, releaseYear: 2025, stillPath: null, posterPath: null, durationMs: 1_000, markers: [] },
+      { id: 'e2', title: 'To', overview: null, seasonNumber: 1, episodeNumber: 2, releaseYear: 2024, stillPath: null, posterPath: null, durationMs: 1_000, markers: [], playback: {} },
+      { id: 'e1', title: 'En', overview: null, seasonNumber: 1, episodeNumber: 1, releaseYear: 2024, stillPath: null, posterPath: null, durationMs: 1_000, markers: [], playback: {} },
+      { id: 'e3', title: 'Tre', overview: null, seasonNumber: 2, episodeNumber: 1, releaseYear: 2025, stillPath: null, posterPath: null, durationMs: 1_000, markers: [], playback: {} },
     ];
     const result = buildSeriesSeasons(episodes, [
       { mediaId: 'e1', positionMs: 950, completed: false, updatedAt: new Date('2026-01-01') },
@@ -34,5 +35,13 @@ describe('experience utilities', () => {
     expect(result.seasons[0]?.watchedCount).toBe(1);
     expect(result.resumeEpisode?.id).toBe('e2');
     expect(result.nextEpisode?.id).toBe('e3');
+  });
+
+  it('ranks provider similarity before shared cast and genre', () => {
+    const source = { providerId: '1', category: 'movie', genres: ['Action'], people: ['actor-1'], rating: 8 };
+    const similar = scoreRelatedTitle(source, { providerId: '2', category: 'movie', genres: [], people: [], rating: 5 }, new Set(['2']));
+    const castAndGenre = scoreRelatedTitle(source, { providerId: '3', category: 'movie', genres: ['Action'], people: ['actor-1'], rating: 9 }, new Set());
+    expect(similar.score).toBeGreaterThan(castAndGenre.score);
+    expect(similar.reason).toBe('Lignende titel');
   });
 });
