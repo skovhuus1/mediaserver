@@ -8,6 +8,7 @@ import { PlaybackAnalysis } from './playback-analysis';
 import { OperationsCenter } from './operations-center';
 import { DiagnosticsCenter } from './diagnostics-center';
 import { BackupManager } from './backup-manager';
+import { ServarrManager } from './servarr-manager';
 
 type Root = { id: string; label: string; mountPath: string; isReadOnly: boolean };
 type Scan = { id: string; status: string; filesSeen: number; filesCreated: number; errors: number; error: string | null };
@@ -77,6 +78,7 @@ export function ManagementView({ view }: { view: string }) {
   if (view === 'playback-analysis') return <PlaybackAnalysis />;
   if (view === 'diagnostics') return <DiagnosticsCenter />;
   if (view === 'backups') return <BackupManager />;
+  if (view === 'servarr') return <ServarrManager />;
   if (view === 'libraries') return <LibrariesView />;
   if (view === 'users') return <UsersView />;
   if (view === 'plans') return <PlansView />;

@@ -9,6 +9,7 @@ import {
   Gauge,
   HeartPulse,
   HardDriveDownload,
+  SatelliteDish,
   Home,
   Library,
   LogOut,
@@ -46,6 +47,7 @@ const admin = [
   { label: 'Playback-analyse', icon: ScanSearch, href: '/?admin=playback-analysis' },
   { label: 'Diagnostik', icon: HeartPulse, href: '/?admin=diagnostics' },
   { label: 'Backup', icon: HardDriveDownload, href: '/?admin=backups' },
+  { label: 'Sonarr / Radarr', icon: SatelliteDish, href: '/?admin=servarr' },
   { label: t.updates, icon: Sparkles, href: '/update' },
   { label: t.settings, icon: Settings, href: '/?admin=settings' },
 ];
