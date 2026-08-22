@@ -556,6 +556,10 @@ export class PlaybackService {
         `/api/v1/playback/sessions/${session.id}/cast-heartbeat?token=${encodedToken}`,
         publicBaseUrl,
       ).toString(),
+      releaseUrl: new URL(
+        `/api/v1/playback/sessions/${session.id}/cast-heartbeat?token=${encodedToken}`,
+        publicBaseUrl,
+      ).toString(),
       contentType: session.method === 'direct_play'
         ? this.directContentType(session.media.container)
         : 'application/x-mpegURL',

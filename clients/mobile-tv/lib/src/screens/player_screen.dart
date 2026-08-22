@@ -817,11 +817,22 @@ class _PlayerScreenState extends State<PlayerScreen>
         activeTrackIds: selectedTrackId == null ? const [] : [selectedTrackId],
         customData: {
           'heartbeatUrl': handoff['heartbeatUrl'],
+          'releaseUrl': handoff['releaseUrl'],
           'timelineOffsetMs': _timelineOffsetMs,
           'fullDurationMs': _durationMs > 0 ? _durationMs : null,
           'currentBitrate': auth.sourceBitrate,
           'currentHeight': auth.sourceHeight,
           'subtitleTrack': _subtitle?.label,
+          'title': _presentationTitle,
+          'subtitle': widget.media.isEpisode
+              ? widget.media.episodeLabel
+              : _status,
+          'posterUrl': poster.isEmpty ? null : poster,
+          'methodLabel': auth.method == 'direct_play'
+              ? 'Direct Play'
+              : auth.method == 'direct_stream'
+              ? 'Direct Stream'
+              : 'Transcoding',
         },
       );
       CastPlaybackCoordinator.instance.activate(
