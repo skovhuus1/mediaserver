@@ -1,11 +1,11 @@
 CREATE TABLE "live_tv_providers" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(), "account_id" UUID NOT NULL, "name" TEXT NOT NULL,
+  "id" TEXT NOT NULL, "account_id" TEXT NOT NULL, "name" TEXT NOT NULL,
   "enabled" BOOLEAN NOT NULL DEFAULT true, "priority" INTEGER NOT NULL DEFAULT 100,
   "per_user_stream_limit" INTEGER NOT NULL DEFAULT 1, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL, CONSTRAINT "live_tv_providers_pkey" PRIMARY KEY ("id")
 );
 CREATE TABLE "live_tv_connections" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(), "account_id" UUID NOT NULL, "provider_id" UUID NOT NULL,
+  "id" TEXT NOT NULL, "account_id" TEXT NOT NULL, "provider_id" TEXT NOT NULL,
   "name" TEXT NOT NULL, "playlist_url" JSONB NOT NULL, "playlist_fingerprint" TEXT NOT NULL,
   "enabled" BOOLEAN NOT NULL DEFAULT true, "priority" INTEGER NOT NULL DEFAULT 100,
   "max_concurrent_streams" INTEGER NOT NULL DEFAULT 1, "health_status" TEXT NOT NULL DEFAULT 'unknown',
@@ -13,7 +13,7 @@ CREATE TABLE "live_tv_connections" (
   "updated_at" TIMESTAMP(3) NOT NULL, CONSTRAINT "live_tv_connections_pkey" PRIMARY KEY ("id")
 );
 CREATE TABLE "live_tv_channels" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(), "account_id" UUID NOT NULL, "canonical_key" TEXT NOT NULL,
+  "id" TEXT NOT NULL, "account_id" TEXT NOT NULL, "canonical_key" TEXT NOT NULL,
   "tvg_id" TEXT, "name" TEXT NOT NULL, "number" INTEGER, "logo_url" TEXT, "group_name" TEXT,
   "enabled" BOOLEAN NOT NULL DEFAULT true, "is_adult" BOOLEAN NOT NULL DEFAULT false,
   "metadata_locked" BOOLEAN NOT NULL DEFAULT false, "sort_order" INTEGER NOT NULL DEFAULT 0,
@@ -21,7 +21,7 @@ CREATE TABLE "live_tv_channels" (
   CONSTRAINT "live_tv_channels_pkey" PRIMARY KEY ("id")
 );
 CREATE TABLE "live_tv_channel_sources" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(), "channel_id" UUID NOT NULL, "connection_id" UUID NOT NULL,
+  "id" TEXT NOT NULL, "channel_id" TEXT NOT NULL, "connection_id" TEXT NOT NULL,
   "external_id" TEXT, "source_name" TEXT NOT NULL, "encrypted_stream_url" JSONB NOT NULL,
   "stream_fingerprint" TEXT NOT NULL, "stream_format" TEXT NOT NULL DEFAULT 'auto', "priority" INTEGER NOT NULL DEFAULT 100,
   "enabled" BOOLEAN NOT NULL DEFAULT true, "last_seen_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -29,30 +29,30 @@ CREATE TABLE "live_tv_channel_sources" (
   CONSTRAINT "live_tv_channel_sources_pkey" PRIMARY KEY ("id")
 );
 CREATE TABLE "live_tv_epg_sources" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(), "account_id" UUID NOT NULL, "provider_id" UUID NOT NULL,
+  "id" TEXT NOT NULL, "account_id" TEXT NOT NULL, "provider_id" TEXT NOT NULL,
   "encrypted_url" JSONB NOT NULL, "enabled" BOOLEAN NOT NULL DEFAULT true, "health_status" TEXT NOT NULL DEFAULT 'unknown',
   "last_error" TEXT, "last_imported_at" TIMESTAMP(3), "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL, CONSTRAINT "live_tv_epg_sources_pkey" PRIMARY KEY ("id")
 );
 CREATE TABLE "live_tv_programs" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(), "account_id" UUID NOT NULL, "provider_id" UUID NOT NULL,
-  "channel_id" UUID NOT NULL, "starts_at" TIMESTAMP(3) NOT NULL, "ends_at" TIMESTAMP(3) NOT NULL,
+  "id" TEXT NOT NULL, "account_id" TEXT NOT NULL, "provider_id" TEXT NOT NULL,
+  "channel_id" TEXT NOT NULL, "starts_at" TIMESTAMP(3) NOT NULL, "ends_at" TIMESTAMP(3) NOT NULL,
   "title" TEXT NOT NULL, "subtitle" TEXT, "description" TEXT, "category" TEXT, "icon_url" TEXT, "episode" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "live_tv_programs_pkey" PRIMARY KEY ("id")
 );
 CREATE TABLE "live_tv_leases" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(), "account_id" UUID NOT NULL, "user_id" UUID NOT NULL,
-  "profile_id" UUID NOT NULL, "device_id" UUID NOT NULL, "channel_id" UUID NOT NULL, "source_id" UUID NOT NULL,
-  "connection_id" UUID NOT NULL, "status" TEXT NOT NULL DEFAULT 'preparing', "method" TEXT NOT NULL,
-  "stream_token_hash" TEXT NOT NULL, "job_id" UUID, "is_cast_session" BOOLEAN NOT NULL DEFAULT false,
+  "id" TEXT NOT NULL, "account_id" TEXT NOT NULL, "user_id" TEXT NOT NULL,
+  "profile_id" TEXT NOT NULL, "device_id" TEXT NOT NULL, "channel_id" TEXT NOT NULL, "source_id" TEXT NOT NULL,
+  "connection_id" TEXT NOT NULL, "status" TEXT NOT NULL DEFAULT 'preparing', "method" TEXT NOT NULL,
+  "stream_token_hash" TEXT NOT NULL, "job_id" TEXT, "is_cast_session" BOOLEAN NOT NULL DEFAULT false,
   "runtime_state" TEXT NOT NULL DEFAULT 'starting', "current_bitrate" INTEGER, "buffer_ahead_ms" INTEGER,
   "stall_count" INTEGER NOT NULL DEFAULT 0, "lease_expires_at" TIMESTAMP(3) NOT NULL,
   "last_heartbeat_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "started_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "ended_at" TIMESTAMP(3), "last_error" TEXT, CONSTRAINT "live_tv_leases_pkey" PRIMARY KEY ("id")
 );
 CREATE TABLE "live_tv_favorites" (
-  "id" UUID NOT NULL DEFAULT gen_random_uuid(), "account_id" UUID NOT NULL, "profile_id" UUID NOT NULL,
-  "channel_id" UUID NOT NULL, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "id" TEXT NOT NULL, "account_id" TEXT NOT NULL, "profile_id" TEXT NOT NULL,
+  "channel_id" TEXT NOT NULL, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "live_tv_favorites_pkey" PRIMARY KEY ("id")
 );
 
