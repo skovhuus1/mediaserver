@@ -36,7 +36,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { accessToken, api, apiBlob, type ApiFailure } from '@/lib/api';
 import { Brand } from './brand';
-import { ensureCastSdk } from './cast-sdk-loader';
+import { castSdkLastError, ensureCastSdk } from './cast-sdk-loader';
 import styles from './playback.module.css';
 
 export type PlayableMedia = {
@@ -1068,29 +1068,50 @@ export function WebPlayer() {
 
   const startCast = async () => {
     if (!authorization || !media) return;
-    setCasting(true);
     setCastNotice('');
+    if (!castAvailable) {
+      setCasting(true);
+      try {
+        const castState = await loadCastFramework(true);
+        setCastAvailable(castState.available);
+        setCastReason(castState.reason);
+        setCastNotice(castState.available
+          ? 'Google Cast er klar. Tryk på Cast-knappen igen for at vælge en enhed.'
+          : castState.reason);
+      } finally {
+        setCasting(false);
+      }
+      return;
+    }
+
+    const castWindow = window as CastWindow;
+    const framework = castWindow.cast?.framework;
+    const mediaApi = castWindow.chrome?.cast?.media;
+    if (!framework || !mediaApi) {
+      setCastAvailable(false);
+      setCastReason('Google Cast SDK mistede forbindelsen til browserens Cast Framework.');
+      setCastNotice('Google Cast skal initialiseres igen. Tryk på Cast-knappen én gang til.');
+      return;
+    }
+    const context = framework.CastContext.getInstance();
+    const sessionRequest = context.getCurrentSession()
+      ? Promise.resolve()
+      : context.requestSession();
+    setCasting(true);
     let handoffAccepted = false;
+    let castSession: CastSession | null = null;
+    let mediaLoaded = false;
     try {
       if (!window.isSecureContext) {
         throw new Error('Chromecast fra webpanelet kræver HTTPS. Åbn serveren via en HTTPS-adresse og prøv igen.');
       }
-      const castState = await loadCastFramework(!castAvailable);
-      setCastAvailable(castState.available);
-      setCastReason(castState.reason);
-      if (!castState.available) throw new Error(castState.reason);
-      const castWindow = window as CastWindow;
-      const framework = castWindow.cast?.framework;
-      const mediaApi = castWindow.chrome?.cast?.media;
-      if (!framework || !mediaApi) throw new Error('Google Cast er ikke tilgængelig i denne browser.');
-      const context = framework.CastContext.getInstance();
-      await context.requestSession();
+      await sessionRequest;
       const handoff = await api<CastHandoff>(`/playback/sessions/${authorization.sessionId}/cast-handoff`, {
         method: 'POST',
         body: JSON.stringify({ streamToken: authorization.streamToken }),
       });
       handoffAccepted = true;
-      const castSession = context.getCurrentSession();
+      castSession = context.getCurrentSession();
       if (!castSession) throw new Error('Chromecast-sessionen kunne ikke oprettes.');
       const mediaInfo = new mediaApi.MediaInfo(
         handoff.streamUrl,
@@ -1128,6 +1149,7 @@ export function WebPlayer() {
       const selectedTrackId = castTextTrackId(handoff.subtitleTracks, activeSubtitleRef.current);
       if (selectedTrackId !== null) request.activeTrackIds = [selectedTrackId];
       await castSession.loadMedia(request);
+      mediaLoaded = true;
       videoRef.current?.pause();
       castingRef.current = true;
       const remotePlayer = new framework.RemotePlayer();
@@ -1182,7 +1204,8 @@ export function WebPlayer() {
         await api(`/playback/sessions/${authorization.sessionId}/cast-handoff`, { method: 'DELETE' })
           .catch(() => undefined);
       }
-      setCastNotice(caught instanceof Error ? caught.message : 'Chromecast kunne ikke startes.');
+      if (castSession && !mediaLoaded) castSession.endSession(false);
+      setCastNotice(castOperationErrorMessage(caught));
       setControlsVisible(true);
     } finally {
       setCasting(false);
@@ -1581,7 +1604,7 @@ export function WebPlayer() {
             className={styles.iconButton}
             onClick={() => void startCast()}
             disabled={!authorization || !sourceReady || casting}
-            aria-label="Chromecast"
+            aria-label={castAvailable ? 'Afspil på Chromecast' : 'Initialiser Chromecast'}
             title={castAvailable ? 'Afspil på Chromecast' : castReason}
           >
             <Cast />
@@ -2066,7 +2089,7 @@ async function loadCastFramework(retry = false): Promise<{ available: boolean; r
   if (!sdkAvailable) {
     return {
       available: false,
-      reason: 'Google Cast SDK kunne ikke indlæses. Kontrollér HTTPS, netværk og browserens Cast-understøttelse.',
+      reason: castFrameworkFailureReason(castSdkLastError()),
     };
   }
   if (castWindow.cast?.framework && castWindow.chrome?.cast?.media) {
@@ -2089,6 +2112,23 @@ function castFrameworkFailureReason(errorInfo: unknown): string {
   return detail
     ? `Google Cast Framework kunne ikke indlæses (${detail}).`
     : 'Google Cast Framework kunne ikke indlæses. Brug Chrome via HTTPS og kontrollér, at browseren og Chromecast er på samme netværk.';
+}
+
+function castOperationErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  const value = error && typeof error === 'object' ? error as Record<string, unknown> : null;
+  const code = String(value?.code ?? '').trim().toLowerCase();
+  const known = ({
+    cancel: 'Valg af Chromecast blev annulleret.',
+    timeout: 'Chromecast svarede ikke inden for tidsfristen.',
+    receiver_unavailable: 'Der blev ikke fundet en tilgængelig Chromecast på netværket.',
+    session_error: 'Google Cast kunne ikke oprette receiver-sessionen.',
+    channel_error: 'Forbindelsen til Chromecast blev afbrudt.',
+    load_media_failed: 'Chromecast kunne ikke indlæse den valgte stream.',
+  } as Record<string, string>)[code];
+  if (known) return known;
+  const description = String(value?.description ?? '').trim();
+  return description || 'Chromecast kunne ikke startes.';
 }
 
 function castTextTracks(tracks: SubtitleTrack[]): SubtitleTrack[] {

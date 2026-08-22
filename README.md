@@ -1023,3 +1023,11 @@ Denne leverance samler kundeportal, titeloplevelse, webplayer, administration og
 - HLS-seek bruger latest-request-wins. Hvis brugeren søger igen, mens Direct Stream eller transcoding genstartes, annulleres den forældede statuspolling, og kun den seneste absolutte position klargøres og aktiveres.
 - En HLS-genstart genbruger fortsat samme logical playback-session og streamreservation; resume-positionen genanvendes ikke som et lokalt seek efter kildeskift.
 - Film-, serie-, søge- og filterklik beskytter nu kataloget mod sene svar fra den forrige forespørgsel. Navigationen viser desuden korrekt aktiv side via `aria-current`.
+
+## Web Chromecast-pålidelighed - 2026-08-22
+
+- Google Cast SDK-loaderen reagerer nu både på API-callback og script-load, gemmer den konkrete initialiseringsfejl og kan genprøve efter timeout eller netværksfejl.
+- Receiver-dialogen åbnes direkte fra et brugerklik uden et forudgående asynkront SDK-`await`, så Chromes user-activation-krav bevares.
+- Hvis SDK'et ikke var klar ved første klik, initialiseres det, og brugeren får en eksplicit besked om at klikke igen for at vælge enheden.
+- Annullering, timeout, manglende receiver, sessionfejl, kanalfejl og media-load-fejl vises særskilt. En Cast-session uden indlæst medie og et accepteret server-handoff ryddes deterministisk op ved fejl.
+- Docker bygger fortsat webklienten med `BB_MEDIA_CAST_RECEIVER_APP_ID` som `NEXT_PUBLIC_CAST_RECEIVER_APP_ID`; tom værdi bruger Google Default Media Receiver.
