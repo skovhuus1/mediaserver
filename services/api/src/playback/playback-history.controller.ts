@@ -20,6 +20,14 @@ export class PlaybackHistoryController {
     return this.history.continueWatching(actor);
   }
 
+  @Delete('history/:mediaId')
+  removeFromContinueWatching(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('mediaId') mediaId: string,
+  ) {
+    return this.history.removeFromContinueWatching(actor, mediaId);
+  }
+
   @Get('watchlist')
   watchlist(@CurrentUser() actor: AuthenticatedUser) {
     return this.history.watchlist(actor);

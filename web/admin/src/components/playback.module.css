@@ -1002,19 +1002,53 @@
   min-width: 0;
 }
 
+.continueHeading > div:first-child { display: grid; gap: 4px; }
+.continueHeading small { color: #8e9995; font-size: 10px; }
+.continueNav { display: flex; gap: 7px; }
+.continueNav button { display: grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid rgba(255,255,255,.12); border-radius: 50%; color: #f4f1e9; background: rgba(19,24,23,.92); cursor: pointer; }
+.continueNav button:hover:not(:disabled), .continueNav button:focus-visible { border-color: rgba(232,176,88,.62); color: #efbd6c; outline: none; }
+.continueNav button:disabled { opacity: .25; cursor: default; }
+.continueRailFrame { position: relative; min-width: 0; }
+.continueRailFrame::before, .continueRailFrame::after { position: absolute; z-index: 4; top: 0; bottom: 8px; width: 46px; opacity: 0; content: ''; pointer-events: none; transition: opacity 160ms ease; }
+.continueRailFrame::before { left: 0; background: linear-gradient(90deg,#080b0c,transparent); }
+.continueRailFrame::after { right: 0; background: linear-gradient(270deg,#080b0c,transparent); }
+.continueRailFrame[data-can-scroll-left='true']::before, .continueRailFrame[data-can-scroll-right='true']::after { opacity: 1; }
+
 .continueRow {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(175px, 1fr));
-  gap: 12px;
+  display: flex;
+  min-width: 0;
+  gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px 2px 12px;
+  overscroll-behavior-inline: contain;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  touch-action: pan-x;
 }
 
 .continueCard {
+  position: relative;
+  flex: 0 0 clamp(250px, 23vw, 340px);
   overflow: hidden;
-  padding: 0;
   border: 1px solid rgba(255, 255, 255, .07);
-  border-radius: 8px;
+  border-radius: 12px;
   color: #f5f6f8;
-  background: #151a20;
+  background: #111716;
+  box-shadow: 0 14px 34px rgba(0,0,0,.2);
+  scroll-snap-align: start;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.continueCard:hover, .continueCard:focus-within { border-color: rgba(235,183,99,.34); box-shadow: 0 20px 44px rgba(0,0,0,.36); transform: translateY(-3px); }
+
+.continuePlay {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
   cursor: pointer;
   text-align: left;
 }
@@ -1030,9 +1064,17 @@
   background-size: cover;
 }
 
+.continueArt::after { position: absolute; inset: 0; background: linear-gradient(180deg,transparent 45%,rgba(4,7,7,.58)); content: ''; }
+.continueFallback { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 8px; color: rgba(239,189,108,.64); }
+.continueFallback svg { width: 34px; height: 34px; }
+.continueFallback b { font-size: 10px; letter-spacing: .15em; text-transform: uppercase; }
+.continuePlayCue { position: absolute; z-index: 2; top: 50%; left: 50%; display: grid; width: 48px; height: 48px; place-items: center; border: 1px solid rgba(255,255,255,.24); border-radius: 50%; color: #171008; background: rgba(241,194,116,.93); box-shadow: 0 10px 30px rgba(0,0,0,.4); opacity: 0; transform: translate(-50%,-42%) scale(.88); transition: opacity 160ms ease, transform 160ms ease; }
+.continueCard:hover .continuePlayCue, .continuePlay:focus-visible .continuePlayCue { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+.continuePlay:focus-visible { outline: none; }
+
 .continueCopy {
   display: block;
-  padding: 10px;
+  padding: 11px 12px 12px;
 }
 
 .continueCopy strong,
@@ -1045,8 +1087,16 @@
 
 .continueCopy small {
   margin-top: 4px;
-  color: #9ba4b0;
+  color: #929d98;
+  font-size: 10px;
 }
+
+.continueRemove { position: absolute; z-index: 5; top: 9px; right: 9px; display: grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid rgba(255,255,255,.17); border-radius: 50%; color: #fff; background: rgba(5,8,8,.82); box-shadow: 0 8px 22px rgba(0,0,0,.36); cursor: pointer; opacity: 0; transform: translateY(-4px); transition: opacity 150ms ease, transform 150ms ease, background 150ms ease; backdrop-filter: blur(12px); }
+.continueCard:hover .continueRemove, .continueRemove:focus-visible { opacity: 1; transform: translateY(0); }
+.continueRemove:hover, .continueRemove:focus-visible { border-color: rgba(255,132,118,.52); background: rgba(120,35,29,.9); outline: none; }
+.continueRemove:disabled { cursor: wait; }
+.continueSpinner { animation: continueSpin 800ms linear infinite; }
+.continueError { margin-bottom: 10px; padding: 9px 12px; border: 1px solid rgba(255,124,108,.25); border-radius: 8px; color: #ffc2ba; background: rgba(113,30,24,.18); font-size: 11px; }
 
 .progress {
   display: block;
@@ -1061,6 +1111,10 @@
   height: 100%;
   background: linear-gradient(90deg, #9c55f5, #c179ff);
 }
+
+@keyframes continueSpin { to { transform: rotate(360deg); } }
+
+:global(.watch-page-heading) .continueHeading { display: none; }
 
 @media (max-width: 1050px) {
   .controlRow {
@@ -1152,9 +1206,9 @@
     display: none;
   }
 
-  .continueRow {
-    grid-template-columns: repeat(2, minmax(150px, 1fr));
-  }
+  .continueCard { flex-basis: min(78vw, 310px); }
+  .continueNav { display: none; }
+  .continueRemove { opacity: 1; transform: none; }
 }
 
 .episodeRich {
