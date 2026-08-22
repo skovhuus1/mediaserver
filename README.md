@@ -112,7 +112,7 @@ npm run prisma:migrate
 - **scripts/bootstrap-env.mjs** genererer manglende **JWT_SECRET** og **ENCRYPTION_KEY**.
 - Mistet **ENCRYPTION_KEY** betyder, at krypterede settings og backups ikke kan dekrypteres.
 - Medier monteres read-only. Midlertidige transcodes og applikationsdata bruger separate skrivbare volumes.
-- Updateren accepterer kun validerede fremadgående eller squash-equivalente Git-overgange.
+- Updateren accepterer kun validerede fremadgående eller squash-equivalente Git-overgange og rydder kun en `index.lock`, når grace-perioden er udløbet og hostens PID-namespace beviser, at ingen proces ejer den.
 - Restore kræver owner-role, nul aktive streams/jobs, tidsbegrænset challenge og en automatisk safety backup.
 
 ## Produktion

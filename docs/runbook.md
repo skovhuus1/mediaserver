@@ -63,6 +63,27 @@ sudo docker exec -u node boltbytes-media-api-1 \
 
 Ret ejerskab til den valgte driftsmodel og genskab containeren. Undgå at køre skiftevis som root, hostbruger og containerbruger mod samme Git-database.
 
+### index.lock findes allerede
+
+Den aktuelle updater kontrollerer hostens PID-namespace. En lock under fem minutter eller med en aktiv ejer blokeres med PID og alder. En ældre lock uden ejer fjernes automatisk lige før checkout.
+
+En server, der endnu ikke har lock-rettelsen, kræver én manuel bootstrap. Stop først API-processen, så den ikke kan eje eller genoprette låsen. Kontrollér derefter hosten og fjern kun låsen uden ejer:
+
+~~~bash
+cd /home/seeds/mediaserver
+sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml stop api
+if sudo fuser .git/index.lock >/dev/null 2>&1; then
+  sudo fuser -v .git/index.lock
+  echo "STOP: locken har stadig en aktiv ejer"
+  exit 1
+fi
+sudo rm -f .git/index.lock
+sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml start api
+sudo docker compose -f docker-compose.yml -f docker-compose.updater.yml restart proxy
+~~~
+
+Brug aldrig `reset --hard` som lock-recovery.
+
 ### update_dirty_worktree
 
 Commit eller fjern kun de tracked ændringer, du ejer. Updateren ignorerer ikke tracked driftstilpasninger.
