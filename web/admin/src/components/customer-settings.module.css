@@ -16,6 +16,7 @@
 .toggle { display:flex!important; align-items:center; gap:10px!important; margin:12px 0; }
 .toggle input { width:18px; height:18px; accent-color:#42d3ad; }
 .secondary { margin-top:10px; }
+.rowManager{grid-column:1/-1;display:grid;gap:8px;margin-top:8px;padding-top:18px;border-top:1px solid rgba(255,255,255,.08)}.rowManager>header{display:grid;gap:4px;margin-bottom:4px}.rowManager>header span{color:#8f9a96;font-size:.76rem}.rowManager article{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 14px;border:1px solid rgba(255,255,255,.09);border-radius:11px;background:#090d0c}.rowManager article>span{display:grid;gap:3px}.rowManager article small{color:#8f9995}.rowManager article>div{display:flex;gap:6px}.rowManager article button{display:grid;width:34px;height:34px;padding:0;place-items:center;border-radius:8px}.rowManager article button svg{width:15px}.rowManager .hiddenRow{opacity:.54}.rowManager .hiddenRow>span strong{text-decoration:line-through}
 .error,.notice { padding:14px 18px; }
 .error { border-color:rgba(248,113,113,.45); color:#fecaca; }
 .notice { border-color:rgba(66,211,173,.35); color:#a7f3d0; }

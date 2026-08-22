@@ -14,6 +14,9 @@ import styles from './watch-portal.module.css';
 
 type WatchItem = { id: string; title: string; type: string; seriesTitle: string | null; releaseYear: number | null; posterPath: string | null; width?: number | null; height?: number | null; hdr?: 'hdr10' | 'hlg' | 'dolby_vision' | null };
 type CatalogResponse = { items: WatchItem[] };
+type HomeRowId = 'recommendations' | 'continue' | 'new_movies' | 'new_series';
+type ProfilePreferencesResponse = { preferences: { homeRowOrder: HomeRowId[]; hiddenHomeRows: HomeRowId[] } };
+const DEFAULT_HOME_ROWS: HomeRowId[] = ['recommendations', 'continue', 'new_movies', 'new_series'];
 
 export function WatchPortal() {
   const router = useRouter();
@@ -22,6 +25,8 @@ export function WatchPortal() {
   const [movies, setMovies] = useState<WatchItem[]>([]);
   const [series, setSeries] = useState<WatchItem[]>([]);
   const [catalogError, setCatalogError] = useState('');
+  const [homeRows, setHomeRows] = useState<HomeRowId[]>(DEFAULT_HOME_ROWS);
+  const [hiddenHomeRows, setHiddenHomeRows] = useState<HomeRowId[]>([]);
   const browse = Boolean(Array.from(searchParams.keys()).some((key) => key !== 'view'));
   const continueOnly = searchParams.get('view') === 'continue';
   useEffect(() => {
@@ -29,13 +34,18 @@ export function WatchPortal() {
     void api<SessionUser>('/auth/me').then(async (session) => {
       if (!active) return;
       setUser(session);
-      const [movieResult, seriesResult] = await Promise.allSettled([
+      const [movieResult, seriesResult, preferenceResult] = await Promise.allSettled([
         api<CatalogResponse>('/media/catalog?type=movie&pageSize=18&sort=newest'),
         api<CatalogResponse>('/media/catalog?type=series&pageSize=18&sort=newest'),
+        api<ProfilePreferencesResponse>('/profiles/me/preferences'),
       ]);
       if (!active) return;
       if (movieResult.status === 'fulfilled') setMovies(movieResult.value.items);
       if (seriesResult.status === 'fulfilled') setSeries(seriesResult.value.items);
+      if (preferenceResult.status === 'fulfilled') {
+        setHomeRows(preferenceResult.value.preferences.homeRowOrder);
+        setHiddenHomeRows(preferenceResult.value.preferences.hiddenHomeRows);
+      }
       if (movieResult.status === 'rejected' || seriesResult.status === 'rejected') {
         setCatalogError('En del af biblioteket kunne ikke hentes. Resten af portalen er stadig tilgængelig.');
       }
@@ -46,7 +56,15 @@ export function WatchPortal() {
     return () => { active = false; };
   }, [router]);
   if (!user) return <main className="watch-loading" aria-busy="true" />;
-  return <CustomerShell user={user}><div className={styles.portal}>{catalogError && <p className={styles.catalogNotice}>{catalogError}</p>}{continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : <><PersonalizedRecommendations /><section className={styles.libraryBar}><div><Library size={22} /><strong>Dit BoltBytes-bibliotek</strong><span>{movies.length}+ film · {series.length}+ serier klar til afspilning</span></div><nav><Link href="/watch?type=movie"><Film size={14} />Film</Link><Link href="/watch?type=series"><Tv size={14} />Serier</Link></nav></section><ContinueWatching /><DiscoveryRow title="Nye film" items={movies} allHref="/watch?type=movie" /><DiscoveryRow title="Nye serier" items={series} allHref="/watch?type=series" /></>}</div></CustomerShell>;
+  const visibleRows = homeRows.filter((row) => !hiddenHomeRows.includes(row));
+  const homeRow = (row: HomeRowId) => row === 'recommendations'
+    ? <PersonalizedRecommendations key={row} />
+    : row === 'continue'
+      ? <ContinueWatching key={row} />
+      : row === 'new_movies'
+        ? <DiscoveryRow key={row} title="Nye film" items={movies} allHref="/watch?type=movie" />
+        : <DiscoveryRow key={row} title="Nye serier" items={series} allHref="/watch?type=series" />;
+  return <CustomerShell user={user}><div className={styles.portal}>{catalogError && <p className={styles.catalogNotice}>{catalogError}</p>}{continueOnly ? <section className="watch-page-heading"><span className="eyebrow">DIN HISTORIK</span><h1>Fortsæt med at se</h1><ContinueWatching /></section> : browse ? <CatalogView basePath="/watch" /> : <><section className={styles.libraryBar}><div><Library size={22} /><strong>Dit BoltBytes-bibliotek</strong><span>{movies.length}+ film · {series.length}+ serier klar til afspilning</span></div><nav><Link href="/watch?type=movie"><Film size={14} />Film</Link><Link href="/watch?type=series"><Tv size={14} />Serier</Link></nav></section>{visibleRows.length ? visibleRows.map(homeRow) : <section className={styles.empty}><strong>Din forside er tom</strong><p>Vis mindst én række under Indstillinger → Anbefalinger.</p><Link href="/watch/settings">Tilpas forsiden</Link></section>}</>}</div></CustomerShell>;
 }
 
 function DiscoveryRow({ title, items, allHref }: { title: string; items: WatchItem[]; allHref: string }) {

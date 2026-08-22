@@ -1006,6 +1006,14 @@ Physical acceptance still requires an Android phone and Chromecast on the same W
 - Resultaterne er account-scopede og indeholder aldrig provider-titler, der ikke findes som afspillelige filer på den lokale server.
 - UI'et understøtter debounce, stale-response-beskyttelse, tastaturvalg med pil op/ned, Enter og Escape, seneste lokale søgninger samt direkte navigation til titel-, person- og genresider.
 - `GET /api/v1/experience/search?q=<tekst>` returnerer grupperne `titles`, `people` og `genres`; forespørgsler under to tegn returnerer et tomt resultat uden katalogscan.
+
+## Profilstyrede forside-rækker - 2026-08-22
+
+- Kunden kan under `Indstillinger -> Anbefalinger` flytte og skjule `Anbefalinger`, `Fortsæt med at se`, `Nye film` og `Nye serier`.
+- Rækkefølge og synlighed lagres server-side på den aktive profil og følger derfor profilen mellem browsere, mobil og TV; indstillingerne er ikke bundet til browserens local storage.
+- `GET/PATCH /api/v1/profiles/me/preferences` eksponerer `homeRowOrder` og `hiddenHomeRows`. DTO-validering afviser ukendte række-id'er og mere end fire rækker.
+- Ældre profiler migreres til den dokumenterede standardrækkefølge. Serveren normaliserer dubletter og udfylder manglende standardrækker uden at kassere et gyldigt brugerdefineret valg.
+- Hvis kunden skjuler alle rækker, vises en konkret tom-state med link tilbage til forsideindstillingerne i stedet for en tom eller defekt portal.
 # Native Android playback, TV controls and signed updates
 
 The Flutter client now shares one server-side playback model across Android mobile, Android TV and Chromecast. Series playback uses `/playback/history/series-next`, profile `autoplayNext`, and real timeline markers for intro, recap and credits actions. A ten-second credits countdown can advance to the next local episode and can be cancelled by the viewer.

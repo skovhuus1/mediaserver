@@ -827,6 +827,8 @@ model ProfilePreferences {
   subtitleMode               String    @default("auto") @map("subtitle_mode")
   autoplayNext               Boolean   @default(true) @map("autoplay_next")
   recommendationsEnabled     Boolean   @default(true) @map("recommendations_enabled")
+  homeRowOrder               Json      @default("[\"recommendations\",\"continue\",\"new_movies\",\"new_series\"]") @map("home_row_order")
+  hiddenHomeRows             Json      @default("[]") @map("hidden_home_rows")
   recommendationResetAt      DateTime? @map("recommendation_reset_at")
   createdAt                  DateTime  @default(now()) @map("created_at")
   updatedAt                  DateTime  @updatedAt @map("updated_at")

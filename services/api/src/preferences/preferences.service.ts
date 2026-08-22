@@ -13,6 +13,7 @@ import {
   UpdateDevicePreferencesDto,
   UpdateProfilePreferencesDto,
 } from './preferences.dto';
+import { HOME_ROW_IDS, normalizeHomeLayout } from './home-layout';
 
 export interface PreferenceActor {
   accountId: string;
@@ -27,6 +28,8 @@ const PROFILE_DEFAULTS = {
   subtitleMode: 'auto',
   autoplayNext: true,
   recommendationsEnabled: true,
+  homeRowOrder: [...HOME_ROW_IDS],
+  hiddenHomeRows: [],
 } as const;
 
 const DEVICE_DEFAULTS = {
@@ -50,6 +53,7 @@ export class PreferencesService {
     const preferences = await this.prisma.profilePreferences.findUnique({
       where: { profileId: profile.id },
     });
+    const homeLayout = normalizeHomeLayout(preferences?.homeRowOrder, preferences?.hiddenHomeRows);
 
     return {
       profile: {
@@ -75,8 +79,10 @@ export class PreferencesService {
               subtitleMode: preferences.subtitleMode,
               autoplayNext: preferences.autoplayNext,
               recommendationsEnabled: preferences.recommendationsEnabled,
+              homeRowOrder: homeLayout.order,
+              hiddenHomeRows: homeLayout.hidden,
             }
-          : {}),
+          : { homeRowOrder: homeLayout.order, hiddenHomeRows: homeLayout.hidden }),
       },
     };
   }
@@ -140,6 +146,8 @@ export class PreferencesService {
           recommendationsEnabled:
             input.recommendationsEnabled ??
             PROFILE_DEFAULTS.recommendationsEnabled,
+          homeRowOrder: input.homeRowOrder ?? [...PROFILE_DEFAULTS.homeRowOrder],
+          hiddenHomeRows: input.hiddenHomeRows ?? [...PROFILE_DEFAULTS.hiddenHomeRows],
         },
         update: {
           ...(input.preferredAudioLanguages !== undefined
@@ -156,6 +164,12 @@ export class PreferencesService {
             : {}),
           ...(input.recommendationsEnabled !== undefined
             ? { recommendationsEnabled: input.recommendationsEnabled }
+            : {}),
+          ...(input.homeRowOrder !== undefined
+            ? { homeRowOrder: normalizeHomeLayout(input.homeRowOrder, []).order }
+            : {}),
+          ...(input.hiddenHomeRows !== undefined
+            ? { hiddenHomeRows: normalizeHomeLayout([], input.hiddenHomeRows).hidden }
             : {}),
         },
       });
