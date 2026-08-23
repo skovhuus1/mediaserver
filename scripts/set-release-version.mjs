@@ -1,0 +1,31 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const version = process.argv[2];
+if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('Brug: npm run version:set -- <major.minor.patch>');
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const manifests = ['package.json', 'services/api/package.json', 'services/worker/package.json', 'web/admin/package.json', 'shared/contracts/package.json'];
+for (const relative of manifests) {
+  const path = resolve(root, relative);
+  const manifest = JSON.parse(await readFile(path, 'utf8'));
+  manifest.version = version;
+  if (manifest.dependencies?.['@boltbytes/contracts'] && !manifest.dependencies['@boltbytes/contracts'].startsWith('file:')) manifest.dependencies['@boltbytes/contracts'] = version;
+  await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+const lockPath = resolve(root, 'package-lock.json');
+const lock = JSON.parse(await readFile(lockPath, 'utf8'));
+lock.version = version;
+for (const key of ['', 'services/api', 'services/worker', 'web/admin', 'shared/contracts']) {
+  if (!lock.packages?.[key]) continue;
+  lock.packages[key].version = version;
+  if (lock.packages[key].dependencies?.['@boltbytes/contracts'] && !lock.packages[key].dependencies['@boltbytes/contracts'].startsWith('file:')) lock.packages[key].dependencies['@boltbytes/contracts'] = version;
+}
+await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+
+const releasePath = resolve(root, 'shared/contracts/src/release.ts');
+const release = await readFile(releasePath, 'utf8');
+await writeFile(releasePath, release.replace(/BB_MEDIA_VERSION = '[^']+'/u, `BB_MEDIA_VERSION = '${version}'`));
+console.log(`BoltBytes Media Server version sat til ${version}.`);

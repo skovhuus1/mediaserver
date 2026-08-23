@@ -1,11 +1,13 @@
 # BoltBytes Media Server
 
+Aktuel release: **0.2.0**. Se [CHANGELOG](CHANGELOG.md).
+
 ## Live TV fra M3U
 
 BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde med krypterede M3U/XMLTV-kilder, kanalimport, dubletmatching, kildeprioritet, EPG, favoritter, atomisk forbindelsespulje, Direct Play, remux/transcoding, Chromecast-handoff og hurtigt kanalskift.
 
 - Opret og administrer udbydere, forbindelser, kanalrækkefølge og EPG under `Live TV` i administratorpanelet.
-- Kanalstyringen understøtter op til 50.000 kanaler, server-side pagination, debounced kanal- og gruppesøgning, Shift-markering af intervaller samt atomisk visning/skjul af markeringer eller en hel gruppe. Flere linjer fra samme udbyder samles via kanalidentiteten, og et eksisterende kanalnummer overskrives ikke af en senere redundant linje. Skjulte kanaler fjernes server-side fra kundernes guide; aktive streams stoppes, og planlagte eller aktive optagelser annulleres atomisk.
+- Kanalstyringen understøtter op til 50.000 kanaler, server-side pagination, debounced kanal- og gruppesøgning, Shift-markering af intervaller samt atomisk visning/skjul af markeringer eller en hel gruppe. Kvalitets- og landesuffikser som `DR 1 FHD DK`, `DR 1 FH DK`, `DR 1 HD DK` og `DR 1 DK` samles automatisk under én stabil kanalidentitet. Et manuelt låst navn eller kanalnummer bevares ved senere importer. Skjulte kanaler fjernes server-side fra kundernes guide; aktive streams stoppes, og planlagte eller aktive optagelser annulleres atomisk.
 - Kilde-URL'er krypteres med AES-256-GCM og returneres aldrig til browseren eller Chromecast-modtageren.
 - Store M3U-kilder understøttes op til 256 MiB som standard med streaming bytekontrol, synlig byte-/procentprogress, løbende job-lease renewal og fem minutters timeout; grænsen kan konfigureres for betroede udbydere.
 - M3U-parseren itererer linjer uden en ekstra fuld filkopi. Kanalimporten behandler uafhængige kanalidentiteter med kontrolleret parallelisme, serialiserer dubletter og deaktiverer forsvundne kilder i PostgreSQL-batches på højst 1.000 ID'er.
@@ -13,10 +15,10 @@ BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde me
 - Redis-klienten samler samtidige første opkoblinger og har en fem sekunders ready-grænse, så parallelle API-kald ikke starter konkurrerende forbindelsesforsøg eller hænger ubegrænset under Redis-fejl.
 - En PostgreSQL advisory lock reserverer forbindelser atomisk og håndhæver både abonnementets samlede streamgrænse, udbyderens brugergrænse og hver forbindelses kapacitet.
 - Afspilleren bruger Direct HLS, når kilden er kompatibel, ellers FFmpeg-remux og softwaretranscoding via den eksisterende worker/transcoder-arkitektur.
-- Kundeportalen viser kanalguide, nu/næste, favoritter og hurtig kanalnavigation på `/watch/live`.
+- Kundeportalen viser en pagineret, søgbar kanalguide, nu/næste, favoritter og hurtig kanalnavigation på `/watch/live`. TV- eller guidefejl vises lokalt og må ikke fejlagtigt rydde eller omdirigere en gyldig login-session.
 - Live TV kan pauses og spoles tilbage til tidligste tilgængelige punkt i den aktive session, højst 2 timer. Bufferen starter først, når kunden åbner kanalen, slettes med sessionen og er derfor ikke en permanent 24/7-timeshift-optagelse. Hvis programmet startede efter kanalstart, begrænses tidslinjen til programstart.
 - PVR kan planlægges eller annulleres direkte på programkortene i `/watch/live`; `/watch/recordings` understøtter desuden manuel planlægning, forbindelsesreservation, live-progress, administration og tokeniseret Range-afspilning af færdige MP4-optagelser.
-- Ved et aktivt upstream-svigt markerer stream-worker forbindelsen som fejlramt og forsøger næste prioriterede kilde under samme atomiske puljelås.
+- Ved et aktivt upstream-svigt markerer stream-worker forbindelsen som fejlramt og forsøger næste uprøvede kilde under samme atomiske puljelås. Rækkefølgen er rask forbindelse, 4K/FHD/HD/standard/SD, provider, linje og administrativ tie-breaker.
 - TV-drift på `/live-tv/operations` automatiserer M3U/XMLTV, viser linjehealth, jobs og aktive streams samt giver sikker admin-afbrydelse.
 - Den stabile version før Live TV kan gendannes fra tagget `backup-pre-live-tv-20260823`.
 - Live TV-leverancen, 50K-kanalstyringen og performance-/stabilitetsauditten er lokalt verificeret 23. august 2026 med gyldig Prisma-schema, grøn lint og typecheck, 199 API-tests, 46 worker-tests, 7 release-tests samt production builds af contracts, API, worker og admin.
@@ -115,6 +117,7 @@ API'et ejer identitet, entitlements, playbackvalg, streamlimits og signed URLs. 
 
 ~~~bash
 npm run lint
+npm run version:check
 npm run typecheck
 npm run test
 npm run test:release
@@ -162,6 +165,8 @@ Se [domæne og Nginx Proxy Manager](docs/domain-nginx-proxy-manager.md).
 ## Bidrag og release-flow
 
 Arbejdet laves på **agent/...** branches. Hver færdig leverance skal have opdateret dokumentation, lokale gates og grønne push- og PR-checks. Først derefter squash-merges den til **main**.
+
+Alle releases bruger ét SemVer-nummer. Sæt næste version med `npm run version:set -- 0.2.1`, opdater `CHANGELOG.md`, og kør `npm run version:check`; CI afviser versionsdrift mellem pakker, lockfil og health-API.
 
 Android-releases bygges som separate `mobile`- og `tv`-flavors. Produktionsworkflowet udgiver APK/AAB sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk mobil-, TV- og Cast-certificering forbliver en særskilt releasegate.
 

@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient, type SystemJob } from '@prisma/client';
+import { describeLiveTvChannel, normalizeLiveTvIdentity } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, rm } from 'node:fs/promises';
@@ -6,8 +7,9 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { updateJobProgress } from './job-progress.js';
-import { parseM3u, parseXmlTv, normalizeLiveTvIdentity } from './live-tv-parsers.js';
+import { parseM3u, parseXmlTv } from './live-tv-parsers.js';
 import { disableMissingLiveTvSources, forEachLiveTvEntryByIdentity, stableChannelNumber } from './live-tv-import-batching.js';
+import { loadLiveTvChannelImportIndex, rememberLiveTvImportChannel, resolveLiveTvImportChannel } from './live-tv-channel-import.js';
 import { decryptSecret, encryptSecret } from './secret-value.js';
 
 type LiveJob = SystemJob & { attemptNumber?: number };
@@ -26,6 +28,7 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
   const providerId = stringPayload(job, 'providerId');
   const provider = await prisma.liveTvProvider.findFirst({ where: { id: providerId, accountId: job.accountId }, include: { connections: { where: { enabled: true } } } });
   if (!provider) throw new Error('Live TV provider was not found');
+  const channelIndex = await loadLiveTvChannelImportIndex(prisma, job.accountId);
   await updateJobProgress(prisma, job, { stage: 'Henter M3U', current: 0, total: provider.connections.length, message: provider.name });
   let imported = 0;
   const errors: string[] = [];
@@ -49,9 +52,7 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
       let processed = 0;
       let nextProgressAt = Date.now() + 5_000;
       await forEachLiveTvEntryByIdentity(entries, (entry) => (
-        entry.tvgId
-          ? `tvg:${normalizeLiveTvIdentity(entry.tvgId)}`
-          : `name:${normalizeLiveTvIdentity(entry.tvgName ?? entry.name)}`
+        describeLiveTvChannel(entry).canonicalKey
       ), async (entry) => {
         if (Date.now() >= nextProgressAt) {
           nextProgressAt = Date.now() + 5_000;
@@ -60,21 +61,25 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
         }
         const streamUrl = new URL(entry.url, playlistUrl).toString();
         const streamFingerprint = hash(streamUrl);
-        const identity = entry.tvgId ? `tvg:${normalizeLiveTvIdentity(entry.tvgId)}` : `name:${normalizeLiveTvIdentity(entry.tvgName ?? entry.name)}`;
-        let channel = await prisma.liveTvChannel.findUnique({ where: { accountId_canonicalKey: { accountId: job.accountId, canonicalKey: identity } } });
-        if (!channel) channel = await prisma.liveTvChannel.create({ data: { accountId: job.accountId, canonicalKey: identity, tvgId: entry.tvgId,
-          name: entry.tvgName ?? entry.name, number: entry.channelNumber, logoUrl: entry.logoUrl, groupName: entry.groupName } });
-        else if (!channel.metadataLocked) channel = await prisma.liveTvChannel.update({ where: { id: channel.id }, data: {
-          tvgId: entry.tvgId ?? channel.tvgId, name: entry.tvgName ?? entry.name, number: stableChannelNumber(channel.number, entry.channelNumber),
+        const resolved = await resolveLiveTvImportChannel(prisma, job.accountId, channelIndex, entry);
+        let channel = resolved.channel;
+        if (!channel.metadataLocked) {
+          channel = await prisma.liveTvChannel.update({ where: { id: channel.id }, data: {
+          tvgId: channel.tvgId ?? entry.tvgId, name: resolved.descriptor.displayName, number: stableChannelNumber(channel.number, entry.channelNumber),
           logoUrl: entry.logoUrl ?? channel.logoUrl, groupName: entry.groupName ?? channel.groupName,
-        } });
+          } });
+          rememberLiveTvImportChannel(channelIndex, channel);
+        }
         await prisma.liveTvChannelSource.upsert({
           where: { connectionId_streamFingerprint: { connectionId: connection.id, streamFingerprint } },
           create: { channelId: channel.id, connectionId: connection.id, externalId: entry.tvgId, sourceName: entry.name,
             encryptedStreamUrl: encryptSecret(streamUrl) as unknown as Prisma.InputJsonValue, streamFingerprint,
-            streamFormat: inferFormat(streamUrl), priority: connection.priority, enabled: true },
+            streamFormat: inferFormat(streamUrl), qualityLabel: resolved.descriptor.qualityLabel,
+            qualityRank: resolved.descriptor.qualityRank, priority: connection.priority, enabled: true },
           update: { channelId: channel.id, externalId: entry.tvgId, sourceName: entry.name,
-            encryptedStreamUrl: encryptSecret(streamUrl) as unknown as Prisma.InputJsonValue, streamFormat: inferFormat(streamUrl), enabled: true, lastSeenAt: new Date() },
+            encryptedStreamUrl: encryptSecret(streamUrl) as unknown as Prisma.InputJsonValue, streamFormat: inferFormat(streamUrl),
+            qualityLabel: resolved.descriptor.qualityLabel, qualityRank: resolved.descriptor.qualityRank,
+            enabled: true, lastSeenAt: new Date() },
         });
         seen.push(streamFingerprint);
         processed += 1;
@@ -113,15 +118,18 @@ export async function importLiveTvEpg(prisma: PrismaClient, job: LiveJob, renew:
     });
     await renew();
     const parsed = parseXmlTv(xml);
-    const channels = await prisma.liveTvChannel.findMany({ where: { accountId: job.accountId } });
-    const byTvg = new Map(channels.flatMap((channel) => channel.tvgId ? [[normalizeLiveTvIdentity(channel.tvgId), channel]] as const : []));
-    const byName = new Map(channels.map((channel) => [normalizeLiveTvIdentity(channel.name), channel]));
+    const channels = await prisma.liveTvChannel.findMany({ where: { accountId: job.accountId }, include: { sources: { select: { externalId: true, sourceName: true } } } });
+    const byTvg = new Map(channels.flatMap((channel) => [channel.tvgId, ...channel.sources.map((item) => item.externalId)]
+      .flatMap((value) => value ? [[normalizeLiveTvIdentity(value), channel]] as const : [])));
+    const byCanonicalName = new Map(channels.flatMap((channel) => [channel.name, ...channel.sources.map((item) => item.sourceName)]
+      .map((name) => [describeLiveTvChannel({ name }).canonicalKey, channel] as const)));
     const from = new Date(Date.now() - 6 * 60 * 60_000);
     const until = new Date(Date.now() + 14 * 24 * 60 * 60_000);
     const rows = parsed.programs.flatMap((program) => {
       if (program.endsAt <= from || program.startsAt >= until) return [];
       const metadata = parsed.channels.get(program.channelExternalId);
-      const channel = byTvg.get(normalizeLiveTvIdentity(program.channelExternalId)) ?? (metadata?.name ? byName.get(normalizeLiveTvIdentity(metadata.name)) : undefined);
+      const channel = byTvg.get(normalizeLiveTvIdentity(program.channelExternalId))
+        ?? (metadata?.name ? byCanonicalName.get(describeLiveTvChannel({ name: metadata.name }).canonicalKey) : undefined);
       return channel ? [{ accountId: job.accountId, providerId, channelId: channel.id, startsAt: program.startsAt, endsAt: program.endsAt,
         title: program.title, subtitle: program.subtitle, description: program.description, category: program.category,
         iconUrl: program.iconUrl, episode: program.episode }] : [];

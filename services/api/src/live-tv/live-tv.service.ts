@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { encryptSecret, decryptSecret } from '../system/secret-value';
 import type {
   BulkUpdateLiveTvChannelGroupDto, BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto,
-  ListAdminLiveTvChannelsDto, UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto,
+  ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto,
   UpdateLiveTvSourceDto,
 } from './live-tv.dto';
 import { changedChannelIds, uniqueChannelIds } from './live-tv-channel-visibility';
@@ -17,6 +17,7 @@ import {
   MAX_ADMIN_LIVE_TV_CHANNELS,
   visibilityCounts,
 } from './live-tv-channel-catalog';
+import { resolveLiveTvGuideWindow } from './live-tv-guide';
 
 @Injectable()
 export class LiveTvService {
@@ -204,7 +205,8 @@ export class LiveTvService {
         groupName: channel.groupName, enabled: channel.enabled, isAdult: channel.isAdult, metadataLocked: channel.metadataLocked,
         sortOrder: channel.sortOrder,
         sources: channel.sources.map((source) => ({ id: source.id, sourceName: source.sourceName, enabled: source.enabled,
-          priority: source.priority, streamFormat: source.streamFormat, connectionId: source.connectionId,
+          priority: source.priority, streamFormat: source.streamFormat, qualityLabel: source.qualityLabel,
+          qualityRank: source.qualityRank, connectionId: source.connectionId,
           connectionName: source.connection.name, providerId: source.connection.providerId, providerName: source.connection.provider.name })),
         suspectedDuplicates: (duplicateMap.get(comparableName(channel.name)) ?? []).filter((candidate) => candidate.id !== channel.id),
       })),
@@ -364,6 +366,8 @@ export class LiveTvService {
         create: { accountId: favorite.accountId, profileId: favorite.profileId, channelId: targetChannelId }, update: {},
       });
       await tx.liveTvFavorite.deleteMany({ where: { channelId: sourceChannelId } });
+      await tx.liveTvLease.updateMany({ where: { channelId: sourceChannelId }, data: { channelId: targetChannelId } });
+      await tx.liveTvRecording.updateMany({ where: { channelId: sourceChannelId }, data: { channelId: targetChannelId } });
       await tx.liveTvProgram.deleteMany({ where: { channelId: sourceChannelId } });
       await tx.liveTvChannelSource.updateMany({ where: { channelId: sourceChannelId }, data: { channelId: targetChannelId } });
       await tx.liveTvChannel.delete({ where: { id: sourceChannelId } });
@@ -372,22 +376,44 @@ export class LiveTvService {
     return { targetChannelId, sourceChannelId, merged: true };
   }
 
-  async guide(actor: AuthenticatedUser, fromInput?: string, toInput?: string) {
+  async guide(actor: AuthenticatedUser, query: ListLiveTvGuideDto) {
     const profileId = this.profileId(actor);
     const profile = await this.prisma.profile.findFirst({ where: { id: profileId, accountId: actor.accountId, userId: actor.sub, archivedAt: null } });
     if (!profile) throw new ForbiddenException({ code: 'active_profile_required', message: 'En aktiv profil er påkrævet' });
-    const from = validDate(fromInput) ?? new Date(Date.now() - 30 * 60_000);
-    const requestedTo = validDate(toInput) ?? new Date(from.getTime() + 12 * 60 * 60_000);
-    const to = new Date(Math.min(requestedTo.getTime(), from.getTime() + 48 * 60 * 60_000));
-    const channels = await this.prisma.liveTvChannel.findMany({
-      where: { accountId: actor.accountId, enabled: true, ...(profile.isChildProfile ? { isAdult: false } : {}), sources: { some: { enabled: true, connection: { enabled: true, provider: { enabled: true } } } } },
+    const { from, to, page, pageSize } = resolveLiveTvGuideWindow(query);
+    const search = query.search?.trim();
+    const group = query.group?.trim();
+    const baseWhere: Prisma.LiveTvChannelWhereInput = {
+      accountId: actor.accountId, enabled: true, ...(profile.isChildProfile ? { isAdult: false } : {}),
+      sources: { some: { enabled: true, connection: { enabled: true, provider: { enabled: true } } } },
+    };
+    const channelWhere: Prisma.LiveTvChannelWhereInput = {
+      ...baseWhere,
+      ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
+      ...(group ? { groupName: { equals: group, mode: 'insensitive' } } : {}),
+      ...(query.favorites === 'true' ? { favorites: { some: { profileId } } } : {}),
+    };
+    const [availableTotal, total, groupRows, channels] = await Promise.all([
+      this.prisma.liveTvChannel.count({ where: baseWhere }),
+      this.prisma.liveTvChannel.count({ where: channelWhere }),
+      this.prisma.liveTvChannel.groupBy({
+        by: ['groupName'], where: { ...baseWhere, groupName: { not: null } },
+        orderBy: { groupName: 'asc' }, _count: { _all: true },
+      }),
+      this.prisma.liveTvChannel.findMany({
+      where: channelWhere,
       include: {
         programs: { where: { startsAt: { lt: to }, endsAt: { gt: from } }, orderBy: { startsAt: 'asc' } },
         favorites: { where: { profileId } },
       },
       orderBy: [{ sortOrder: 'asc' }, { number: 'asc' }, { name: 'asc' }],
-    });
-    return { from, to, channels: channels.map((channel) => ({
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    ]);
+    return { from, to, availableTotal, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      groups: groupRows.flatMap((row) => row.groupName ? [{ name: row.groupName, count: row._count._all }] : []),
+      channels: channels.map((channel) => ({
       id: channel.id, name: channel.name, number: channel.number, logoUrl: channel.logoUrl, groupName: channel.groupName,
       favorite: channel.favorites.length > 0,
       programs: channel.programs.map((program) => ({ id: program.id, startsAt: program.startsAt, endsAt: program.endsAt,
@@ -459,4 +485,3 @@ export class LiveTvService {
 
 function fingerprint(value: string) { return createHash('sha256').update(value.trim()).digest('hex'); }
 function comparableName(value: string) { return value.toLocaleLowerCase('da').normalize('NFKD').replace(/\p{M}/gu, '').replace(/\b(uhd|fhd|hd|sd)\b/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
-function validDate(value?: string) { if (!value) return null; const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date; }

@@ -1,6 +1,6 @@
 {
   "name": "boltbytes-media-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "engines": {
     "node": ">=22 <23",
@@ -13,6 +13,8 @@
   ],
   "scripts": {
     "bootstrap": "node scripts/bootstrap-env.mjs",
+    "version:set": "node scripts/set-release-version.mjs",
+    "version:check": "node scripts/check-release-version.mjs",
     "build": "npm run build --workspace=@boltbytes/contracts && npm run build --workspace=@boltbytes/api && npm run build --workspace=@boltbytes/worker && npm run build --workspace=@boltbytes/admin",
     "dev": "concurrently \"npm run start:dev --workspace=@boltbytes/api\" \"npm run dev --workspace=@boltbytes/admin\" \"npm run start:dev --workspace=@boltbytes/worker\"",
     "lint": "eslint services/api/src services/api/test services/worker/src services/worker/test web/admin/src shared/contracts/src --ext .ts,.tsx",
@@ -22,7 +24,7 @@
     "test:integration": "npm run test:integration --workspace=@boltbytes/api",
     "prisma:generate": "npm run prisma:generate --workspace=@boltbytes/api",
     "prisma:migrate": "npm run prisma:migrate --workspace=@boltbytes/api",
-    "ci": "npm run lint && npm run typecheck && npm run test && npm run build"
+    "ci": "npm run version:check && npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "8.65.0",

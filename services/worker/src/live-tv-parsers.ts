@@ -64,10 +64,6 @@ export function parseXmlTv(content: string): ParsedXmlTv {
   return { channels, programs };
 }
 
-export function normalizeLiveTvIdentity(value: string): string {
-  return value.toLocaleLowerCase('da').normalize('NFKD').replace(/\p{M}/gu, '').replaceAll('æ', 'ae').replaceAll('ø', 'o').replaceAll('å', 'a').replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
 function clean(value: string | undefined) { const result = value?.trim(); return result ? result : null; }
 function attribute(value: string, name: string) { const match = value.match(new RegExp(`\\b${name}=(?:"([^"]*)"|'([^']*)')`, 'i')); return match ? decodeEntities(match[1] ?? match[2] ?? '') : null; }
 function tag(value: string, name: string) { const match = value.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)<\\/${name}>`, 'i')); return match ? decodeEntities(match[1]!.replace(/<[^>]+>/g, '').trim()) || null : null; }
@@ -93,3 +89,6 @@ function xmlTvDate(value: string | null) {
   const result = new Date(time);
   return Number.isNaN(result.getTime()) ? null : result;
 }
+import { normalizeLiveTvIdentity } from '@boltbytes/contracts';
+
+export { normalizeLiveTvIdentity };

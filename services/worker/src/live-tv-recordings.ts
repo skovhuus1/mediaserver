@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient, SystemJob } from '@prisma/client';
+import { liveTvConnectionHealthRank } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -13,7 +14,16 @@ const activeLeaseStatuses = ['preparing', 'ready', 'active'];
 export async function processLiveTvRecordingJob(prisma: PrismaClient, job: ClaimedJob, renewLease: () => Promise<void>) {
   const recordingId = stringValue(objectValue(job.payload).recordingId);
   if (!recordingId) throw new Error('live-tv.record requires recordingId');
-  const recording = await reserveRecordingSource(prisma, job, recordingId);
+  let recording;
+  try {
+    recording = await reserveRecordingSource(prisma, job, recordingId);
+  } catch (error) {
+    const finalAttempt = job.attemptNumber >= job.maxAttempts;
+    await prisma.liveTvRecording.updateMany({ where: { id: recordingId, accountId: job.accountId, status: 'queued' }, data: {
+      ...(finalAttempt ? { status: 'failed', recordingEndedAt: new Date() } : {}), error: safeError(error).slice(0, 2_000),
+    } });
+    throw error;
+  }
   if (!recording) return;
   const effectiveEnd = new Date(recording.endsAt.getTime() + recording.postPaddingSeconds * 1_000);
   const durationMs = Math.max(1_000, effectiveEnd.getTime() - Date.now());
@@ -36,8 +46,17 @@ export async function processLiveTvRecordingJob(prisma: PrismaClient, job: Claim
     await updateJobProgress(prisma, job, { stage: 'Færdig', percent: 100, message: 'Optagelsen er klar til afspilning' });
   } catch (error) {
     const message = safeError(error);
-    await prisma.liveTvRecording.updateMany({ where: { id: recording.id, jobId: job.id, status: { in: ['queued', 'recording'] } }, data: { status: 'failed', error: message.slice(0, 2_000), recordingEndedAt: new Date() } });
-    await prisma.liveTvConnection.updateMany({ where: { id: recording.connectionId! }, data: { healthStatus: 'failed', lastError: message.slice(0, 2_000) } });
+    const failedSourceIds = [...new Set([...stringArray(objectValue(job.payload).failedSourceIds), recording.sourceId!])];
+    const retrying = job.attemptNumber < job.maxAttempts;
+    await prisma.$transaction([
+      prisma.liveTvRecording.updateMany({ where: { id: recording.id, jobId: job.id, status: { in: ['queued', 'recording'] } }, data: retrying
+        ? { status: 'queued', sourceId: null, connectionId: null, progress: 0, error: message.slice(0, 2_000), recordingStartedAt: null }
+        : { status: 'failed', error: message.slice(0, 2_000), recordingEndedAt: new Date() } }),
+      prisma.liveTvConnection.updateMany({ where: { id: recording.connectionId! }, data: { healthStatus: 'failed', lastError: message.slice(0, 2_000) } }),
+      prisma.systemJob.updateMany({ where: { id: job.id }, data: { payload: {
+        ...objectValue(job.payload), failedSourceIds,
+      } as Prisma.InputJsonValue } }),
+    ]);
     await rm(partialPath, { force: true });
     throw error;
   }
@@ -50,8 +69,11 @@ async function reserveRecordingSource(prisma: PrismaClient, job: ClaimedJob, rec
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('bbmedia:live-tv-pool'), hashtext(CAST(${initial.accountId} AS text)))::text AS lock_result`;
     const recording = await tx.liveTvRecording.findFirst({ where: { id: initial.id, jobId: job.id, status: 'queued' } });
     if (!recording) return null;
-    const sources = await tx.liveTvChannelSource.findMany({ where: { channelId: recording.channelId, enabled: true, connection: { enabled: true, provider: { enabled: true } } }, include: { channel: true, connection: { include: { provider: { include: { connections: { select: { id: true } } } } } } } });
-    const ordered = sources.sort((left, right) => healthRank(left.connection.healthStatus) - healthRank(right.connection.healthStatus) || left.connection.provider.priority - right.connection.provider.priority || left.connection.priority - right.connection.priority || left.priority - right.priority);
+    const failedSourceIds = stringArray(objectValue(job.payload).failedSourceIds);
+    const sources = await tx.liveTvChannelSource.findMany({ where: { channelId: recording.channelId, ...(failedSourceIds.length ? { id: { notIn: failedSourceIds } } : {}), enabled: true, connection: { enabled: true, provider: { enabled: true } } }, include: { channel: true, connection: { include: { provider: { include: { connections: { select: { id: true } } } } } } } });
+    const ordered = sources.sort((left, right) => liveTvConnectionHealthRank(left.connection.healthStatus) - liveTvConnectionHealthRank(right.connection.healthStatus)
+      || left.qualityRank - right.qualityRank || left.connection.provider.priority - right.connection.provider.priority
+      || left.connection.priority - right.connection.priority || left.priority - right.priority);
     for (const source of ordered) {
       const providerConnections = source.connection.provider.connections.map((connection) => connection.id);
       const [connectionLeases, connectionRecordings, userLeases, userRecordings] = await Promise.all([
@@ -104,5 +126,5 @@ async function runRecordingFfmpeg(input: { prisma: PrismaClient; job: ClaimedJob
 
 function objectValue(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function stringValue(value: unknown) { return typeof value === 'string' ? value : null; }
-function healthRank(value: string) { return value === 'healthy' ? 0 : value === 'unknown' ? 1 : 2; }
+function stringArray(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []; }
 function safeError(error: unknown) { return error instanceof Error ? error.message : String(error); }

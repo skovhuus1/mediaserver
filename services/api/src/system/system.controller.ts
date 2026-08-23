@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Put, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import type { AuthenticatedUser } from '@boltbytes/contracts';
+import { BB_MEDIA_VERSION, type AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../infra/redis.service';
 import { CurrentUser, Public, Roles } from '../common/auth';
@@ -75,7 +75,7 @@ export class SystemController {
   @Public()
   @Get('health')
   health() {
-    return { status: 'ok', service: 'boltbytes-media-api', version: '0.1.0', timestamp: new Date().toISOString() };
+    return { status: 'ok', service: 'boltbytes-media-api', version: BB_MEDIA_VERSION, timestamp: new Date().toISOString() };
   }
 
   @Public()
