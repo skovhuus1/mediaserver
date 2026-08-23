@@ -2,6 +2,12 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.3 - 2026-08-23
+
+- Tilføjer server-side `Skjul alle` og `Vis alle` i Live TV-kanalstyringen via et account-scopet bulk-endpoint, så hele kataloget kan ændres uden at sende op til 50.000 kanal-id'er gennem browseren.
+- Når alle kanaler skjules, stoppes aktive Live TV-leases, planlagte/aktive optagelser annulleres, relaterede jobs stoppes, og handlingen auditlogges samlet.
+- Adminpanelet viser handlingen under `Hele kataloget` med bekræftelse før `Skjul alle`.
+
 ## 0.2.2 - 2026-08-23
 
 - Løfter Flutter TV-hjemmeskærmen med kompakt ikon-rail, topnavigation, fuldskærms-hero, profilrettet statusstribe og TV-optimerede medierækker.

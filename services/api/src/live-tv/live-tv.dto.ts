@@ -79,6 +79,11 @@ export class BulkUpdateLiveTvChannelsDto {
   action!: 'show' | 'hide';
 }
 
+export class BulkUpdateLiveTvAllChannelsDto {
+  @IsIn(['show', 'hide'])
+  action!: 'show' | 'hide';
+}
+
 export class ListAdminLiveTvChannelsDto {
   @IsOptional() @IsString() @MaxLength(160) search?: string;
   @IsOptional() @IsString() @MaxLength(120) group?: string;
