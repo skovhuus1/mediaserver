@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.4**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.2.5**. Se [CHANGELOG](CHANGELOG.md).
 
 ## Live TV fra M3U
 
@@ -81,9 +81,9 @@ Hostmappen monteres read-only som **/media** i API og worker. Biblioteker vælge
 | Admin | Operationscenter, diagnostics, CPU/RAM/playback-telemetri, logs, opdatering, backup og integrationer |
 | Backup | Krypteret PostgreSQL-backup, import, download, retention, pre-restore safety backup og gated restore |
 | Automation | Sonarr/Radarr health, lookup, add, root/profile defaults og autentificerede import-webhooks |
-| Klienter | Flutter mobile/TV-flavors, manifest- og signaturcertificeret Android-releaseflow, TV-optimeret forside med hero/rails/fokusnavigation, offline-downloads og cast-handoff |
+| Klienter | Flutter mobile/TV-flavors, manifest- og signaturcertificeret Android-releaseflow, TV-optimeret forside med hero/rails/fokusnavigation, serverkoblet QR-login, offline-downloads og cast-handoff |
 
-QR-login til TV bruger `/api/v1/auth/tv/start`, `/api/v1/auth/tv/poll` og `/api/v1/auth/tv/approve`. TV’et får en poll-token, QR-linket får en separat approve-token, og `/login/tv` kræver en eksisterende websession før TV’et kan godkendes.
+QR-login til TV bruger `/api/v1/auth/tv/start`, `/api/v1/auth/tv/poll` og `/api/v1/auth/tv/approve`. TV-klienten viser QR-kode og brugerkode, poller med separat poll-token, gemmer access/refresh-token krypteret efter godkendelse og falder tilbage til manuel e-mail/adgangskode-login. QR-linket får en separat approve-token, og `/login/tv` kræver en eksisterende websession før TV’et kan godkendes.
 
 ## Arkitektur
 

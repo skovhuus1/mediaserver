@@ -108,6 +108,44 @@ class ApiClient {
     return result;
   }
 
+  Future<Map<String, dynamic>> startTvLogin({
+    required String deviceFingerprint,
+    required String deviceName,
+    required String deviceType,
+  }) async {
+    final result = _asMap(
+      await _request(
+        'POST',
+        '/auth/tv/start',
+        body: {
+          'deviceFingerprint': deviceFingerprint,
+          'deviceName': deviceName,
+          'deviceType': deviceType,
+          'platform': 'android',
+          'appVersion': AppConfig.appVersion,
+        },
+        allowRefresh: false,
+      ),
+    );
+    return _normalizeTvApproveUrl(result);
+  }
+
+  Future<Map<String, dynamic>> pollTvLogin({
+    required String pairingId,
+    required String pollToken,
+  }) async {
+    final result = _asMap(
+      await _request(
+        'POST',
+        '/auth/tv/poll',
+        body: {'pairingId': pairingId, 'pollToken': pollToken},
+        allowRefresh: false,
+      ),
+    );
+    await _captureTokens(result);
+    return result;
+  }
+
   Future<Map<String, dynamic>> completePasswordChange(
     String token,
     String password,
@@ -243,6 +281,14 @@ class ApiClient {
     _accessToken = access;
     _refreshToken = refresh;
     await storage.writeTokens(access, refresh);
+  }
+
+  Map<String, dynamic> _normalizeTvApproveUrl(Map<String, dynamic> result) {
+    final approveUrl = result['approveUrl']?.toString();
+    if (approveUrl != null && approveUrl.startsWith('/')) {
+      return {...result, 'approveUrl': '${_baseUri.origin}$approveUrl'};
+    }
+    return result;
   }
 
   ApiException _apiError(http.Response response) {

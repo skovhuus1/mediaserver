@@ -21,6 +21,7 @@ Standardflavoren er `mobile`. Produktionsbuilds får server-URL og Cast App ID v
 
 TV-flavoren bruger et separat leanback-layout for biblioteket:
 
+- QR-login er koblet til serverens `/api/v1/auth/tv/start` og `/api/v1/auth/tv/poll`, så TV’et viser en kode, poller sikkert med separat poll-token og gemmer tokens krypteret, når en eksisterende websession godkender login på `/login/tv`.
 - kompakt venstre ikon-rail og topnavigation, så D-pad fokus ikke skal igennem lange tekstmenuer.
 - fuldskærms-hero med Afspil/Fortsæt og Mere info, koblet til de eksisterende playback- og titelsider.
 - statusstribe for Fortsæt, Film, Serier og 4K/HDR samt deduplikerede medierækker.

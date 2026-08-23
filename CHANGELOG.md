@@ -2,6 +2,12 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.5 - 2026-08-23
+
+- Kobler Flutter TV-login på serverens QR-loginkontrakt med start, sikker polling, absolut QR-URL og krypteret tokenlagring efter godkendelse.
+- Gør QR-login til primært TV-flow med brugerkode, udløbsstatus, ny-kode handling og manuel e-mail/adgangskode som fallback.
+- Tilføjer klienttest for TV QR-start, relativ approve-URL normalisering og tokenlagring ved godkendt poll.
+
 ## 0.2.4 - 2026-08-23
 
 - Tilføjer server-side QR/TV-login med `start`, `poll` og `approve`, separat poll-token til TV’et og separat approve-token til QR-linket.
