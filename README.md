@@ -9,7 +9,7 @@ BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde me
 - En PostgreSQL advisory lock reserverer forbindelser atomisk og håndhæver både abonnementets samlede streamgrænse, udbyderens brugergrænse og hver forbindelses kapacitet.
 - Afspilleren bruger Direct HLS, når kilden er kompatibel, ellers FFmpeg-remux og softwaretranscoding via den eksisterende worker/transcoder-arkitektur.
 - Kundeportalen viser kanalguide, nu/næste, favoritter og hurtig kanalnavigation på `/watch/live`.
-- Live TV kan sættes på pause i op til 2 timer. Bufferen er serverstyret; brugerfladen tilbyder kun Pause, Fortsæt og Gå til live, ikke tilbagespoling.
+- Live TV kan pauses og spoles tilbage til tidligste tilgængelige punkt i den aktive session, højst 2 timer. Bufferen starter først, når kunden åbner kanalen, slettes med sessionen og er derfor ikke en permanent 24/7-timeshift-optagelse. Hvis programmet startede efter kanalstart, begrænses tidslinjen til programstart.
 - PVR på `/watch/recordings` understøtter EPG- og manuel planlægning, forbindelsesreservation, live-progress, annullering og tokeniseret Range-afspilning af færdige MP4-optagelser.
 - Ved et aktivt upstream-svigt markerer stream-worker forbindelsen som fejlramt og forsøger næste prioriterede kilde under samme atomiske puljelås.
 - TV-drift på `/live-tv/operations` automatiserer M3U/XMLTV, viser linjehealth, jobs og aktive streams samt giver sikker admin-afbrydelse.
