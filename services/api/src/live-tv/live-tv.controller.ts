@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import {
-  CreateLiveTvConnectionDto, CreateLiveTvProviderDto, LiveTvAuthorizeDto, LiveTvSwitchDto, LiveTvTokenDto,
+  BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto, LiveTvAuthorizeDto, LiveTvSwitchDto, LiveTvTokenDto,
   MergeLiveTvChannelDto, UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto, UpdateLiveTvSourceDto,
 } from './live-tv.dto';
 import { LiveTvPlaybackService } from './live-tv-playback.service';
@@ -25,6 +25,7 @@ export class LiveTvController {
   @Post('admin/providers/:id/epg') @Roles('admin') queueEpg(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) { return this.liveTv.queueEpg(actor, id); }
   @Get('admin/jobs') @Roles('admin', 'operator') jobs(@CurrentUser() actor: AuthenticatedUser) { return this.liveTv.jobs(actor); }
   @Get('admin/channels') @Roles('admin', 'operator') channels(@CurrentUser() actor: AuthenticatedUser, @Query('search') search?: string, @Query('group') group?: string) { return this.liveTv.adminChannels(actor, search, group); }
+  @Patch('admin/channels/bulk') @Roles('admin') bulkUpdateChannels(@CurrentUser() actor: AuthenticatedUser, @Body() dto: BulkUpdateLiveTvChannelsDto) { return this.liveTv.bulkUpdateChannels(actor, dto); }
   @Patch('admin/channels/:id') @Roles('admin') updateChannel(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateLiveTvChannelDto) { return this.liveTv.updateChannel(actor, id, dto); }
   @Post('admin/channels/:id/merge') @Roles('admin') mergeChannel(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: MergeLiveTvChannelDto) { return this.liveTv.mergeChannels(actor, id, dto.sourceChannelId); }
   @Patch('admin/sources/:id') @Roles('admin') updateSource(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateLiveTvSourceDto) { return this.liveTv.updateSource(actor, id, dto); }

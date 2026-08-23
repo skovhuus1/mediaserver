@@ -1,5 +1,19 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUrl, Max, MaxLength, Min } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 const urlOptions = { protocols: ['http', 'https'], require_protocol: true, require_tld: false };
 
@@ -46,6 +60,17 @@ export class UpdateLiveTvChannelDto {
   @IsOptional() @IsBoolean() isAdult?: boolean;
   @IsOptional() @IsBoolean() metadataLocked?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100_000) sortOrder?: number;
+}
+
+export class BulkUpdateLiveTvChannelsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(1000)
+  @IsUUID('4', { each: true })
+  channelIds!: string[];
+
+  @IsIn(['show', 'hide'])
+  action!: 'show' | 'hide';
 }
 
 export class UpdateLiveTvSourceDto {
