@@ -474,6 +474,80 @@ class SubtitleTrack {
   }
 }
 
+class SubtitleQueueSelection {
+  const SubtitleQueueSelection.off()
+    : disabled = true,
+      language = '',
+      label = '',
+      delivery = '',
+      isText = true,
+      forced = false;
+
+  SubtitleQueueSelection.fromTrack(SubtitleTrack track)
+    : disabled = false,
+      language = track.language,
+      label = track.label,
+      delivery = track.delivery,
+      isText = track.isText,
+      forced = track.forced;
+
+  final bool disabled;
+  final String language;
+  final String label;
+  final String delivery;
+  final bool isText;
+  final bool forced;
+
+  SubtitleTrack? resolve(List<SubtitleTrack> tracks) {
+    if (disabled || tracks.isEmpty) return null;
+
+    String normalizeLanguage(String value) =>
+        value.trim().toLowerCase().split(RegExp(r'[-_]')).first;
+    final selectedLanguage = normalizeLanguage(language);
+    final selectedLabel = label.trim().toLowerCase();
+    final selectedDelivery = delivery.trim().toLowerCase();
+    final languageMatches = selectedLanguage.isEmpty
+        ? const <SubtitleTrack>[]
+        : tracks
+              .where(
+                (track) =>
+                    normalizeLanguage(track.language) == selectedLanguage,
+              )
+              .toList(growable: false);
+    final candidates = languageMatches.isNotEmpty
+        ? languageMatches
+        : tracks
+              .where(
+                (track) =>
+                    selectedLabel.isNotEmpty &&
+                    track.label.trim().toLowerCase() == selectedLabel,
+              )
+              .toList(growable: false);
+    if (candidates.isEmpty) return null;
+
+    SubtitleTrack? best;
+    var bestScore = -1;
+    for (final track in candidates) {
+      var score = 0;
+      if (track.isText == isText) score += 8;
+      if (track.forced == forced) score += 4;
+      if (selectedLabel.isNotEmpty &&
+          track.label.trim().toLowerCase() == selectedLabel) {
+        score += 2;
+      }
+      if (selectedDelivery.isNotEmpty &&
+          track.delivery.trim().toLowerCase() == selectedDelivery) {
+        score += 1;
+      }
+      if (score > bestScore) {
+        best = track;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+}
+
 SubtitleTrack? preferredSubtitleTrack(
   List<SubtitleTrack> tracks,
   PlaybackPreferences preferences,

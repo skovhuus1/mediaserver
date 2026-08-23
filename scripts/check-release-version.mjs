@@ -16,5 +16,13 @@ if (!release.includes(`BB_MEDIA_VERSION = '${version}'`)) errors.push('Den offen
 const lock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'));
 if (lock.version !== version || lock.packages?.['']?.version !== version) errors.push('package-lock.json matcher ikke releaseversionen');
 for (const key of ['services/api', 'services/worker', 'web/admin', 'shared/contracts']) if (lock.packages?.[key]?.version !== version) errors.push(`package-lock workspace ${key} matcher ikke ${version}`);
+const flutterManifest = await readFile(resolve(root, 'clients/mobile-tv/pubspec.yaml'), 'utf8');
+const flutterVersionMatch = flutterManifest.match(/^version:\s*([^+\s]+)(?:\+(\d+))?\s*$/mu);
+if (!flutterVersionMatch) {
+  errors.push('clients/mobile-tv/pubspec.yaml mangler et gyldigt version-felt');
+} else {
+  if (flutterVersionMatch[1] !== version) errors.push(`Flutter-klienten har ${flutterVersionMatch[1]}, forventede ${version}`);
+  if (!/^\d+$/u.test(flutterVersionMatch[2] ?? '') || Number(flutterVersionMatch[2]) < 1) errors.push('Flutter-klienten mangler et positivt Android buildnummer');
+}
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log(`Releaseversion ${version} er konsistent i alle workspaces, lockfil og API-kontrakt.`);
+console.log(`Releaseversion ${version} er konsistent i alle workspaces, lockfil, API-kontrakt og Flutter-klient.`);

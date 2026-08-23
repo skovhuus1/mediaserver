@@ -29,6 +29,8 @@ TV-flavoren bruger et separat leanback-layout for biblioteket:
 
 Mobil-layoutet bruger fortsat den kompakte touch-navigation.
 
+Serieafspilning går automatisk videre efter nedtællingen, når profilens `autoplayNext` er aktiv. Et manuelt undertekstvalg følger episodekøen efter sprog og sportype, også når næste episode bruger andre track-id'er; valget `Fra` bevares ligeledes, indtil kunden vælger et spor igen.
+
 ## CI
 
 `flutter-client.yml` udfører formatkontrol, analyze, tests og bygger begge debug-flavors. Derefter kontrollerer `scripts/android-release-evidence.mjs` de faktisk mergede manifests, versionsdata, signaturer og at APK-hashene er forskellige.

@@ -28,4 +28,21 @@ await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
 const releasePath = resolve(root, 'shared/contracts/src/release.ts');
 const release = await readFile(releasePath, 'utf8');
 await writeFile(releasePath, release.replace(/BB_MEDIA_VERSION = '[^']+'/u, `BB_MEDIA_VERSION = '${version}'`));
+
+const flutterManifestPath = resolve(root, 'clients/mobile-tv/pubspec.yaml');
+const flutterManifest = await readFile(flutterManifestPath, 'utf8');
+const flutterVersionMatch = flutterManifest.match(/^version:\s*([^+\s]+)(?:\+(\d+))?\s*$/mu);
+if (!flutterVersionMatch) throw new Error('clients/mobile-tv/pubspec.yaml mangler et gyldigt version-felt');
+const currentFlutterVersion = flutterVersionMatch[1];
+const currentBuildNumber = Number.parseInt(flutterVersionMatch[2] ?? '0', 10);
+const nextBuildNumber = currentFlutterVersion === version
+  ? Math.max(1, currentBuildNumber)
+  : Math.max(1, currentBuildNumber + 1);
+await writeFile(
+  flutterManifestPath,
+  flutterManifest.replace(
+    /^version:\s*[^\r\n]+$/mu,
+    `version: ${version}+${nextBuildNumber}`,
+  ),
+);
 console.log(`BoltBytes Media Server version sat til ${version}.`);
