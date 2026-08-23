@@ -11,6 +11,10 @@ type LiveTvSourceStore = {
   };
 };
 
+export function stableChannelNumber(current: number | null, incoming: number | null): number | null {
+  return current ?? incoming;
+}
+
 export async function forEachLiveTvEntryByIdentity<T>(
   entries: readonly T[],
   identity: (entry: T) => string,

@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { disableMissingLiveTvSources, forEachLiveTvEntryByIdentity } from './live-tv-import-batching.js';
+import { disableMissingLiveTvSources, forEachLiveTvEntryByIdentity, stableChannelNumber } from './live-tv-import-batching.js';
 
 describe('Live TV import batching', () => {
+  it('keeps the canonical number stable when redundant provider lines disagree', () => {
+    expect(stableChannelNumber(12, 912)).toBe(12);
+    expect(stableChannelNumber(null, 912)).toBe(912);
+    expect(stableChannelNumber(null, null)).toBeNull();
+  });
+
   it('serializes duplicate identities while processing independent channels concurrently', async () => {
     const active = new Set<string>();
     let maximumActive = 0;
