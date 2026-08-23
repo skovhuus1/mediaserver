@@ -1,6 +1,6 @@
 'use client';
 
-import { Activity, Antenna, Check, CircleAlert, CloudDownload, ListRestart, Plus, Radio, Server, Shield, Trash2 } from 'lucide-react';
+import { Activity, Antenna, Check, CircleAlert, CloudDownload, Eye, EyeOff, ListChecks, ListRestart, Plus, Radio, Server, Shield, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, type ApiFailure, type SessionUser } from '@/lib/api';
@@ -20,6 +20,8 @@ export function LiveTvAdmin() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [search, setSearch] = useState('');
+  const [visibility, setVisibility] = useState<'all' | 'visible' | 'hidden'>('all');
+  const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const canWrite = user?.roles.includes('admin') ?? false;
@@ -31,6 +33,7 @@ export function LiveTvAdmin() {
     ]);
     if (!me.roles.some((role) => role === 'admin' || role === 'operator')) { router.replace('/watch'); return; }
     setUser(me); setProviders(providerRows); setChannels(channelRows); setJobs(jobRows);
+    setSelectedChannelIds((current) => current.filter((id) => channelRows.some((channel) => channel.id === id)));
   }, [router, search]);
 
   useEffect(() => { void load().catch((failure) => setError(message(failure))); }, [load]);
@@ -43,6 +46,14 @@ export function LiveTvAdmin() {
 
   if (!user) return <main className="watch-loading" aria-busy="true">{error}</main>;
   const activeLeases = providers.flatMap((provider) => provider.connections).reduce((sum, connection) => sum + connection.activeStreams, 0);
+  const visibleCount = channels.filter((channel) => channel.enabled).length;
+  const filteredChannels = channels.filter((channel) => visibility === 'all' || (visibility === 'visible' ? channel.enabled : !channel.enabled));
+  const filteredChannelIds = filteredChannels.map((channel) => channel.id);
+  const allFilteredSelected = filteredChannelIds.length > 0 && filteredChannelIds.every((id) => selectedChannelIds.includes(id));
+  const bulkVisibility = (nextVisibility: 'show' | 'hide') => action(`bulk-${nextVisibility}`, async () => {
+    await api('/live-tv/admin/channels/bulk', { method: 'PATCH', body: JSON.stringify({ channelIds: selectedChannelIds, action: nextVisibility }) });
+    setSelectedChannelIds([]);
+  });
   return (
     <AppShell rail={<LiveTvRail providers={providers} channels={channels} jobs={jobs} activeLeases={activeLeases} />}>
       <section className={styles.page}>
@@ -53,8 +64,21 @@ export function LiveTvAdmin() {
         <section className={styles.providers}><header><div><span>KILDEPULJE</span><h2>Providers og M3U-linjer</h2></div><b>{activeLeases} aktive</b></header>
           <div className={styles.providerGrid}>{providers.map((provider) => <ProviderCard provider={provider} canWrite={canWrite} busy={busy} key={provider.id} onAction={action} />)}{!providers.length && <p className={styles.empty}>Opret den første provider ovenfor.</p>}</div>
         </section>
-        <section className={styles.channels}><header><div><span>KANALSTYRING</span><h2>{channels.length} importerede kanaler</h2></div><input aria-label="Søg kanaler" onChange={(event) => setSearch(event.target.value)} placeholder="Søg kanal..." value={search} /></header>
-          <div className={styles.channelTable}>{channels.map((channel) => <ChannelRow channel={channel} canWrite={canWrite} busy={busy} key={channel.id} onAction={action} />)}{!channels.length && <p className={styles.empty}>Ingen kanaler matcher. Kør M3U-import på en provider.</p>}</div>
+        <section className={styles.channels}><header><div><span>KANALSTYRING</span><h2>{channels.length} importerede · {visibleCount} synlige</h2></div><input aria-label="Søg kanaler" onChange={(event) => setSearch(event.target.value)} placeholder="Søg kanal..." value={search} /></header>
+          <div className={styles.channelToolbar}>
+            <div className={styles.visibilityTabs} aria-label="Filtrer kanalvisning">
+              <button type="button" aria-pressed={visibility === 'all'} onClick={() => setVisibility('all')}>Alle <strong>{channels.length}</strong></button>
+              <button type="button" aria-pressed={visibility === 'visible'} onClick={() => setVisibility('visible')}><Eye size={15} />Synlige <strong>{visibleCount}</strong></button>
+              <button type="button" aria-pressed={visibility === 'hidden'} onClick={() => setVisibility('hidden')}><EyeOff size={15} />Skjulte <strong>{channels.length - visibleCount}</strong></button>
+            </div>
+            {canWrite && <div className={styles.bulkActions}>
+              <button type="button" disabled={filteredChannels.length === 0 || busy !== null} onClick={() => setSelectedChannelIds((current) => allFilteredSelected ? current.filter((id) => !filteredChannelIds.includes(id)) : [...new Set([...current, ...filteredChannelIds])])}><ListChecks size={16} />{allFilteredSelected ? 'Ryd viste' : 'Vælg viste'}</button>
+              <span>{selectedChannelIds.length} valgt</span>
+              <button type="button" disabled={selectedChannelIds.length === 0 || busy !== null} onClick={() => void bulkVisibility('show')}><Eye size={16} />Vis</button>
+              <button type="button" className={styles.hideAction} disabled={selectedChannelIds.length === 0 || busy !== null} onClick={() => void bulkVisibility('hide')}><EyeOff size={16} />Skjul</button>
+            </div>}
+          </div>
+          <div className={styles.channelTable}>{filteredChannels.map((channel) => <ChannelRow channel={channel} canWrite={canWrite} busy={busy} key={channel.id} selected={selectedChannelIds.includes(channel.id)} onSelect={(id, selected) => setSelectedChannelIds((current) => selected ? [...new Set([...current, id])] : current.filter((item) => item !== id))} onAction={action} />)}{!filteredChannels.length && <p className={styles.empty}>Ingen kanaler matcher det valgte filter.</p>}</div>
         </section>
       </section>
     </AppShell>
@@ -75,9 +99,9 @@ function ProviderCard({ provider, canWrite, busy, onAction }: { provider: Provid
   </article>;
 }
 
-function ChannelRow({ channel, canWrite, busy, onAction }: { channel: Channel; canWrite: boolean; busy: string | null; onAction: (key: string, operation: () => Promise<unknown>) => Promise<void> }) {
+function ChannelRow({ channel, canWrite, busy, selected, onSelect, onAction }: { channel: Channel; canWrite: boolean; busy: string | null; selected: boolean; onSelect: (id: string, selected: boolean) => void; onAction: (key: string, operation: () => Promise<unknown>) => Promise<void> }) {
   const patch = (payload: Record<string, unknown>) => onAction(`channel-${channel.id}`, () => api(`/live-tv/admin/channels/${channel.id}`, { method: 'PATCH', body: JSON.stringify(payload) }));
-  return <article className={styles.channelRow} data-disabled={!channel.enabled}><span className={styles.channelLogo}>{channel.logoUrl ? <img alt="" src={channel.logoUrl} /> : <Antenna />}</span><label>Nr.<input defaultValue={channel.number ?? ''} disabled={!canWrite} min="1" onBlur={(event) => { const value = Number(event.target.value); if (value && value !== channel.number) void patch({ number: value, metadataLocked: true }); }} type="number" /></label><label>Navn<input defaultValue={channel.name} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== channel.name) void patch({ name: event.target.value.trim(), metadataLocked: true }); }} /></label><label>Gruppe<input defaultValue={channel.groupName ?? ''} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== (channel.groupName ?? '')) void patch({ groupName: event.target.value.trim(), metadataLocked: true }); }} /></label><div className={styles.flags}><button aria-pressed={channel.enabled} disabled={!canWrite || busy !== null} onClick={() => void patch({ enabled: !channel.enabled })}>{channel.enabled ? <Check /> : <CircleAlert />}Aktiv</button><button aria-pressed={channel.isAdult} disabled={!canWrite || busy !== null} onClick={() => void patch({ isAdult: !channel.isAdult })}>18+</button></div><details className={styles.sources}><summary>{channel.sources.length} kilde(r)</summary>{channel.sources.map((source) => <div key={source.id}><span><b>{source.providerName}</b><small>{source.connectionName}</small></span><select disabled={!canWrite} onChange={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ streamFormat: event.target.value }) }))} value={source.streamFormat}><option value="auto">Auto</option><option value="hls">HLS</option><option value="mpegts">MPEG-TS</option></select><input aria-label="Kildeprioritet" defaultValue={source.priority} disabled={!canWrite} min="0" onBlur={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ priority: Number(event.target.value) }) }))} type="number" /></div>)}</details>{canWrite && channel.suspectedDuplicates.length > 0 && <select className={styles.merge} defaultValue="" onChange={(event) => { if (event.target.value) void onAction(`merge-${channel.id}`, () => api(`/live-tv/admin/channels/${channel.id}/merge`, { method: 'POST', body: JSON.stringify({ sourceChannelId: event.target.value }) })); }}><option value="">Flet mulig dublet...</option>{channel.suspectedDuplicates.map((duplicate) => <option key={duplicate.id} value={duplicate.id}>{duplicate.name}</option>)}</select>}</article>;
+  return <article className={styles.channelRow} data-disabled={!channel.enabled}><input className={styles.channelSelect} type="checkbox" checked={selected} disabled={!canWrite || busy !== null} aria-label={`Vælg ${channel.name}`} onChange={(event) => onSelect(channel.id, event.target.checked)} /><span className={styles.channelLogo}>{channel.logoUrl ? <img alt="" src={channel.logoUrl} /> : <Antenna />}</span><label>Nr.<input defaultValue={channel.number ?? ''} disabled={!canWrite} min="1" onBlur={(event) => { const value = Number(event.target.value); if (value && value !== channel.number) void patch({ number: value, metadataLocked: true }); }} type="number" /></label><label>Navn<input defaultValue={channel.name} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== channel.name) void patch({ name: event.target.value.trim(), metadataLocked: true }); }} /></label><label>Gruppe<input defaultValue={channel.groupName ?? ''} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== (channel.groupName ?? '')) void patch({ groupName: event.target.value.trim(), metadataLocked: true }); }} /></label><div className={styles.flags}><button aria-pressed={channel.enabled} disabled={!canWrite || busy !== null} onClick={() => void patch({ enabled: !channel.enabled })}>{channel.enabled ? <Check /> : <CircleAlert />}Aktiv</button><button aria-pressed={channel.isAdult} disabled={!canWrite || busy !== null} onClick={() => void patch({ isAdult: !channel.isAdult })}>18+</button></div><details className={styles.sources}><summary>{channel.sources.length} kilde(r)</summary>{channel.sources.map((source) => <div key={source.id}><span><b>{source.providerName}</b><small>{source.connectionName}</small></span><select disabled={!canWrite} onChange={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ streamFormat: event.target.value }) }))} value={source.streamFormat}><option value="auto">Auto</option><option value="hls">HLS</option><option value="mpegts">MPEG-TS</option></select><input aria-label="Kildeprioritet" defaultValue={source.priority} disabled={!canWrite} min="0" onBlur={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ priority: Number(event.target.value) }) }))} type="number" /></div>)}</details>{canWrite && channel.suspectedDuplicates.length > 0 && <select className={styles.merge} defaultValue="" onChange={(event) => { if (event.target.value) void onAction(`merge-${channel.id}`, () => api(`/live-tv/admin/channels/${channel.id}/merge`, { method: 'POST', body: JSON.stringify({ sourceChannelId: event.target.value }) })); }}><option value="">Flet mulig dublet...</option>{channel.suspectedDuplicates.map((duplicate) => <option key={duplicate.id} value={duplicate.id}>{duplicate.name}</option>)}</select>}</article>;
 }
 
 function JobRow({ job }: { job: Job }) { const progress = job.payload.progress; return <article className={styles.job} data-status={job.status}><span><b>{job.type === 'live-tv.import' ? 'M3U-import' : job.type === 'live-tv.epg' ? 'XMLTV' : 'Live stream'}</b><small>{progress?.stage ?? job.status} · {progress?.message ?? `forsøg ${job.attemptCount}`}</small></span><div><i style={{ width: `${progress?.percent ?? (job.status === 'completed' ? 100 : 8)}%` }} /></div><time>{date(job.updatedAt)}</time></article>; }

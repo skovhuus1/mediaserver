@@ -5,9 +5,10 @@ import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { encryptSecret, decryptSecret } from '../system/secret-value';
 import type {
-  CreateLiveTvConnectionDto, CreateLiveTvProviderDto, UpdateLiveTvChannelDto,
+  BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto, UpdateLiveTvChannelDto,
   UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto, UpdateLiveTvSourceDto,
 } from './live-tv.dto';
+import { changedChannelIds, uniqueChannelIds } from './live-tv-channel-visibility';
 
 @Injectable()
 export class LiveTvService {
@@ -177,6 +178,97 @@ export class LiveTvService {
     } });
     await this.audit(actor, 'live_tv.channel.update', channelId, { fields: Object.keys(dto) });
     return { id: channelId, updated: true };
+  }
+
+  async bulkUpdateChannels(actor: AuthenticatedUser, dto: BulkUpdateLiveTvChannelsDto) {
+    const channelIds = uniqueChannelIds(dto.channelIds);
+    const enabled = dto.action === 'show';
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const channels = await tx.liveTvChannel.findMany({
+        where: { accountId: actor.accountId, id: { in: channelIds } },
+        select: { id: true, enabled: true },
+      });
+      if (channels.length !== channelIds.length) {
+        throw new NotFoundException({
+          code: 'live_tv_bulk_channel_missing',
+          message: 'En eller flere valgte kanaler findes ikke på kontoen',
+        });
+      }
+
+      const changedIds = changedChannelIds(channels, enabled);
+      let releasedStreams = 0;
+      let cancelledRecordings = 0;
+
+      if (changedIds.length > 0) {
+        await tx.liveTvChannel.updateMany({
+          where: { accountId: actor.accountId, id: { in: changedIds } },
+          data: { enabled },
+        });
+
+        if (!enabled) {
+          const activeLeases = await tx.liveTvLease.findMany({
+            where: {
+              accountId: actor.accountId,
+              channelId: { in: changedIds },
+              status: { in: ['preparing', 'ready', 'active'] },
+              leaseExpiresAt: { gt: now },
+            },
+            select: { id: true, jobId: true },
+          });
+          const activeRecordings = await tx.liveTvRecording.findMany({
+            where: {
+              accountId: actor.accountId,
+              channelId: { in: changedIds },
+              status: { in: ['scheduled', 'queued', 'recording'] },
+            },
+            select: { id: true, jobId: true },
+          });
+
+          if (activeLeases.length > 0) {
+            releasedStreams = (await tx.liveTvLease.updateMany({
+              where: { id: { in: activeLeases.map((lease) => lease.id) } },
+              data: {
+                status: 'released', runtimeState: 'channel_hidden', endedAt: now,
+                leaseExpiresAt: now, lastError: 'channel_hidden_by_admin',
+              },
+            })).count;
+          }
+          if (activeRecordings.length > 0) {
+            cancelledRecordings = (await tx.liveTvRecording.updateMany({
+              where: { id: { in: activeRecordings.map((recording) => recording.id) } },
+              data: {
+                status: 'cancelled', error: 'Kanalen blev skjult af administratoren', recordingEndedAt: now,
+              },
+            })).count;
+          }
+
+          const jobIds = [...activeLeases, ...activeRecordings]
+            .flatMap((item) => item.jobId ? [item.jobId] : []);
+          if (jobIds.length > 0) {
+            await tx.systemJob.updateMany({
+              where: { accountId: actor.accountId, id: { in: jobIds }, status: { in: ['queued', 'running'] } },
+              data: { status: 'cancelled' },
+            });
+          }
+        }
+      }
+
+      await tx.auditLog.create({ data: {
+        accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId,
+        action: 'live_tv.channel.bulk_visibility', outcome: 'success', code: dto.action,
+        details: {
+          requestedCount: channelIds.length, changedCount: changedIds.length, channelIds: changedIds,
+          releasedStreams, cancelledRecordings,
+        },
+      } });
+
+      return {
+        action: dto.action, requestedCount: channelIds.length, matchedCount: channels.length,
+        changedCount: changedIds.length, releasedStreams, cancelledRecordings,
+      };
+    });
   }
 
   async updateSource(actor: AuthenticatedUser, sourceId: string, dto: UpdateLiveTvSourceDto) {

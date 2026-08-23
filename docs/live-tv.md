@@ -20,8 +20,11 @@ Live TV-domænet importerer M3U-kanaler, samler dubletter, prioriterer redundant
 3. Tilføj ekstra forbindelser, hvis abonnementet hos udbyderen tillader parallelle streams.
 4. Kør kanalimport og derefter EPG-import. Begge kører som durable jobs med status og fejl i opgaveoversigten.
 5. Ret kanalnavn, nummer, gruppe, voksenmarkering og aktivering efter behov.
-6. Sæt kildeprioritet og format. Ved fejl går reservationen videre til næste ledige, prioriterede forbindelse.
-7. Saml bekræftede dubletter. Samlingen flytter kilder og EPG-match til den valgte kanal.
+6. Filtrér på synlige eller skjulte kanaler, markér de ønskede rækker, og brug `Vis` eller `Skjul` til op til 1.000 kanaler ad gangen.
+7. Sæt kildeprioritet og format. Ved fejl går reservationen videre til næste ledige, prioriterede forbindelse.
+8. Saml bekræftede dubletter. Samlingen flytter kilder og EPG-match til den valgte kanal.
+
+Bulkændringer er account-scoped og kræver administratorrolle. Skjul udføres i samme databasetransaktion som auditloggen, frigiver aktive leases, annullerer deres streamjobs og annullerer planlagte, køsatte eller aktive optagelser. Operators kan filtrere og inspicere, men ikke ændre kanalstatus.
 
 ## Forbindelsespulje og grænser
 
@@ -68,6 +71,7 @@ M3U er som standard begrænset til 50 MiB og XMLTV til 200 MiB. Workerens eksist
 - `POST /api/v1/live-tv/providers/:id/import`
 - `POST /api/v1/live-tv/providers/:id/epg/import`
 - `GET/PATCH /api/v1/live-tv/admin/channels`
+- `PATCH /api/v1/live-tv/admin/channels/bulk`
 - `POST /api/v1/live-tv/admin/channels/:id/merge`
 - `GET /api/v1/live-tv/guide`
 - `PUT/DELETE /api/v1/live-tv/channels/:id/favorite`
