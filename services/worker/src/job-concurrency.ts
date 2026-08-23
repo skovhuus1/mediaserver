@@ -10,7 +10,8 @@ export type WorkerJobType =
   | 'notification.push'
   | 'live-tv.import'
   | 'live-tv.epg'
-  | 'live-tv.stream';
+  | 'live-tv.stream'
+  | 'live-tv.record';
 
 export type WorkerConcurrencyLimits = {
   scans: number;
@@ -53,9 +54,9 @@ export function claimableWorkerJobTypes(input: {
   ).length;
 
   if (input.workerMode === 'transcode') {
-    const activeTranscodes = activeCount('playback.transcode') + activeCount('offline.prepare') + activeCount('live-tv.stream');
+    const activeTranscodes = activeCount('playback.transcode') + activeCount('offline.prepare') + activeCount('live-tv.stream') + activeCount('live-tv.record');
     return activeTranscodes < input.limits.transcodes
-      ? ['playback.transcode', 'offline.prepare', 'live-tv.stream']
+      ? ['playback.transcode', 'offline.prepare', 'live-tv.stream', 'live-tv.record']
       : [];
   }
 

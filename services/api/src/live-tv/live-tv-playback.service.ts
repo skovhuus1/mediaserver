@@ -137,7 +137,10 @@ export class LiveTvPlaybackService {
     const candidates: LiveTvSourceCandidate[] = [];
     for (const source of channel.sources) {
       if (!source.connection.enabled || !source.connection.provider.enabled) continue;
-      const method = chooseLiveTvMethod(source.streamFormat, rights, preferredMethod);
+      const chosenMethod = chooseLiveTvMethod(source.streamFormat, rights, preferredMethod);
+      const method = chosenMethod === 'direct_play' && preferredMethod === 'auto' && rights.allowDirectStream
+        ? 'direct_stream'
+        : chosenMethod;
       if (!method) continue;
       methodBySource.set(source.id, method);
       candidates.push({ sourceId: source.id, connectionId: source.connectionId, providerId: source.connection.providerId,
@@ -146,7 +149,24 @@ export class LiveTvPlaybackService {
         providerUserLimit: source.connection.provider.perUserStreamLimit });
     }
     if (!candidates.length) throw new ForbiddenException({ code: 'live_tv_method_not_allowed', message: 'Abonnementet tillader ikke den afspilningsmetode, som kanalen kræver' });
-    const connectionIds = [...new Set(candidates.map((candidate) => candidate.connectionId))];
+    const recordingRows = await tx.liveTvRecording.findMany({
+      where: { status: 'recording', connectionId: { in: [...new Set(candidates.map((candidate) => candidate.connectionId))] } },
+      select: { connectionId: true, userId: true, connection: { select: { providerId: true } } },
+    });
+    const recordingsByConnection = new Map<string, number>();
+    const actorRecordingsByProvider = new Map<string, number>();
+    for (const recording of recordingRows) {
+      if (recording.connectionId) recordingsByConnection.set(recording.connectionId, (recordingsByConnection.get(recording.connectionId) ?? 0) + 1);
+      if (recording.userId === actor.sub && recording.connection) {
+        actorRecordingsByProvider.set(recording.connection.providerId, (actorRecordingsByProvider.get(recording.connection.providerId) ?? 0) + 1);
+      }
+    }
+    const capacityAdjustedCandidates = candidates.map((candidate) => ({
+      ...candidate,
+      connectionLimit: Math.max(0, candidate.connectionLimit - (recordingsByConnection.get(candidate.connectionId) ?? 0)),
+      providerUserLimit: Math.max(0, candidate.providerUserLimit - (actorRecordingsByProvider.get(candidate.providerId) ?? 0)),
+    }));
+    const connectionIds = [...new Set(capacityAdjustedCandidates.map((candidate) => candidate.connectionId))];
     const active = await tx.liveTvLease.groupBy({ by: ['connectionId'], where: {
       connectionId: { in: connectionIds }, status: { in: [...activeStatuses] }, leaseExpiresAt: { gt: new Date() },
       ...(current ? { id: { not: current.id } } : {}),
@@ -157,7 +177,7 @@ export class LiveTvPlaybackService {
     }, select: { connection: { select: { providerId: true } } } });
     const activeByProvider = new Map<string, number>();
     for (const lease of providerLeases) activeByProvider.set(lease.connection.providerId, (activeByProvider.get(lease.connection.providerId) ?? 0) + 1);
-    const selected = selectLiveTvSource(candidates, new Map(active.map((entry) => [entry.connectionId, entry._count._all])), activeByProvider);
+    const selected = selectLiveTvSource(capacityAdjustedCandidates, new Map(active.map((entry) => [entry.connectionId, entry._count._all])), activeByProvider);
     if (!selected) throw new ConflictException({ code: 'live_tv_pool_busy', message: 'Alle tilladte M3U-forbindelser er optaget. Prøv igen om et øjeblik.' });
     return { source: selected, method: methodBySource.get(selected.sourceId)! };
   }
@@ -179,11 +199,13 @@ export class LiveTvPlaybackService {
 
   private async assertPlanCapacity(tx: Prisma.TransactionClient, actor: AuthenticatedUser, limit: number) {
     const now = new Date();
-    const [vod, live] = await Promise.all([
+    const [vod, live, recordings] = await Promise.all([
       tx.playbackSession.count({ where: { userId: actor.sub, status: { in: ['reserving', 'active', 'paused'] }, leaseExpiresAt: { gt: now } } }),
       tx.liveTvLease.count({ where: { userId: actor.sub, status: { in: [...activeStatuses] }, leaseExpiresAt: { gt: now } } }),
+      tx.liveTvRecording.count({ where: { userId: actor.sub, status: 'recording' } }),
     ]);
-    if (vod + live >= limit) throw new ForbiddenException({ code: 'max_streams_reached', message: `Abonnementet tillader ${limit} samtidig(e) stream(s); ${vod + live} er aktive` });
+    const active = vod + live + recordings;
+    if (active >= limit) throw new ForbiddenException({ code: 'max_streams_reached', message: `Abonnementet tillader ${limit} samtidig(e) stream(s); ${active} er aktive` });
   }
 
   private async queueStreamJob(tx: Prisma.TransactionClient, lease: LiveTvLeaseWithChannel, method: LiveTvMethod, allowFallback: boolean): Promise<LiveTvLeaseWithChannel> {

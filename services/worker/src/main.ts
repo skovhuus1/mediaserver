@@ -19,7 +19,9 @@ import { deliverPushNotification, queueOfflineReadyNotification } from './push-n
 import { updateJobProgress, withJobProgress } from './job-progress.js';
 import { buildSdrColorMetadataArguments, resolveVideoColorPipeline } from './video-color.js';
 import { LibraryChangeDetector, resolveLibraryWatchConfig, type LibraryFileChange } from './library-change-detector.js';
-import { importLiveTvEpg, importLiveTvPlaylist, runLiveTvStream } from './live-tv.js';
+import { importLiveTvEpg, importLiveTvPlaylist } from './live-tv.js';
+import { processLiveTvRecordingJob } from './live-tv-recordings.js';
+import { processLiveTvStreamJobWithFailover } from './live-tv-stream-failover.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -131,7 +133,7 @@ async function claimNextJob(allowedTypes: readonly WorkerJobType[]): Promise<Cla
       `;
       const running = await tx.systemJob.count({
         where: {
-          type: { in: ['playback.transcode', 'offline.prepare'] },
+          type: { in: ['playback.transcode', 'offline.prepare', 'live-tv.stream', 'live-tv.record'] },
           status: 'running',
           leaseExpiresAt: { gt: new Date() },
         },
@@ -221,7 +223,10 @@ async function processJob(job: ClaimedJob): Promise<void> {
       await importLiveTvEpg(prisma, job, () => renewJobLease(job.id));
       return;
     case 'live-tv.stream':
-      await runLiveTvStream(prisma, job, transcodeRoot, () => renewJobLease(job.id));
+      await processLiveTvStreamJobWithFailover(prisma, job, transcodeRoot, () => renewJobLease(job.id));
+      return;
+    case 'live-tv.record':
+      await processLiveTvRecordingJob(prisma, job, () => renewJobLease(job.id));
       return;
     default:
       throw new Error(`Unsupported job type: ${job.type}`);

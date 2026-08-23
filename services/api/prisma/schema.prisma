@@ -119,6 +119,7 @@ model Account {
   liveTvPrograms       LiveTvProgram[]
   liveTvLeases         LiveTvLease[]
   liveTvFavorites      LiveTvFavorite[]
+  liveTvRecordings     LiveTvRecording[]
 
   @@map("accounts")
 }
@@ -144,6 +145,7 @@ model User {
   playbackHistory      PlaybackHistory[]
   auditLogs            AuditLog[]
   liveTvLeases         LiveTvLease[]
+  liveTvRecordings     LiveTvRecording[]
 
   @@unique([accountId, email])
   @@index([accountId, status])
@@ -172,6 +174,7 @@ model Profile {
   auditLogs            AuditLog[]
   liveTvLeases         LiveTvLease[]
   liveTvFavorites      LiveTvFavorite[]
+  liveTvRecordings     LiveTvRecording[]
 
   @@index([accountId, userId])
   @@index([accountId, userId, archivedAt])
@@ -989,6 +992,7 @@ model LiveTvConnection {
   provider             LiveTvProvider        @relation(fields: [providerId], references: [id], onDelete: Cascade)
   sources              LiveTvChannelSource[]
   leases               LiveTvLease[]
+  recordings           LiveTvRecording[]
 
   @@unique([providerId, playlistFingerprint])
   @@index([accountId, enabled, priority])
@@ -1015,6 +1019,7 @@ model LiveTvChannel {
   programs       LiveTvProgram[]
   leases         LiveTvLease[]
   favorites      LiveTvFavorite[]
+  recordings     LiveTvRecording[]
 
   @@unique([accountId, canonicalKey])
   @@index([accountId, enabled, groupName, sortOrder])
@@ -1039,6 +1044,7 @@ model LiveTvChannelSource {
   channel            LiveTvChannel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
   connection         LiveTvConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   leases             LiveTvLease[]
+  recordings         LiveTvRecording[]
 
   @@unique([connectionId, streamFingerprint])
   @@index([channelId, enabled, priority])
@@ -1080,6 +1086,7 @@ model LiveTvProgram {
   account     Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
   provider    LiveTvProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
   channel     LiveTvChannel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  recordings  LiveTvRecording[]
 
   @@unique([providerId, channelId, startsAt, title])
   @@index([accountId, channelId, startsAt, endsAt])
@@ -1136,4 +1143,46 @@ model LiveTvFavorite {
   @@unique([profileId, channelId])
   @@index([accountId, profileId])
   @@map("live_tv_favorites")
+}
+
+model LiveTvRecording {
+  id                    String               @id @default(uuid())
+  accountId             String               @map("account_id")
+  userId                String               @map("user_id")
+  profileId             String               @map("profile_id")
+  channelId             String               @map("channel_id")
+  programId             String?              @map("program_id")
+  sourceId              String?              @map("source_id")
+  connectionId          String?              @map("connection_id")
+  title                  String
+  startsAt               DateTime             @map("starts_at")
+  endsAt                 DateTime             @map("ends_at")
+  prePaddingSeconds      Int                  @default(60) @map("pre_padding_seconds")
+  postPaddingSeconds     Int                  @default(120) @map("post_padding_seconds")
+  status                 String               @default("scheduled")
+  progress               Int                  @default(0)
+  jobId                  String?              @map("job_id")
+  outputPath             String?              @map("output_path")
+  sizeBytes              BigInt?              @map("size_bytes")
+  durationMs             Int?                 @map("duration_ms")
+  error                  String?
+  playbackTokenHash      String?              @unique @map("playback_token_hash")
+  playbackTokenExpiresAt DateTime?            @map("playback_token_expires_at")
+  recordingStartedAt     DateTime?            @map("recording_started_at")
+  recordingEndedAt       DateTime?            @map("recording_ended_at")
+  createdAt              DateTime             @default(now()) @map("created_at")
+  updatedAt              DateTime             @updatedAt @map("updated_at")
+  account                Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user                   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile                Profile              @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  channel                LiveTvChannel        @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  program                LiveTvProgram?       @relation(fields: [programId], references: [id], onDelete: SetNull)
+  source                 LiveTvChannelSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  connection             LiveTvConnection?    @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@unique([profileId, programId])
+  @@index([accountId, status, startsAt])
+  @@index([connectionId, status, endsAt])
+  @@index([profileId, createdAt])
+  @@map("live_tv_recordings")
 }
