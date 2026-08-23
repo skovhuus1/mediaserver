@@ -422,6 +422,40 @@ export class LiveTvService {
     })) };
   }
 
+  async guideNeighbor(actor: AuthenticatedUser, channelId: string, direction: 'next' | 'previous') {
+    const profileId = this.profileId(actor);
+    const profile = await this.prisma.profile.findFirst({ where: { id: profileId, accountId: actor.accountId, userId: actor.sub, archivedAt: null } });
+    if (!profile) throw new ForbiddenException({ code: 'active_profile_required', message: 'En aktiv profil er påkrævet' });
+    const { from, to } = resolveLiveTvGuideWindow({});
+    const where: Prisma.LiveTvChannelWhereInput = {
+      accountId: actor.accountId, enabled: true, ...(profile.isChildProfile ? { isAdult: false } : {}),
+      sources: { some: { enabled: true, connection: { enabled: true, provider: { enabled: true } } } },
+    };
+    const current = await this.prisma.liveTvChannel.findFirst({ where: { ...where, id: channelId }, select: { id: true } });
+    if (!current) throw new NotFoundException({ code: 'live_tv_channel_unavailable', message: 'Kanalen er ikke længere tilgængelig' });
+    const orderBy: Prisma.LiveTvChannelOrderByWithRelationInput[] = [{ sortOrder: 'asc' }, { number: 'asc' }, { name: 'asc' }, { id: 'asc' }];
+    const include = {
+      programs: { where: { startsAt: { lt: to }, endsAt: { gt: from } }, orderBy: { startsAt: 'asc' as const } },
+      favorites: { where: { profileId } },
+    };
+    const adjacent = await this.prisma.liveTvChannel.findMany({
+      where, cursor: { id: channelId }, skip: 1, take: direction === 'next' ? 1 : -1, orderBy, include,
+    });
+    const channel = adjacent[0] ?? await this.prisma.liveTvChannel.findFirst({
+      where,
+      orderBy: direction === 'next' ? orderBy : [{ sortOrder: 'desc' }, { number: 'desc' }, { name: 'desc' }, { id: 'desc' }],
+      include,
+    });
+    if (!channel) throw new NotFoundException({ code: 'live_tv_channel_unavailable', message: 'Der er ingen tilgængelige Live TV-kanaler' });
+    return {
+      id: channel.id, name: channel.name, number: channel.number, logoUrl: channel.logoUrl, groupName: channel.groupName,
+      favorite: channel.favorites.length > 0,
+      programs: channel.programs.map((program) => ({ id: program.id, startsAt: program.startsAt, endsAt: program.endsAt,
+        title: program.title, subtitle: program.subtitle, description: program.description, category: program.category,
+        iconUrl: program.iconUrl, episode: program.episode })),
+    };
+  }
+
   async setFavorite(actor: AuthenticatedUser, channelId: string, favorite: boolean) {
     const profileId = this.profileId(actor);
     await this.channel(actor, channelId);

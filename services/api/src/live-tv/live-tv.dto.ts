@@ -97,6 +97,11 @@ export class ListLiveTvGuideDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(MAX_LIVE_TV_GUIDE_PAGE_SIZE) pageSize = DEFAULT_LIVE_TV_GUIDE_PAGE_SIZE;
 }
 
+export class LiveTvGuideNeighborDto {
+  @IsIn(['next', 'previous'])
+  direction!: 'next' | 'previous';
+}
+
 export class BulkUpdateLiveTvChannelGroupDto {
   @IsString() @MaxLength(120) groupName!: string;
   @IsIn(['show', 'hide']) action!: 'show' | 'hide';

@@ -4,7 +4,7 @@ import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import {
   BulkUpdateLiveTvChannelGroupDto, BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto,
-  ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, LiveTvAuthorizeDto, LiveTvSwitchDto, LiveTvTokenDto, MergeLiveTvChannelDto,
+  ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, LiveTvAuthorizeDto, LiveTvGuideNeighborDto, LiveTvSwitchDto, LiveTvTokenDto, MergeLiveTvChannelDto,
   UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto, UpdateLiveTvSourceDto,
 } from './live-tv.dto';
 import { LiveTvPlaybackService } from './live-tv-playback.service';
@@ -33,6 +33,7 @@ export class LiveTvController {
   @Patch('admin/sources/:id') @Roles('admin') updateSource(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateLiveTvSourceDto) { return this.liveTv.updateSource(actor, id, dto); }
 
   @Get('guide') guide(@CurrentUser() actor: AuthenticatedUser, @Query() query: ListLiveTvGuideDto) { return this.liveTv.guide(actor, query); }
+  @Get('guide/channels/:id/neighbor') guideNeighbor(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Query() query: LiveTvGuideNeighborDto) { return this.liveTv.guideNeighbor(actor, id, query.direction); }
   @Put('favorites/:channelId') favorite(@CurrentUser() actor: AuthenticatedUser, @Param('channelId') id: string) { return this.liveTv.setFavorite(actor, id, true); }
   @Delete('favorites/:channelId') unfavorite(@CurrentUser() actor: AuthenticatedUser, @Param('channelId') id: string) { return this.liveTv.setFavorite(actor, id, false); }
   @Post('playback/authorize') authorize(@CurrentUser() actor: AuthenticatedUser, @Body() dto: LiveTvAuthorizeDto) { return this.playback.authorize(actor, dto); }

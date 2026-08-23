@@ -26,6 +26,12 @@ export function describeLiveTvChannel(input: LiveTvChannelInput): LiveTvChannelD
   const canonicalIdentity = normalizeCanonicalIdentity(displayName)
     || normalizeCanonicalIdentity(input.tvgId ?? '')
     || 'ukendt-kanal';
+  const externalIdentity = input.tvgId
+    ? normalizeCanonicalIdentity(canonicalLiveTvDisplayName(input.tvgId))
+    : '';
+  const externalDiscriminator = externalIdentity && externalIdentity !== canonicalIdentity
+    ? `:tvg:${normalizeCanonicalIdentity(input.tvgId ?? '')}`
+    : '';
   const quality = classifyLiveTvSourceQuality(input.name, input.tvgName, input.tvgId);
   const legacyKeys = [
     input.tvgId ? `tvg:${normalizeLiveTvIdentity(input.tvgId)}` : null,
@@ -33,7 +39,7 @@ export function describeLiveTvChannel(input: LiveTvChannelInput): LiveTvChannelD
   ].filter((value): value is string => Boolean(value && !value.endsWith(':')));
 
   return {
-    canonicalKey: `${LIVE_TV_CANONICAL_KEY_PREFIX}${canonicalIdentity}`,
+    canonicalKey: `${LIVE_TV_CANONICAL_KEY_PREFIX}${canonicalIdentity}${externalDiscriminator}`,
     displayName,
     qualityLabel: quality.label,
     qualityRank: quality.rank,
