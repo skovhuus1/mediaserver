@@ -184,27 +184,48 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     if (tv) {
       return Scaffold(
-        body: Row(
-          children: [
-            _TvSideRail(
-              labels: labels,
-              icons: icons,
-              selected: _tab,
-              onSelect: (index) => setState(() => _tab = index),
-              controller: widget.controller,
-              onSearch: _showSearch,
-              onSettings: _openSettings,
-              onDownloads: _openDownloads,
-              onNotifications: _openNotifications,
+        body: DecoratedBox(
+          decoration: const BoxDecoration(
+            color: Color(0xFF050505),
+            gradient: RadialGradient(
+              center: Alignment.topRight,
+              radius: 1.1,
+              colors: [Color(0x333A2412), Color(0xFF050505)],
             ),
-            const VerticalDivider(width: 1),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: _load,
-                child: _TvScrollContainer(child: body),
+          ),
+          child: Row(
+            children: [
+              _TvSideRail(
+                labels: labels,
+                icons: icons,
+                selected: _tab,
+                onSelect: (index) => setState(() => _tab = index),
+                onSettings: _openSettings,
               ),
-            ),
-          ],
+              Expanded(
+                child: Column(
+                  children: [
+                    _TvTopBar(
+                      controller: widget.controller,
+                      labels: labels,
+                      selected: _tab,
+                      onSelect: (index) => setState(() => _tab = index),
+                      onSearch: _showSearch,
+                      onSettings: _openSettings,
+                      onDownloads: _openDownloads,
+                      onNotifications: _openNotifications,
+                    ),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: _load,
+                        child: _TvScrollContainer(child: body),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -469,139 +490,66 @@ class _TvSideRail extends StatelessWidget {
     required this.icons,
     required this.selected,
     required this.onSelect,
-    required this.controller,
-    required this.onSearch,
     required this.onSettings,
-    required this.onDownloads,
-    required this.onNotifications,
   });
 
   final List<String> labels;
   final List<IconData> icons;
   final int selected;
   final ValueChanged<int> onSelect;
-  final AppController controller;
-  final VoidCallback onSearch;
   final VoidCallback onSettings;
-  final VoidCallback onDownloads;
-  final VoidCallback onNotifications;
 
   @override
   Widget build(BuildContext context) => SafeArea(
     child: SizedBox(
-      width: 286,
+      width: 88,
       child: Container(
         decoration: const BoxDecoration(
-          border: Border(right: BorderSide(color: Color(0xFF1E2730))),
-          color: Color(0xF2090E15),
+          border: Border(right: BorderSide(color: Color(0x1FFFFFFF))),
+          color: Color(0xB8000000),
           boxShadow: [
             BoxShadow(
-              color: Color(0x33000000),
-              blurRadius: 14,
-              offset: Offset(8, 0),
+              color: Color(0x66000000),
+              blurRadius: 28,
+              offset: Offset(10, 0),
             ),
           ],
         ),
         child: Column(
           children: [
-            const SizedBox(height: 14),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(999),
-                  color: Colors.white.withValues(alpha: 0.06),
-                ),
-                child: InkWell(
-                  onTap: () => onSelect(0),
-                  borderRadius: BorderRadius.circular(999),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    child: BrandLockup(compact: false),
-                  ),
+            const SizedBox(height: 18),
+            Tooltip(
+              message: 'Hjem',
+              child: InkWell(
+                onTap: () => onSelect(0),
+                borderRadius: BorderRadius.circular(14),
+                child: const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: BrandMark(size: 42),
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             Expanded(
-              child: NavigationRail(
-                selectedIndex: selected,
-                onDestinationSelected: onSelect,
-                labelType: NavigationRailLabelType.all,
-                groupAlignment: -0.95,
-                backgroundColor: Colors.transparent,
-                selectedIconTheme: const IconThemeData(size: 24),
-                destinations: [
-                  for (final entry in labels.indexed)
-                    NavigationRailDestination(
-                      icon: Icon(icons[entry.$1]),
-                      label: Text(entry.$2),
-                    ),
-                ],
-                trailing: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Divider(height: 16),
-                    _TvRailAction(
-                      icon: Icons.search,
-                      label: 'Søg',
-                      onTap: onSearch,
-                    ),
-                    _TvRailAction(
-                      icon: Icons.notifications_none_outlined,
-                      label: 'Notifikationer',
-                      onTap: onNotifications,
-                    ),
-                    _TvRailAction(
-                      icon: Icons.download_for_offline_outlined,
-                      label: 'Downloads',
-                      onTap: onDownloads,
-                    ),
-                    if (controller.isAdmin)
-                      _TvRailAction(
-                        icon: Icons.admin_panel_settings_outlined,
-                        label: 'Admin',
-                        onTap: () => launchUrl(
-                          Uri.parse(
-                            controller.api.baseUrl.replaceFirst('/api/v1', ''),
-                          ),
-                          mode: LaunchMode.externalApplication,
-                        ),
-                      ),
-                    _TvRailAction(
-                      icon: Icons.settings,
-                      label: 'Indstillinger',
-                      onTap: onSettings,
-                    ),
-                  ],
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: labels.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (_, index) => _TvRailIcon(
+                  icon: icons[index],
+                  label: labels[index],
+                  selected: selected == index,
+                  onTap: () => onSelect(index),
                 ),
               ),
             ),
-            const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    color: Colors.white.withValues(alpha: 0.04),
-                  ),
-                  child: Text(
-                    controller.activeProfile?.name ?? 'Bruger',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                ),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: _TvRailIcon(
+                icon: Icons.settings_outlined,
+                label: 'Indstillinger',
+                selected: false,
+                onTap: onSettings,
               ),
             ),
           ],
@@ -611,8 +559,260 @@ class _TvSideRail extends StatelessWidget {
   );
 }
 
-class _TvRailAction extends StatelessWidget {
-  const _TvRailAction({
+class _TvTopBar extends StatelessWidget {
+  const _TvTopBar({
+    required this.controller,
+    required this.labels,
+    required this.selected,
+    required this.onSelect,
+    required this.onSearch,
+    required this.onSettings,
+    required this.onDownloads,
+    required this.onNotifications,
+  });
+
+  final AppController controller;
+  final List<String> labels;
+  final int selected;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onSearch;
+  final VoidCallback onSettings;
+  final VoidCallback onDownloads;
+  final VoidCallback onNotifications;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    bottom: false,
+    child: Container(
+      height: 84,
+      padding: const EdgeInsets.fromLTRB(24, 10, 28, 10),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xD9000000), Color(0x33000000)],
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final entry in labels.indexed)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 18),
+                      child: _TvTopTab(
+                        label: entry.$2,
+                        selected: selected == entry.$1,
+                        onTap: () => onSelect(entry.$1),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          _TvIconAction(icon: Icons.search, label: 'Søg', onTap: onSearch),
+          _TvIconAction(
+            icon: Icons.notifications_none_outlined,
+            label: 'Notifikationer',
+            onTap: onNotifications,
+          ),
+          _TvIconAction(
+            icon: Icons.download_for_offline_outlined,
+            label: 'Downloads',
+            onTap: onDownloads,
+          ),
+          if (controller.isAdmin)
+            _TvIconAction(
+              icon: Icons.admin_panel_settings_outlined,
+              label: 'Admin',
+              onTap: () => launchUrl(
+                Uri.parse(controller.api.baseUrl.replaceFirst('/api/v1', '')),
+                mode: LaunchMode.externalApplication,
+              ),
+            ),
+          _TvIconAction(
+            icon: Icons.settings_outlined,
+            label: 'Indstillinger',
+            onTap: onSettings,
+          ),
+          const SizedBox(width: 8),
+          PopupMenuButton<String>(
+            tooltip: 'Profil',
+            onSelected: (value) {
+              if (value == 'profiles') controller.showProfiles();
+              if (value == 'settings') onSettings();
+              if (value == 'downloads') onDownloads();
+              if (value == 'notifications') onNotifications();
+              if (value == 'logout') unawaited(controller.logout());
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'settings', child: Text('Indstillinger')),
+              PopupMenuItem(
+                value: 'notifications',
+                child: Text('Notifikationer'),
+              ),
+              PopupMenuItem(value: 'downloads', child: Text('Downloads')),
+              PopupMenuItem(value: 'profiles', child: Text('Skift profil')),
+              PopupMenuItem(value: 'logout', child: Text('Log ud')),
+            ],
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: Colors.white.withValues(alpha: 0.08),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: const Color(0xFFE4AA52),
+                      child: Text(
+                        (controller.activeProfile?.name ?? 'B').characters.first
+                            .toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 140),
+                      child: Text(
+                        controller.activeProfile?.name ?? 'Bruger',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _TvTopTab extends StatelessWidget {
+  const _TvTopTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(8),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: selected ? Colors.white : Colors.white54,
+              fontSize: 18,
+              fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            height: 3,
+            width: selected ? 34 : 0,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE4AA52),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _TvRailIcon extends StatefulWidget {
+  const _TvRailIcon({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  State<_TvRailIcon> createState() => _TvRailIconState();
+}
+
+class _TvRailIconState extends State<_TvRailIcon> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.selected || _focused;
+    return Tooltip(
+      message: widget.label,
+      child: FocusableActionDetector(
+        onFocusChange: (value) => setState(() => _focused = value),
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            height: 54,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: widget.selected
+                  ? const Color(0xFFE4AA52)
+                  : _focused
+                  ? Colors.white.withValues(alpha: 0.13)
+                  : Colors.white.withValues(alpha: 0.04),
+              boxShadow: _focused
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x55E4AA52),
+                        blurRadius: 18,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : const [],
+            ),
+            child: Icon(
+              widget.icon,
+              color: widget.selected
+                  ? Colors.black
+                  : active
+                  ? Colors.white
+                  : Colors.white54,
+              size: 24,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TvIconAction extends StatefulWidget {
+  const _TvIconAction({
     required this.icon,
     required this.label,
     required this.onTap,
@@ -623,44 +823,64 @@ class _TvRailAction extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    return FocusableActionDetector(
+  State<_TvIconAction> createState() => _TvIconActionState();
+}
+
+class _TvIconActionState extends State<_TvIconAction> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: widget.label,
+    child: FocusableActionDetector(
+      onFocusChange: (value) => setState(() => _focused = value),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              height: 46,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: Colors.white.withValues(alpha: 0.05),
-              ),
-              child: Row(
-                children: [
-                  Icon(icon, size: 20),
-                  const SizedBox(width: 12),
-                  Expanded(
+        padding: const EdgeInsets.only(left: 8),
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: _focused ? 112 : 46,
+            height: 46,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              color: _focused
+                  ? const Color(0xFFE4AA52)
+                  : Colors.white.withValues(alpha: 0.08),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  widget.icon,
+                  color: _focused ? Colors.black : Colors.white70,
+                  size: 21,
+                ),
+                if (_focused) ...[
+                  const SizedBox(width: 7),
+                  Flexible(
                     child: Text(
-                      label,
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.1,
+                        color: Colors.black,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
                       ),
                     ),
                   ),
-                  const Icon(Icons.chevron_right, size: 17),
                 ],
-              ),
+              ],
             ),
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _LibraryTopTab extends StatelessWidget {
@@ -740,6 +960,20 @@ class _HomeFeed extends StatelessWidget {
         (continueItems.isNotEmpty
             ? continueItems.first
             : (movies.isNotEmpty ? movies.first : null));
+    if (tv) {
+      return _PremiumTvHomeFeed(
+        api: api,
+        profileName: profileName,
+        hero: hero,
+        recommendations: recommendations,
+        movies: movies,
+        series: series,
+        continueItems: continueItems,
+        onOpen: onOpen,
+        onPlay: onPlay,
+      );
+    }
+
     final sections = <MediaSection>[
       if (continueItems.isNotEmpty)
         MediaSection(title: 'Fortsæt med at se', items: continueItems),
@@ -774,6 +1008,712 @@ class _HomeFeed extends StatelessWidget {
       ],
     );
   }
+}
+
+class _PremiumTvHomeFeed extends StatelessWidget {
+  const _PremiumTvHomeFeed({
+    required this.api,
+    required this.profileName,
+    required this.hero,
+    required this.recommendations,
+    required this.movies,
+    required this.series,
+    required this.continueItems,
+    required this.onOpen,
+    required this.onPlay,
+  });
+
+  final ApiClient api;
+  final String profileName;
+  final MediaItem? hero;
+  final RecommendationFeed recommendations;
+  final List<MediaItem> movies;
+  final List<MediaItem> series;
+  final List<MediaItem> continueItems;
+  final ValueChanged<MediaItem> onOpen;
+  final ValueChanged<MediaItem> onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final qualityItems = _dedupeMedia([
+      ...movies.where((item) => item.is4k || item.isHdr),
+      ...series.where((item) => item.is4k || item.isHdr),
+    ]);
+    final personalized = recommendations.sections
+        .where((section) => section.items.isNotEmpty)
+        .take(4)
+        .toList(growable: false);
+    final sections = <MediaSection>[
+      if (continueItems.isNotEmpty)
+        MediaSection(title: 'Fortsæt med at se', items: continueItems),
+      ...personalized,
+      if (qualityItems.isNotEmpty)
+        MediaSection(title: '4K og HDR på serveren', items: qualityItems),
+      if (movies.isNotEmpty) MediaSection(title: 'Nye film', items: movies),
+      if (series.isNotEmpty)
+        MediaSection(title: 'Serier til sofaen', items: series),
+    ];
+
+    return FocusTraversalGroup(
+      child: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
+        slivers: [
+          SliverToBoxAdapter(
+            child: hero == null
+                ? const _PremiumEmptyHero()
+                : _PremiumTvHero(
+                    api: api,
+                    media: hero!,
+                    profileName: profileName,
+                    onOpen: onOpen,
+                    onPlay: onPlay,
+                  ),
+          ),
+          SliverToBoxAdapter(
+            child: _TvMetricStrip(
+              continueCount: continueItems.length,
+              movieCount: movies.length,
+              seriesCount: series.length,
+              qualityCount: qualityItems.length,
+            ),
+          ),
+          for (final section in sections)
+            SliverToBoxAdapter(
+              child: _PremiumMediaRail(
+                api: api,
+                section: section,
+                onPressed: onOpen,
+              ),
+            ),
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(42, 22, 42, 48),
+              child: Text(
+                'BoltBytes TV er optimeret til fjernbetjening, hurtig navigation og din lokale server.',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PremiumEmptyHero extends StatelessWidget {
+  const _PremiumEmptyHero();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 520,
+    margin: const EdgeInsets.fromLTRB(32, 12, 32, 22),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(30),
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF19110A), Color(0xFF07090C), Color(0xFF101820)],
+      ),
+      border: Border.all(color: Colors.white10),
+    ),
+    child: const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          BrandMark(size: 74),
+          SizedBox(height: 22),
+          Text(
+            'Dit bibliotek er tomt',
+            style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900),
+          ),
+          SizedBox(height: 10),
+          Text(
+            'Scan et bibliotek fra adminpanelet for at fylde TV-forsiden.',
+            style: TextStyle(color: Colors.white60, fontSize: 16),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _PremiumTvHero extends StatelessWidget {
+  const _PremiumTvHero({
+    required this.api,
+    required this.media,
+    required this.profileName,
+    required this.onOpen,
+    required this.onPlay,
+  });
+
+  final ApiClient api;
+  final MediaItem media;
+  final String profileName;
+  final ValueChanged<MediaItem> onOpen;
+  final ValueChanged<MediaItem> onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final image = api.absoluteMediaUrl(
+      media.backdropPath ?? media.posterPath,
+      imageSize: 'original',
+    );
+    final poster = api.absoluteMediaUrl(media.posterPath, imageSize: 'w500');
+    final progress = media.progress?.percent.clamp(0, 100);
+    final hasProgress = progress != null && progress > 0;
+    final reason = media.reason?.trim();
+
+    return Container(
+      height: 620,
+      margin: const EdgeInsets.fromLTRB(24, 6, 32, 22),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(34),
+          bottomRight: Radius.circular(34),
+        ),
+        color: const Color(0xFF06080A),
+        border: Border.all(color: Colors.white10),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x99000000),
+            blurRadius: 42,
+            offset: Offset(0, 22),
+          ),
+        ],
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (image.isNotEmpty)
+            Image.network(
+              image,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const SizedBox(),
+            ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Color(0xFF040506),
+                  Color(0xE6040506),
+                  Color(0x99040506),
+                  Color(0x22040506),
+                ],
+                stops: [0, 0.42, 0.68, 1],
+              ),
+            ),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0x77000000),
+                  Color(0x00000000),
+                  Color(0xE6000000),
+                ],
+                stops: [0, 0.48, 1],
+              ),
+            ),
+          ),
+          Positioned(
+            left: 54,
+            top: 48,
+            child: Row(
+              children: [
+                const BrandMark(size: 42),
+                const SizedBox(width: 14),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'DIT BIBLIOTEK',
+                      style: TextStyle(
+                        color: Color(0xFFE4AA52),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 2.2,
+                      ),
+                    ),
+                    Text(
+                      'Udvalgt til $profileName',
+                      style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Positioned(
+            left: 58,
+            right: 52,
+            bottom: 54,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 850),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (reason != null && reason.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _HeroReason(label: reason),
+                          ),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            if (media.releaseYear != null)
+                              _ChipPill(label: '${media.releaseYear}'),
+                            if (media.episodeLabel.isNotEmpty)
+                              _ChipPill(label: media.episodeLabel),
+                            if (media.is4k) const _ChipPill(label: '4K'),
+                            if (media.isHdr)
+                              _ChipPill(label: media.hdr!.toUpperCase()),
+                            if (hasProgress)
+                              _ChipPill(label: '${progress.round()}% set'),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          media.displayTitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.displayLarge
+                              ?.copyWith(
+                                fontSize: 64,
+                                height: 0.94,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -2.2,
+                                shadows: const [
+                                  Shadow(
+                                    color: Color(0xCC000000),
+                                    blurRadius: 18,
+                                  ),
+                                ],
+                              ),
+                        ),
+                        const SizedBox(height: 18),
+                        if ((media.overview ?? '').isNotEmpty)
+                          Text(
+                            media.overview!,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xB8FFFFFF),
+                              fontSize: 17,
+                              height: 1.45,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        const SizedBox(height: 28),
+                        Row(
+                          children: [
+                            _TvHeroButton(
+                              icon: hasProgress
+                                  ? Icons.play_circle_fill_rounded
+                                  : Icons.play_arrow_rounded,
+                              label: hasProgress ? 'Fortsæt' : 'Afspil',
+                              primary: true,
+                              onTap: () => onPlay(media),
+                            ),
+                            const SizedBox(width: 14),
+                            _TvHeroButton(
+                              icon: Icons.info_outline_rounded,
+                              label: 'Mere info',
+                              onTap: () => onOpen(media),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (poster.isNotEmpty) ...[
+                  const SizedBox(width: 36),
+                  _HeroPosterPreview(image: poster, media: media),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroPosterPreview extends StatelessWidget {
+  const _HeroPosterPreview({required this.image, required this.media});
+
+  final String image;
+  final MediaItem media;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 178,
+    height: 270,
+    clipBehavior: Clip.antiAlias,
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: Colors.white24),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0xAA000000),
+          blurRadius: 30,
+          offset: Offset(0, 18),
+        ),
+      ],
+    ),
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.network(
+          image,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => const SizedBox(),
+        ),
+        Positioned(
+          left: 10,
+          right: 10,
+          bottom: 10,
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (media.is4k) const _ChipPill(label: '4K'),
+              if (media.isHdr) const _ChipPill(label: 'HDR'),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _HeroReason extends StatelessWidget {
+  const _HeroReason({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(999),
+      color: Colors.black.withValues(alpha: 0.38),
+      border: Border.all(color: const Color(0x55E4AA52)),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Color(0xFFFFD596),
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
+  );
+}
+
+class _TvHeroButton extends StatefulWidget {
+  const _TvHeroButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.primary = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool primary;
+
+  @override
+  State<_TvHeroButton> createState() => _TvHeroButtonState();
+}
+
+class _TvHeroButtonState extends State<_TvHeroButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) => FocusableActionDetector(
+    onFocusChange: (value) => setState(() => _focused = value),
+    child: AnimatedScale(
+      scale: _focused ? 1.06 : 1,
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOutCubic,
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            color: widget.primary
+                ? const Color(0xFFE4AA52)
+                : Colors.white.withValues(alpha: _focused ? 0.18 : 0.1),
+            border: Border.all(
+              color: widget.primary
+                  ? const Color(0xFFFFD596)
+                  : Colors.white.withValues(alpha: _focused ? 0.38 : 0.18),
+            ),
+            boxShadow: _focused
+                ? const [
+                    BoxShadow(
+                      color: Color(0x55E4AA52),
+                      blurRadius: 22,
+                      offset: Offset(0, 10),
+                    ),
+                  ]
+                : const [],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                widget.icon,
+                color: widget.primary ? Colors.black : Colors.white,
+                size: 24,
+              ),
+              const SizedBox(width: 9),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  color: widget.primary ? Colors.black : Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _TvMetricStrip extends StatelessWidget {
+  const _TvMetricStrip({
+    required this.continueCount,
+    required this.movieCount,
+    required this.seriesCount,
+    required this.qualityCount,
+  });
+
+  final int continueCount;
+  final int movieCount;
+  final int seriesCount;
+  final int qualityCount;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(42, 6, 42, 16),
+    child: Row(
+      children: [
+        Expanded(
+          child: _TvMetricCard(
+            icon: Icons.play_circle_outline,
+            label: 'Fortsæt',
+            value: '$continueCount',
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _TvMetricCard(
+            icon: Icons.movie_creation_outlined,
+            label: 'Film',
+            value: '$movieCount',
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _TvMetricCard(
+            icon: Icons.live_tv_outlined,
+            label: 'Serier',
+            value: '$seriesCount',
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _TvMetricCard(
+            icon: Icons.hdr_auto_outlined,
+            label: '4K / HDR',
+            value: '$qualityCount',
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _TvMetricCard extends StatelessWidget {
+  const _TvMetricCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(18),
+      color: Colors.white.withValues(alpha: 0.055),
+      border: Border.all(color: Colors.white10),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: const Color(0x22E4AA52),
+            ),
+            child: Icon(icon, color: const Color(0xFFE4AA52), size: 21),
+          ),
+          const SizedBox(width: 13),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _PremiumMediaRail extends StatelessWidget {
+  const _PremiumMediaRail({
+    required this.api,
+    required this.section,
+    required this.onPressed,
+  });
+
+  final ApiClient api;
+  final MediaSection section;
+  final ValueChanged<MediaItem> onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _dedupeMedia(section.items).take(24).toList(growable: false);
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 42),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    section.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.7,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${items.length} titler',
+                  style: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 398,
+            child: ScrollConfiguration(
+              behavior: const ScrollBehavior().copyWith(scrollbars: false),
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 42,
+                  vertical: 5,
+                ),
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 16),
+                itemBuilder: (_, index) => MediaPosterCard(
+                  api: api,
+                  media: items[index],
+                  width: 202,
+                  isTv: true,
+                  showMeta: true,
+                  heroTag: 'premium-${section.title}-$index-${items[index].id}',
+                  onPressed: () => onPressed(items[index]),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+List<MediaItem> _dedupeMedia(Iterable<MediaItem> items) {
+  final seen = <String>{};
+  final result = <MediaItem>[];
+  for (final item in items) {
+    if (item.id.isEmpty || !seen.add(item.id)) continue;
+    result.add(item);
+  }
+  return result;
 }
 
 class _Hero extends StatelessWidget {
@@ -959,6 +1899,8 @@ class _MediaRail extends StatelessWidget {
                   width: width,
                   isTv: tv,
                   showMeta: true,
+                  heroTag:
+                      'rail-${section.title}-$index-${section.items[index].id}',
                   onPressed: () => onPressed(section.items[index]),
                 ),
               ),

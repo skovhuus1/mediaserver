@@ -81,7 +81,7 @@ Hostmappen monteres read-only som **/media** i API og worker. Biblioteker vælge
 | Admin | Operationscenter, diagnostics, CPU/RAM/playback-telemetri, logs, opdatering, backup og integrationer |
 | Backup | Krypteret PostgreSQL-backup, import, download, retention, pre-restore safety backup og gated restore |
 | Automation | Sonarr/Radarr health, lookup, add, root/profile defaults og autentificerede import-webhooks |
-| Klienter | Flutter mobile/TV-flavors, manifest- og signaturcertificeret Android-releaseflow, TV-navigation, offline-downloads og cast-handoff |
+| Klienter | Flutter mobile/TV-flavors, manifest- og signaturcertificeret Android-releaseflow, TV-optimeret forside med hero/rails/fokusnavigation, offline-downloads og cast-handoff |
 
 ## Arkitektur
 

@@ -2,6 +2,12 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.2 - 2026-08-23
+
+- Løfter Flutter TV-hjemmeskærmen med kompakt ikon-rail, topnavigation, fuldskærms-hero, profilrettet statusstribe og TV-optimerede medierækker.
+- Gør TV-kort mere fjernbetjeningsvenlige med tydelig fokusmarkering, større play-overlay og unikke Hero-tags pr. række, så dubletter i anbefalinger ikke kan udløse Flutter runtime-konflikter.
+- Bevarer mobil-layoutet og eksisterende handlers til afspilning, titelvisning, søgning, downloads, notifikationer, admin og indstillinger.
+
 ## 0.2.1 - 2026-08-23
 
 - Tilføjer `BB_MEDIA_PUBLIC_URL` som effektiv CORS-origin automatisk, så `https://media.boltbytes.com` ikke fejlagtigt blokerer Cast-status eller API-kald.
