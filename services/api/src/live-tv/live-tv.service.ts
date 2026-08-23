@@ -17,7 +17,7 @@ import {
   MAX_ADMIN_LIVE_TV_CHANNELS,
   visibilityCounts,
 } from './live-tv-channel-catalog';
-import { resolveLiveTvGuideWindow } from './live-tv-guide';
+import { presentLiveTvGuidePrograms, resolveLiveTvGuideWindow } from './live-tv-guide';
 
 @Injectable()
 export class LiveTvService {
@@ -416,9 +416,7 @@ export class LiveTvService {
       channels: channels.map((channel) => ({
       id: channel.id, name: channel.name, number: channel.number, logoUrl: channel.logoUrl, groupName: channel.groupName,
       favorite: channel.favorites.length > 0,
-      programs: channel.programs.map((program) => ({ id: program.id, startsAt: program.startsAt, endsAt: program.endsAt,
-        title: program.title, subtitle: program.subtitle, description: program.description, category: program.category,
-        iconUrl: program.iconUrl, episode: program.episode })),
+      programs: presentLiveTvGuidePrograms(channel, from, to),
     })) };
   }
 
@@ -450,9 +448,7 @@ export class LiveTvService {
     return {
       id: channel.id, name: channel.name, number: channel.number, logoUrl: channel.logoUrl, groupName: channel.groupName,
       favorite: channel.favorites.length > 0,
-      programs: channel.programs.map((program) => ({ id: program.id, startsAt: program.startsAt, endsAt: program.endsAt,
-        title: program.title, subtitle: program.subtitle, description: program.description, category: program.category,
-        iconUrl: program.iconUrl, episode: program.episode })),
+      programs: presentLiveTvGuidePrograms(channel, from, to),
     };
   }
 

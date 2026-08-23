@@ -17,6 +17,7 @@ import { cpus, freemem, loadavg, totalmem, uptime } from 'node:os';
 import type { Request, Response } from 'express';
 import { BackupService } from './backup.service';
 import { RestoreBackupDto } from './system.dto';
+import { readCorsOrigins } from '../config/environment';
 
 type CpuSnapshot = { idle: number; total: number };
 
@@ -401,7 +402,7 @@ export class SystemController {
       publicUrlSource: environmentUrl ? 'environment' : account?.externalUrl ? 'account' : 'unset',
       httpsReady: effectivePublicUrl?.startsWith('https://') ?? false,
       castReady: Boolean(effectivePublicUrl?.startsWith('https://') && !/localhost|127\.0\.0\.1/i.test(effectivePublicUrl)),
-      corsOrigins: (process.env.CORS_ORIGIN ?? '').split(',').map((value) => value.trim()).filter(Boolean),
+      corsOrigins: readCorsOrigins(process.env.CORS_ORIGIN, process.env.BB_MEDIA_PUBLIC_URL),
     };
   }
 

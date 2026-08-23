@@ -7,7 +7,7 @@ import { api, type ApiFailure, type SessionUser } from '@/lib/api';
 import { CustomerShell } from './customer-shell';
 import styles from './live-tv-experience.module.css';
 
-type Program = { id: string; startsAt: string; endsAt: string; title: string; subtitle: string | null; description: string | null; category: string | null; iconUrl: string | null; episode: string | null };
+type Program = { id: string; startsAt: string; endsAt: string; title: string; subtitle: string | null; description: string | null; category: string | null; iconUrl: string | null; episode: string | null; source?: 'xmltv' | 'm3u'; recordable?: boolean };
 type Channel = { id: string; name: string; number: number | null; logoUrl: string | null; groupName: string | null; favorite: boolean; programs: Program[] };
 type Guide = { from: string; to: string; availableTotal: number; total: number; page: number; pageSize: number; totalPages: number; groups: Array<{ name: string; count: number }>; channels: Channel[] };
 type LiveSession = { accepted: true; leaseId: string; method: string; status: string; channel: { id: string; name: string; number: number | null; logoUrl: string | null }; streamToken: string; streamUrl: string; statusUrl: string; heartbeatUrl: string; releaseUrl: string; contentType: string };
@@ -79,9 +79,11 @@ export function LiveTvExperience() {
 function ProgramCard({ program, onError }: { program: Program; onError: (value: string | null) => void }) {
   const [recording, setRecording] = useState<{ id: string; status: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const recordable = program.recordable !== false;
   const now = Date.now(); const active = Date.parse(program.startsAt) <= now && Date.parse(program.endsAt) > now; const programDuration = Date.parse(program.endsAt) - Date.parse(program.startsAt); const progress = active ? Math.max(0, Math.min(100, ((now - Date.parse(program.startsAt)) / programDuration) * 100)) : 0;
-  useEffect(() => { let mounted = true; void scheduledPrograms().then((items) => { if (mounted) setRecording(items.get(program.id) ?? null); }).catch(() => undefined); return () => { mounted = false; }; }, [program.id]);
+  useEffect(() => { if (!recordable) { setRecording(null); return; } let mounted = true; void scheduledPrograms().then((items) => { if (mounted) setRecording(items.get(program.id) ?? null); }).catch(() => undefined); return () => { mounted = false; }; }, [program.id, recordable]);
   const toggleRecording = async () => {
+    if (!recordable) return;
     setBusy(true); onError(null);
     try {
       if (recording) { await api(`/live-tv/recordings/${recording.id}/cancel`, { method: 'POST' }); setRecording(null); }
@@ -91,7 +93,7 @@ function ProgramCard({ program, onError }: { program: Program; onError: (value: 
     finally { setBusy(false); }
   };
   const recordingLabel = recording?.status === 'recording' ? 'Optager' : recording ? 'Planlagt' : 'Optag';
-  return <article className={styles.program} data-active={active} data-recording={Boolean(recording)}><time>{clock(program.startsAt)}–{clock(program.endsAt)}</time><strong>{program.title}</strong><small>{program.subtitle ?? program.category ?? 'Programinformation'}</small><button aria-label={`${recording ? 'Annuller optagelse af' : 'Optag'} ${program.title}`} className={styles.recordButton} disabled={busy} onClick={() => void toggleRecording()}>{busy ? <LoaderCircle className={styles.spin} /> : <CircleStop fill={recording ? 'currentColor' : 'none'} />}{recordingLabel}</button>{active && <i><b style={{ width: `${progress}%` }} /></i>}</article>;
+  return <article className={styles.program} data-active={active} data-recording={Boolean(recording)}><time>{clock(program.startsAt)}–{clock(program.endsAt)}</time><strong>{program.title}</strong><small>{program.subtitle ?? program.category ?? 'Programinformation'}</small>{recordable && <button aria-label={`${recording ? 'Annuller optagelse af' : 'Optag'} ${program.title}`} className={styles.recordButton} disabled={busy} onClick={() => void toggleRecording()}>{busy ? <LoaderCircle className={styles.spin} /> : <CircleStop fill={recording ? 'currentColor' : 'none'} />}{recordingLabel}</button>}{active && <i><b style={{ width: `${progress}%` }} /></i>}</article>;
 }
 
 let recordingScheduleCache: { expiresAt: number; promise: Promise<Map<string, { id: string; status: string }>> } | null = null;

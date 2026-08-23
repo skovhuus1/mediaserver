@@ -2,6 +2,13 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.1 - 2026-08-23
+
+- Tilføjer `BB_MEDIA_PUBLIC_URL` som effektiv CORS-origin automatisk, så `https://media.boltbytes.com` ikke fejlagtigt blokerer Cast-status eller API-kald.
+- Normaliserer CORS-origins med trailing slash og viser den effektive allow-list i serverindstillinger og diagnostics.
+- Autoopdager XMLTV-kilder fra M3U-headerfelterne `url-tvg`, `x-tvg-url` og `tvg-url`, krypterer URL'en og sætter et EPG-job i kø.
+- Viser M3U-kanalnavn, logo og gruppe som ikke-optagelig guidefallback, indtil rigtige XMLTV-programtider er importeret.
+
 ## 0.2.0 - 2026-08-23
 
 - Retter falsk logout fra `/watch/live`, når kanalguide eller profilkontekst fejler.

@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { updateJobProgress } from './job-progress.js';
-import { parseM3u, parseXmlTv } from './live-tv-parsers.js';
+import { parseM3uDocument, parseXmlTv } from './live-tv-parsers.js';
 import { disableMissingLiveTvSources, forEachLiveTvEntryByIdentity, stableChannelNumber } from './live-tv-import-batching.js';
 import { loadLiveTvChannelImportIndex, rememberLiveTvImportChannel, resolveLiveTvImportChannel } from './live-tv-channel-import.js';
 import { decryptSecret, encryptSecret } from './secret-value.js';
@@ -26,8 +26,9 @@ export interface LiveTvSourceFetchOptions {
 
 export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, renew: () => Promise<void>) {
   const providerId = stringPayload(job, 'providerId');
-  const provider = await prisma.liveTvProvider.findFirst({ where: { id: providerId, accountId: job.accountId }, include: { connections: { where: { enabled: true } } } });
+  const provider = await prisma.liveTvProvider.findFirst({ where: { id: providerId, accountId: job.accountId }, include: { connections: { where: { enabled: true } }, epgSource: true } });
   if (!provider) throw new Error('Live TV provider was not found');
+  let epgSourceDiscovered = Boolean(provider.epgSource);
   const channelIndex = await loadLiveTvChannelImportIndex(prisma, job.accountId);
   await updateJobProgress(prisma, job, { stage: 'Henter M3U', current: 0, total: provider.connections.length, message: provider.name });
   let imported = 0;
@@ -46,8 +47,14 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
           });
         },
       });
-      const entries = parseM3u(text);
+      const document = parseM3uDocument(text);
+      const entries = document.entries;
       if (!entries.length) throw new Error('M3U-listen indeholder ingen gyldige HTTP-kanaler');
+      const discoveredEpgUrl = firstResolvedM3uEpgUrl(document.epgUrls, playlistUrl);
+      if (discoveredEpgUrl && !epgSourceDiscovered) {
+        await ensureDiscoveredEpgSource(prisma, job, providerId, discoveredEpgUrl);
+        epgSourceDiscovered = true;
+      }
       const seen: string[] = [];
       let processed = 0;
       let nextProgressAt = Date.now() + 5_000;
@@ -280,3 +287,47 @@ function sourceLimitError(limit: number) { return new Error(`Kilden overstiger s
 function sourceDownloadMessage(name: string, receivedBytes: number, totalBytes: number | null) { return `${name} · ${formatMebibytes(receivedBytes)}${totalBytes !== null ? ` / ${formatMebibytes(totalBytes)}` : ''}`; }
 function formatMebibytes(bytes: number) { return `${(bytes / MEBIBYTE).toFixed(bytes >= 10 * MEBIBYTE ? 0 : 1)} MiB`; }
 function safeError(error: unknown) { return error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000); }
+
+function firstResolvedM3uEpgUrl(epgUrls: string[], playlistUrl: string) {
+  for (const epgUrl of epgUrls) {
+    try {
+      const resolved = new URL(epgUrl, playlistUrl);
+      if (['http:', 'https:'].includes(resolved.protocol)) return resolved.toString();
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function ensureDiscoveredEpgSource(prisma: PrismaClient, job: LiveJob, providerId: string, epgUrl: string) {
+  await prisma.liveTvEpgSource.upsert({
+    where: { providerId },
+    create: {
+      accountId: job.accountId,
+      providerId,
+      encryptedUrl: encryptSecret(epgUrl) as unknown as Prisma.InputJsonValue,
+      enabled: true,
+      healthStatus: 'unknown',
+      lastError: null,
+    },
+    update: { enabled: true, healthStatus: 'unknown', lastError: null },
+  });
+  const active = await prisma.systemJob.findMany({
+    where: { accountId: job.accountId, type: 'live-tv.epg', status: { in: ['queued', 'running'] } },
+    take: 100,
+  });
+  if (active.some((pending) => (pending.payload as Record<string, unknown>)?.providerId === providerId)) return;
+  await prisma.$transaction([
+    prisma.systemJob.create({
+      data: {
+        accountId: job.accountId,
+        type: 'live-tv.epg',
+        status: 'queued',
+        maxAttempts: 3,
+        payload: { providerId, trigger: 'm3u_epg_discovery', sourceJobId: job.id },
+      },
+    }),
+    prisma.liveTvProvider.update({ where: { id: providerId }, data: { lastEpgQueuedAt: new Date() } }),
+  ]);
+}
