@@ -42,4 +42,26 @@ describe('series catalog aggregation', () => {
       _count: { _all: true },
     }));
   });
+
+  it('reuses category and library facets across catalog pages for the same account', async () => {
+    const prisma = {
+      $transaction: vi.fn().mockResolvedValue([[{ category: 'Drama' }], [{ id: 'library-1', name: 'Film', type: 'movie' }]]),
+      library: { findMany: vi.fn().mockResolvedValue([]) },
+      mediaItem: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+    };
+    const service = new CatalogService(prisma as never);
+
+    await service.listCatalog({ accountId: 'account-1' } as never, {
+      type: 'movie', page: 1, pageSize: 24, sort: 'newest',
+    });
+    await service.listCatalog({ accountId: 'account-1' } as never, {
+      type: 'movie', page: 2, pageSize: 24, sort: 'newest',
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+    expect(prisma.library.findMany).toHaveBeenCalledTimes(1);
+  });
 });

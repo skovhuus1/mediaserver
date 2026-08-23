@@ -14,12 +14,11 @@ export type ParsedXmlTv = {
 };
 
 export function parseM3u(content: string): ParsedM3uEntry[] {
-  const lines = content.replace(/^\uFEFF/, '').split(/\r?\n/);
   const entries: ParsedM3uEntry[] = [];
   let metadata: Record<string, string> | null = null;
   let displayName = '';
   let extGroup: string | null = null;
-  for (const raw of lines) {
+  for (const raw of iterateLines(content)) {
     const line = raw.trim();
     if (!line) continue;
     if (line.startsWith('#EXTINF:')) {
@@ -72,8 +71,19 @@ export function normalizeLiveTvIdentity(value: string): string {
 function clean(value: string | undefined) { const result = value?.trim(); return result ? result : null; }
 function attribute(value: string, name: string) { const match = value.match(new RegExp(`\\b${name}=(?:"([^"]*)"|'([^']*)')`, 'i')); return match ? decodeEntities(match[1] ?? match[2] ?? '') : null; }
 function tag(value: string, name: string) { const match = value.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)<\\/${name}>`, 'i')); return match ? decodeEntities(match[1]!.replace(/<[^>]+>/g, '').trim()) || null : null; }
-function tagAttribute(value: string, name: string, attr: string) { const match = value.match(new RegExp(`<${name}\\b([^>]*)\\/?\s*>`, 'i')); return match ? attribute(match[1]!, attr) : null; }
+function tagAttribute(value: string, name: string, attr: string) { const match = value.match(new RegExp(`<${name}\\b([^>]*)\\/?\\s*>`, 'i')); return match ? attribute(match[1]!, attr) : null; }
 function decodeEntities(value: string) { return value.replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(Number(code))); }
+function* iterateLines(content: string): Generator<string> {
+  let start = content.charCodeAt(0) === 0xFEFF ? 1 : 0;
+  while (start <= content.length) {
+    const newline = content.indexOf('\n', start);
+    const end = newline === -1 ? content.length : newline;
+    const lineEnd = end > start && content.charCodeAt(end - 1) === 13 ? end - 1 : end;
+    yield content.slice(start, lineEnd);
+    if (newline === -1) break;
+    start = newline + 1;
+  }
+}
 function xmlTvDate(value: string | null) {
   if (!value) return null;
   const match = value.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2})|\s*Z)?/);
