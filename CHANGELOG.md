@@ -14,6 +14,7 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 - Rettet API 24/25 playback-notifikation, Android 14 updater-receiver,
   TV-launcher-export, Ethernet-TV-kompatibilitet, no-backup-policy og PiP-transition.
 - Native Android lint er nu en obligatorisk Flutter-CI-gate.
+- Gradle-wrapperen er komplet versionsstyret for både Linux- og Windows-runners.
 
 ## 0.2.7 - 2026-08-23
 

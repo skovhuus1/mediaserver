@@ -22,6 +22,8 @@ hvis processen ikke overlever eller Android registrerer et app-crash.
 Native Android lint køres desuden mod `tvRelease`. Klienten understøtter minSdk 24,
 Ethernet-TV uden Wi-Fi-krav, eksplicit no-backup af tokens/offline-nøgler og de nyere
 Android-regler for dynamiske updater-receivere og eksporterede Leanback activities.
+Gradles Linux- og Windows-wrappers samt wrapper-JAR er versionsstyrede, så den samme
+native lint- og release-kæde kan køres reproducerbart lokalt og på GitHub Actions.
 
 ## Live TV fra M3U
 
