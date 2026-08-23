@@ -40,7 +40,7 @@ export default function LoginPage() {
       saveSession(result.accessToken, result.refreshToken);
       const session = await api<SessionUser>('/auth/me');
       const isAdmin = session.roles.some((role) => role === 'admin' || role === 'operator');
-      router.replace(isAdmin ? '/' : session.profiles.length > 1 ? '/profiles' : '/watch');
+      router.replace(safeNextPath(new URLSearchParams(window.location.search).get('next')) ?? (isAdmin ? '/' : session.profiles.length > 1 ? '/profiles' : '/watch'));
     } catch (failure) {
       const apiFailure = failure as ApiFailure;
       setError(apiFailure.message ?? 'Login mislykkedes');
@@ -67,4 +67,9 @@ export default function LoginPage() {
       <aside className="auth-art"><span /><div><b>Din server.</b><b>Dine medier.</b><b>Dine regler.</b></div></aside>
     </main>
   );
+}
+
+function safeNextPath(value: string | null): string | null {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) return null;
+  return value;
 }

@@ -90,6 +90,8 @@ M3U er som standard begrænset til 256 MiB og XMLTV til 200 MiB. Begge kilder l�
 - `DELETE /api/v1/live-tv/playback/:leaseId`
 - `GET/POST /api/v1/live-tv/recordings`
 - `GET /api/v1/live-tv/recordings/schedule-options`
+
+TV-klienter kan logge ind uden fjernbetjeningsindtastning via QR-flowet i `/api/v1/auth/tv/start`, `/api/v1/auth/tv/poll` og `/api/v1/auth/tv/approve`. QR-linket lander på `/login/tv`, hvor brugeren skal have en gyldig websession for at godkende TV’et.
 - `POST /api/v1/live-tv/recordings/:id/cancel`
 - `DELETE /api/v1/live-tv/recordings/:id`
 - `POST /api/v1/live-tv/recordings/:id/playback`
