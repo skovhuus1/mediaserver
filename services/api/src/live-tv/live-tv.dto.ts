@@ -14,6 +14,11 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  DEFAULT_ADMIN_CHANNEL_PAGE_SIZE,
+  MAX_ADMIN_CHANNEL_PAGE_SIZE,
+  MAX_ADMIN_LIVE_TV_CHANNELS,
+} from './live-tv-channel-catalog';
 
 const urlOptions = { protocols: ['http', 'https'], require_protocol: true, require_tld: false };
 
@@ -65,12 +70,25 @@ export class UpdateLiveTvChannelDto {
 export class BulkUpdateLiveTvChannelsDto {
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(1000)
+  @ArrayMaxSize(MAX_ADMIN_LIVE_TV_CHANNELS)
   @IsUUID('4', { each: true })
   channelIds!: string[];
 
   @IsIn(['show', 'hide'])
   action!: 'show' | 'hide';
+}
+
+export class ListAdminLiveTvChannelsDto {
+  @IsOptional() @IsString() @MaxLength(160) search?: string;
+  @IsOptional() @IsString() @MaxLength(120) group?: string;
+  @IsOptional() @IsIn(['all', 'visible', 'hidden']) visibility: 'all' | 'visible' | 'hidden' = 'all';
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) page = 1;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(MAX_ADMIN_CHANNEL_PAGE_SIZE) pageSize = DEFAULT_ADMIN_CHANNEL_PAGE_SIZE;
+}
+
+export class BulkUpdateLiveTvChannelGroupDto {
+  @IsString() @MaxLength(120) groupName!: string;
+  @IsIn(['show', 'hide']) action!: 'show' | 'hide';
 }
 
 export class UpdateLiveTvSourceDto {

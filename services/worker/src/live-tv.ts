@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { updateJobProgress } from './job-progress.js';
 import { parseM3u, parseXmlTv, normalizeLiveTvIdentity } from './live-tv-parsers.js';
-import { disableMissingLiveTvSources, forEachLiveTvEntryByIdentity } from './live-tv-import-batching.js';
+import { disableMissingLiveTvSources, forEachLiveTvEntryByIdentity, stableChannelNumber } from './live-tv-import-batching.js';
 import { decryptSecret, encryptSecret } from './secret-value.js';
 
 type LiveJob = SystemJob & { attemptNumber?: number };
@@ -65,7 +65,7 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
         if (!channel) channel = await prisma.liveTvChannel.create({ data: { accountId: job.accountId, canonicalKey: identity, tvgId: entry.tvgId,
           name: entry.tvgName ?? entry.name, number: entry.channelNumber, logoUrl: entry.logoUrl, groupName: entry.groupName } });
         else if (!channel.metadataLocked) channel = await prisma.liveTvChannel.update({ where: { id: channel.id }, data: {
-          tvgId: entry.tvgId ?? channel.tvgId, name: entry.tvgName ?? entry.name, number: entry.channelNumber ?? channel.number,
+          tvgId: entry.tvgId ?? channel.tvgId, name: entry.tvgName ?? entry.name, number: stableChannelNumber(channel.number, entry.channelNumber),
           logoUrl: entry.logoUrl ?? channel.logoUrl, groupName: entry.groupName ?? channel.groupName,
         } });
         await prisma.liveTvChannelSource.upsert({

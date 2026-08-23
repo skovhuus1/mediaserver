@@ -5,10 +5,18 @@ import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { encryptSecret, decryptSecret } from '../system/secret-value';
 import type {
-  BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto, UpdateLiveTvChannelDto,
-  UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto, UpdateLiveTvSourceDto,
+  BulkUpdateLiveTvChannelGroupDto, BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto,
+  ListAdminLiveTvChannelsDto, UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto,
+  UpdateLiveTvSourceDto,
 } from './live-tv.dto';
 import { changedChannelIds, uniqueChannelIds } from './live-tv-channel-visibility';
+import {
+  channelGroupFacets,
+  DEFAULT_ADMIN_CHANNEL_PAGE_SIZE,
+  MAX_ADMIN_CHANNEL_PAGE_SIZE,
+  MAX_ADMIN_LIVE_TV_CHANNELS,
+  visibilityCounts,
+} from './live-tv-channel-catalog';
 
 @Injectable()
 export class LiveTvService {
@@ -146,26 +154,69 @@ export class LiveTvService {
     return jobs.map((job) => ({ id: job.id, type: job.type, status: job.status, payload: job.payload, attemptCount: job.attemptCount, createdAt: job.createdAt, updatedAt: job.updatedAt }));
   }
 
-  async adminChannels(actor: AuthenticatedUser, search?: string, group?: string) {
-    const channels = await this.prisma.liveTvChannel.findMany({
-      where: { accountId: actor.accountId, ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}), ...(group ? { groupName: group } : {}) },
-      include: { sources: { include: { connection: { include: { provider: true } } }, orderBy: { priority: 'asc' } } },
-      orderBy: [{ sortOrder: 'asc' }, { number: 'asc' }, { name: 'asc' }], take: 1_000,
-    });
+  async adminChannels(actor: AuthenticatedUser, query: ListAdminLiveTvChannelsDto) {
+    const search = query.search?.trim();
+    const group = query.group?.trim();
+    const visibility = query.visibility ?? 'all';
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.min(MAX_ADMIN_CHANNEL_PAGE_SIZE, Math.max(1, query.pageSize ?? DEFAULT_ADMIN_CHANNEL_PAGE_SIZE));
+    const filteredWhere: Prisma.LiveTvChannelWhereInput = {
+      accountId: actor.accountId,
+      ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
+      ...(group ? { groupName: { contains: group, mode: 'insensitive' } } : {}),
+    };
+    const pageWhere: Prisma.LiveTvChannelWhereInput = {
+      ...filteredWhere,
+      ...(visibility === 'visible' ? { enabled: true } : visibility === 'hidden' ? { enabled: false } : {}),
+    };
+    const [channels, accountRows, filteredRows, groupRows] = await this.prisma.$transaction([
+      this.prisma.liveTvChannel.findMany({
+        where: pageWhere,
+        include: { sources: { include: { connection: { include: { provider: true } } }, orderBy: { priority: 'asc' } } },
+        orderBy: [{ sortOrder: 'asc' }, { number: 'asc' }, { name: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.liveTvChannel.groupBy({ by: ['enabled'], where: { accountId: actor.accountId }, orderBy: { enabled: 'asc' }, _count: { _all: true } }),
+      this.prisma.liveTvChannel.groupBy({ by: ['enabled'], where: filteredWhere, orderBy: { enabled: 'asc' }, _count: { _all: true } }),
+      this.prisma.liveTvChannel.groupBy({
+        by: ['groupName', 'enabled'],
+        where: { accountId: actor.accountId, groupName: { not: null } },
+        orderBy: [{ groupName: 'asc' }, { enabled: 'asc' }],
+        _count: { _all: true },
+      }),
+    ]);
+    const accountCounts = visibilityCounts(accountRows);
+    const filteredCounts = visibilityCounts(filteredRows);
+    const filteredTotal = visibility === 'visible'
+      ? filteredCounts.visible
+      : visibility === 'hidden'
+        ? filteredCounts.hidden
+        : filteredCounts.total;
     const duplicateMap = new Map<string, Array<{ id: string; name: string }>>();
     for (const channel of channels) {
       const key = comparableName(channel.name);
       duplicateMap.set(key, [...(duplicateMap.get(key) ?? []), { id: channel.id, name: channel.name }]);
     }
-    return channels.map((channel) => ({
-      id: channel.id, tvgId: channel.tvgId, name: channel.name, number: channel.number, logoUrl: channel.logoUrl,
-      groupName: channel.groupName, enabled: channel.enabled, isAdult: channel.isAdult, metadataLocked: channel.metadataLocked,
-      sortOrder: channel.sortOrder,
-      sources: channel.sources.map((source) => ({ id: source.id, sourceName: source.sourceName, enabled: source.enabled,
-        priority: source.priority, streamFormat: source.streamFormat, connectionId: source.connectionId,
-        connectionName: source.connection.name, providerId: source.connection.providerId, providerName: source.connection.provider.name })),
-      suspectedDuplicates: (duplicateMap.get(comparableName(channel.name)) ?? []).filter((candidate) => candidate.id !== channel.id),
-    }));
+    return {
+      items: channels.map((channel) => ({
+        id: channel.id, tvgId: channel.tvgId, name: channel.name, number: channel.number, logoUrl: channel.logoUrl,
+        groupName: channel.groupName, enabled: channel.enabled, isAdult: channel.isAdult, metadataLocked: channel.metadataLocked,
+        sortOrder: channel.sortOrder,
+        sources: channel.sources.map((source) => ({ id: source.id, sourceName: source.sourceName, enabled: source.enabled,
+          priority: source.priority, streamFormat: source.streamFormat, connectionId: source.connectionId,
+          connectionName: source.connection.name, providerId: source.connection.providerId, providerName: source.connection.provider.name })),
+        suspectedDuplicates: (duplicateMap.get(comparableName(channel.name)) ?? []).filter((candidate) => candidate.id !== channel.id),
+      })),
+      total: accountCounts.total,
+      visibleCount: accountCounts.visible,
+      hiddenCount: accountCounts.hidden,
+      filteredTotal,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(filteredTotal / pageSize)),
+      groups: channelGroupFacets(groupRows),
+    };
   }
 
   async updateChannel(actor: AuthenticatedUser, channelId: string, dto: UpdateLiveTvChannelDto) {
@@ -269,6 +320,28 @@ export class LiveTvService {
         changedCount: changedIds.length, releasedStreams, cancelledRecordings,
       };
     });
+  }
+
+  async bulkUpdateChannelGroup(actor: AuthenticatedUser, dto: BulkUpdateLiveTvChannelGroupDto) {
+    const groupName = dto.groupName.trim();
+    if (!groupName) throw new BadRequestException({ code: 'live_tv_group_required', message: 'Vælg en kanalgruppe' });
+    const channels = await this.prisma.liveTvChannel.findMany({
+      where: { accountId: actor.accountId, groupName: { equals: groupName, mode: 'insensitive' } },
+      select: { id: true },
+      take: MAX_ADMIN_LIVE_TV_CHANNELS + 1,
+    });
+    if (!channels.length) throw new NotFoundException({ code: 'live_tv_group_missing', message: 'Kanalgruppen blev ikke fundet' });
+    if (channels.length > MAX_ADMIN_LIVE_TV_CHANNELS) {
+      throw new BadRequestException({
+        code: 'live_tv_group_too_large',
+        message: `Gruppen overstiger grænsen på ${MAX_ADMIN_LIVE_TV_CHANNELS.toLocaleString('da-DK')} kanaler`,
+      });
+    }
+    const result = await this.bulkUpdateChannels(actor, {
+      channelIds: channels.map((channel) => channel.id),
+      action: dto.action,
+    });
+    return { ...result, groupName };
   }
 
   async updateSource(actor: AuthenticatedUser, sourceId: string, dto: UpdateLiveTvSourceDto) {

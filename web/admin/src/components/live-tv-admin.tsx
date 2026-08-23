@@ -11,16 +11,22 @@ type Connection = { id: string; name: string; enabled: boolean; priority: number
 type Provider = { id: string; name: string; enabled: boolean; priority: number; perUserStreamLimit: number; epg: null | { configured: boolean; enabled: boolean; url: string; healthStatus: string; lastError: string | null; lastImportedAt: string | null }; connections: Connection[] };
 type Source = { id: string; sourceName: string; enabled: boolean; priority: number; streamFormat: string; connectionName: string; providerName: string };
 type Channel = { id: string; name: string; number: number | null; logoUrl: string | null; groupName: string | null; enabled: boolean; isAdult: boolean; metadataLocked: boolean; sortOrder: number; sources: Source[]; suspectedDuplicates: Array<{ id: string; name: string }> };
+type ChannelGroup = { name: string; total: number; visible: number; hidden: number };
+type ChannelCatalog = { items: Channel[]; total: number; visibleCount: number; hiddenCount: number; filteredTotal: number; page: number; pageSize: number; totalPages: number; groups: ChannelGroup[] };
 type Job = { id: string; type: string; status: string; payload: { progress?: { stage?: string; percent?: number | null; current?: number | null; total?: number | null; message?: string | null } }; attemptCount: number; updatedAt: string };
 
 export function LiveTvAdmin() {
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [channels, setChannels] = useState<Channel[]>([]);
+  const [catalog, setCatalog] = useState<ChannelCatalog>({ items: [], total: 0, visibleCount: 0, hiddenCount: 0, filteredTotal: 0, page: 1, pageSize: 100, totalPages: 1, groups: [] });
   const [jobs, setJobs] = useState<Job[]>([]);
   const [search, setSearch] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [groupSearch, setGroupSearch] = useState('');
+  const [groupQuery, setGroupQuery] = useState('');
   const [visibility, setVisibility] = useState<'all' | 'visible' | 'hidden'>('all');
+  const [page, setPage] = useState(1);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [lastSelectedChannelId, setLastSelectedChannelId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,17 +34,22 @@ export function LiveTvAdmin() {
   const canWrite = user?.roles.includes('admin') ?? false;
 
   const load = useCallback(async () => {
+    const channelQuery = new URLSearchParams({ page: String(page), pageSize: '100', visibility });
+    if (searchQuery) channelQuery.set('search', searchQuery);
+    if (groupQuery) channelQuery.set('group', groupQuery);
     const [me, providerRows, channelRows, jobRows] = await Promise.all([
       api<SessionUser>('/auth/me'), api<Provider[]>('/live-tv/admin/providers'),
-      api<Channel[]>(`/live-tv/admin/channels${search ? `?search=${encodeURIComponent(search)}` : ''}`), api<Job[]>('/live-tv/admin/jobs'),
+      api<ChannelCatalog>(`/live-tv/admin/channels?${channelQuery.toString()}`), api<Job[]>('/live-tv/admin/jobs'),
     ]);
     if (!me.roles.some((role) => role === 'admin' || role === 'operator')) { router.replace('/watch'); return; }
-    setUser(me); setProviders(providerRows); setChannels(channelRows); setJobs(jobRows);
-    setSelectedChannelIds((current) => current.filter((id) => channelRows.some((channel) => channel.id === id)));
-  }, [router, search]);
+    setUser(me); setProviders(providerRows); setCatalog(channelRows); setJobs(jobRows);
+    setSelectedChannelIds((current) => current.filter((id) => channelRows.items.some((channel) => channel.id === id)));
+  }, [groupQuery, page, router, searchQuery, visibility]);
 
+  useEffect(() => { const timer = window.setTimeout(() => { setSearchQuery(search.trim()); setPage(1); }, 300); return () => window.clearTimeout(timer); }, [search]);
+  useEffect(() => { const timer = window.setTimeout(() => { setGroupQuery(groupSearch.trim()); setPage(1); }, 300); return () => window.clearTimeout(timer); }, [groupSearch]);
   useEffect(() => { void load().catch((failure) => setError(message(failure))); }, [load]);
-  useEffect(() => { const timer = window.setInterval(() => void load().catch(() => undefined), 3_000); return () => window.clearInterval(timer); }, [load]);
+  useEffect(() => { const timer = window.setInterval(() => void load().catch(() => undefined), 10_000); return () => window.clearInterval(timer); }, [load]);
 
   const action = async (key: string, operation: () => Promise<unknown>) => {
     setBusy(key); setError(null);
@@ -46,9 +57,10 @@ export function LiveTvAdmin() {
   };
 
   if (!user) return <main className="watch-loading" aria-busy="true">{error}</main>;
+  const channels = catalog.items;
   const activeLeases = providers.flatMap((provider) => provider.connections).reduce((sum, connection) => sum + connection.activeStreams, 0);
-  const visibleCount = channels.filter((channel) => channel.enabled).length;
-  const filteredChannels = channels.filter((channel) => visibility === 'all' || (visibility === 'visible' ? channel.enabled : !channel.enabled));
+  const visibleCount = catalog.visibleCount;
+  const filteredChannels = channels;
   const filteredChannelIds = filteredChannels.map((channel) => channel.id);
   const allFilteredSelected = filteredChannelIds.length > 0 && filteredChannelIds.every((id) => selectedChannelIds.includes(id));
   const bulkVisibility = (nextVisibility: 'show' | 'hide') => action(`bulk-${nextVisibility}`, async () => {
@@ -56,6 +68,13 @@ export function LiveTvAdmin() {
     setSelectedChannelIds([]);
     setLastSelectedChannelId(null);
   });
+  const exactGroup = catalog.groups.find((group) => group.name.localeCompare(groupQuery, 'da', { sensitivity: 'base' }) === 0) ?? null;
+  const bulkGroupVisibility = (nextVisibility: 'show' | 'hide') => {
+    if (!exactGroup) return Promise.resolve();
+    return action(`group-${nextVisibility}`, () => api('/live-tv/admin/channels/groups/visibility', {
+      method: 'PATCH', body: JSON.stringify({ groupName: exactGroup.name, action: nextVisibility }),
+    }));
+  };
   const selectChannel = (channelId: string, selected: boolean, extendRange: boolean) => {
     setSelectedChannelIds((current) => {
       const anchorIndex = lastSelectedChannelId ? filteredChannelIds.indexOf(lastSelectedChannelId) : -1;
@@ -70,7 +89,7 @@ export function LiveTvAdmin() {
     setLastSelectedChannelId(channelId);
   };
   return (
-    <AppShell rail={<LiveTvRail providers={providers} channels={channels} jobs={jobs} activeLeases={activeLeases} />}>
+    <AppShell rail={<LiveTvRail providers={providers} channelTotal={catalog.total} jobs={jobs} activeLeases={activeLeases} />}>
       <section className={styles.page}>
         <header className={styles.hero}><div><span>LIVE CONTROL PLANE</span><h1>Live TV</h1><p>M3U-puljer, kanalstyring, XMLTV og aktive tunerpladser.</p></div><Antenna aria-hidden="true" /></header>
         {error && <div className={styles.error} role="alert"><CircleAlert />{error}</div>}
@@ -79,13 +98,14 @@ export function LiveTvAdmin() {
         <section className={styles.providers}><header><div><span>KILDEPULJE</span><h2>Providers og M3U-linjer</h2></div><b>{activeLeases} aktive</b></header>
           <div className={styles.providerGrid}>{providers.map((provider) => <ProviderCard provider={provider} canWrite={canWrite} busy={busy} key={provider.id} onAction={action} />)}{!providers.length && <p className={styles.empty}>Opret den første provider ovenfor.</p>}</div>
         </section>
-        <section className={styles.channels}><header><div><span>KANALSTYRING</span><h2>{channels.length} importerede · {visibleCount} synlige</h2></div><input aria-label="Søg kanaler" onChange={(event) => setSearch(event.target.value)} placeholder="Søg kanal..." value={search} /></header>
+        <section className={styles.channels}><header><div><span>KANALSTYRING</span><h2>{catalog.total.toLocaleString('da-DK')} importerede · {visibleCount.toLocaleString('da-DK')} synlige</h2><small>{catalog.filteredTotal.toLocaleString('da-DK')} matcher det aktive filter</small></div><div className={styles.channelSearches}><input aria-label="Søg kanaler" onChange={(event) => setSearch(event.target.value)} placeholder="Søg kanal..." value={search} /><input aria-label="Søg kanalgrupper" list="live-tv-channel-groups" onChange={(event) => setGroupSearch(event.target.value)} placeholder="Søg gruppe..." value={groupSearch} /><datalist id="live-tv-channel-groups">{catalog.groups.map((group) => <option key={group.name} value={group.name}>{group.total} kanaler</option>)}</datalist></div></header>
           <div className={styles.channelToolbar}>
             <div className={styles.visibilityTabs} aria-label="Filtrer kanalvisning">
-              <button type="button" aria-pressed={visibility === 'all'} onClick={() => setVisibility('all')}>Alle <strong>{channels.length}</strong></button>
-              <button type="button" aria-pressed={visibility === 'visible'} onClick={() => setVisibility('visible')}><Eye size={15} />Synlige <strong>{visibleCount}</strong></button>
-              <button type="button" aria-pressed={visibility === 'hidden'} onClick={() => setVisibility('hidden')}><EyeOff size={15} />Skjulte <strong>{channels.length - visibleCount}</strong></button>
+              <button type="button" aria-pressed={visibility === 'all'} onClick={() => { setVisibility('all'); setPage(1); }}>Alle <strong>{catalog.total}</strong></button>
+              <button type="button" aria-pressed={visibility === 'visible'} onClick={() => { setVisibility('visible'); setPage(1); }}><Eye size={15} />Synlige <strong>{visibleCount}</strong></button>
+              <button type="button" aria-pressed={visibility === 'hidden'} onClick={() => { setVisibility('hidden'); setPage(1); }}><EyeOff size={15} />Skjulte <strong>{catalog.hiddenCount}</strong></button>
             </div>
+            {canWrite && exactGroup && <div className={styles.groupActions}><b>{exactGroup.name} · {exactGroup.total.toLocaleString('da-DK')}</b><button type="button" disabled={busy !== null || exactGroup.visible === exactGroup.total} onClick={() => void bulkGroupVisibility('show')}><Eye size={16} />Vis hele gruppen</button><button type="button" className={styles.hideAction} disabled={busy !== null || exactGroup.hidden === exactGroup.total} onClick={() => void bulkGroupVisibility('hide')}><EyeOff size={16} />Skjul hele gruppen</button></div>}
             {canWrite && <div className={styles.bulkActions}>
               <button type="button" disabled={filteredChannels.length === 0 || busy !== null} onClick={() => setSelectedChannelIds((current) => allFilteredSelected ? current.filter((id) => !filteredChannelIds.includes(id)) : [...new Set([...current, ...filteredChannelIds])])}><ListChecks size={16} />{allFilteredSelected ? 'Ryd viste' : 'Vælg viste'}</button>
               <span>{selectedChannelIds.length} valgt · Shift-klik for interval</span>
@@ -93,6 +113,7 @@ export function LiveTvAdmin() {
               <button type="button" className={styles.hideAction} disabled={selectedChannelIds.length === 0 || busy !== null} onClick={() => void bulkVisibility('hide')}><EyeOff size={16} />Skjul</button>
             </div>}
           </div>
+          <nav className={styles.pagination} aria-label="Kanalnavigation"><button type="button" disabled={page <= 1 || busy !== null} onClick={() => setPage((current) => Math.max(1, current - 1))}>Forrige</button><span>Side {page} af {catalog.totalPages}</span><button type="button" disabled={page >= catalog.totalPages || busy !== null} onClick={() => setPage((current) => Math.min(catalog.totalPages, current + 1))}>Næste</button></nav>
           <div className={styles.channelTable}>{filteredChannels.map((channel) => <ChannelRow channel={channel} canWrite={canWrite} busy={busy} key={channel.id} selected={selectedChannelIds.includes(channel.id)} onSelect={selectChannel} onAction={action} />)}{!filteredChannels.length && <p className={styles.empty}>Ingen kanaler matcher det valgte filter.</p>}</div>
         </section>
       </section>
@@ -120,6 +141,6 @@ function ChannelRow({ channel, canWrite, busy, selected, onSelect, onAction }: {
 }
 
 function JobRow({ job }: { job: Job }) { const progress = job.payload.progress; return <article className={styles.job} data-status={job.status}><span><b>{job.type === 'live-tv.import' ? 'M3U-import' : job.type === 'live-tv.epg' ? 'XMLTV' : 'Live stream'}</b><small>{progress?.stage ?? job.status} · {progress?.message ?? `forsøg ${job.attemptCount}`}</small></span><div><i style={{ width: `${progress?.percent ?? (job.status === 'completed' ? 100 : 8)}%` }} /></div><time>{date(job.updatedAt)}</time></article>; }
-function LiveTvRail({ providers, channels, jobs, activeLeases }: { providers: Provider[]; channels: Channel[]; jobs: Job[]; activeLeases: number }) { const running = jobs.filter((job) => ['queued', 'running'].includes(job.status)).length; return <><section className="rail-card"><div className="rail-title"><h3>Live TV-status</h3><Antenna /></div><dl className="status-list"><div><dt>Providers</dt><dd>{providers.length}</dd></div><div><dt>M3U-linjer</dt><dd>{providers.flatMap((provider) => provider.connections).length}</dd></div><div><dt>Kanaler</dt><dd>{channels.length}</dd></div><div><dt>Aktive streams</dt><dd>{activeLeases}</dd></div><div><dt>Opgaver</dt><dd>{running}</dd></div></dl></section></>; }
+function LiveTvRail({ providers, channelTotal, jobs, activeLeases }: { providers: Provider[]; channelTotal: number; jobs: Job[]; activeLeases: number }) { const running = jobs.filter((job) => ['queued', 'running'].includes(job.status)).length; return <><section className="rail-card"><div className="rail-title"><h3>Live TV-status</h3><Antenna /></div><dl className="status-list"><div><dt>Providers</dt><dd>{providers.length}</dd></div><div><dt>M3U-linjer</dt><dd>{providers.flatMap((provider) => provider.connections).length}</dd></div><div><dt>Kanaler</dt><dd>{channelTotal.toLocaleString('da-DK')}</dd></div><div><dt>Aktive streams</dt><dd>{activeLeases}</dd></div><div><dt>Opgaver</dt><dd>{running}</dd></div></dl></section></>; }
 function message(error: unknown) { return (error as ApiFailure)?.message ?? (error instanceof Error ? error.message : 'Live TV-handlingen fejlede.'); }
 function date(value: string) { return new Date(value).toLocaleString('da-DK', { dateStyle: 'short', timeStyle: 'short' }); }
