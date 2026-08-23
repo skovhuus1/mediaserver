@@ -140,6 +140,7 @@ services:
       BB_MEDIA_WORKER_MODE: transcode
       TRANSCODE_PATH: /transcode
       BB_MEDIA_TRANSCODE_MAX_CONCURRENT: ${BB_MEDIA_TRANSCODE_MAX_CONCURRENT:-1}
+      BB_MEDIA_LIVE_TV_PAUSE_BUFFER_SECONDS: ${BB_MEDIA_LIVE_TV_PAUSE_BUFFER_SECONDS:-7200}
     volumes:
       - ${MEDIA_PATH:-./media}:/media:ro
       - transcode_data:/transcode

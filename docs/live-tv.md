@@ -29,6 +29,8 @@ Reservationen holdes under en account-baseret PostgreSQL advisory lock. Inden en
 
 En lease har heartbeat og udløber automatisk efter tabt klientkontakt. Hurtigt kanalskift genbruger samme logiske lease og reserverer ikke en ekstra brugerplads.
 
+Aktive optagelser og aktive seersessioner deler de samme fysiske forbindelses- og brugerlofter. En PVR-reservation foretages under samme advisory lock, så to samtidige schedulere eller seere ikke kan tage den sidste forbindelse.
+
 ## Afspilning
 
 - Kompatibel HLS proxes direkte uden buffering.
@@ -36,13 +38,25 @@ En lease har heartbeat og udløber automatisk efter tabt klientkontakt. Hurtigt 
 - Hvis probe eller remux viser inkompatibel video, bruges H.264/AAC softwaretranscoding, når planen tillader det.
 - Streamjobbet stopper FFmpeg, når leasen frigives eller udløber.
 - Chromecast-handoff bevarer lease og får kun BoltBytes' absolutte, tokeniserede stream-URL.
-- Nginx-ruten `/api/v1/live-tv/stream/` har buffering slået fra og en times read/send-timeout.
+- Auto vælger Direct Stream HLS, når planen tillader det, så serveren kan holde en skjult, rullende pausebuffer på op til 2 timer. UI'et tilbyder Pause, Fortsæt og Gå til live; tilbagespoling er ikke eksponeret.
+- Nginx-ruterne for live-streams og optagelser har buffering slået fra, Range-understøttelse og 7.500 sekunders read/send-timeout.
+
+## PVR-optagelser
+
+- EPG-programmer kan planlægges på `/watch/recordings`; samme side understøtter manuel kanal, titel, start og slut.
+- Schedulerjobbet reserverer den bedst prioriterede, ledige kilde kort før programstart og markerer for sene jobs som mistet.
+- Workerens optagelse kører som et durable `live-tv.record`-job med lease renewal, progress og annulleringskontrol.
+- H.264 kopieres, mens anden video transkodes til H.264. Lyd normaliseres til AAC, og resultatet skrives som faststart-optimeret MP4 i den delte transcode-volume.
+- Afspilning kræver et kortlivet token, understøtter `HEAD` og `Range`/`206`, og providerens credentials returneres aldrig.
+- Ved streamfejl markeres den konkrete forbindelse som fejlet. Live-sessionens næste jobforsøg reserverer automatisk næste prioriterede kilde med ledig kapacitet.
 
 ## Konfiguration
 
 ```env
 BB_MEDIA_LIVE_TV_IMPORT_MAX_BYTES=52428800
 BB_MEDIA_LIVE_TV_EPG_MAX_BYTES=209715200
+BB_MEDIA_LIVE_TV_PAUSE_BUFFER_SECONDS=7200
+BB_MEDIA_LIVE_TV_RECORDING_SCHEDULER_SECONDS=15
 ```
 
 M3U er som standard begrænset til 50 MiB og XMLTV til 200 MiB. Workerens eksisterende `DATABASE_URL`, `ENCRYPTION_KEY`, FFmpeg og transcode-volume er påkrævet.
@@ -63,6 +77,12 @@ M3U er som standard begrænset til 50 MiB og XMLTV til 200 MiB. Workerens eksist
 - `POST /api/v1/live-tv/playback/:leaseId/switch`
 - `POST /api/v1/live-tv/playback/:leaseId/cast-handoff`
 - `DELETE /api/v1/live-tv/playback/:leaseId`
+- `GET/POST /api/v1/live-tv/recordings`
+- `GET /api/v1/live-tv/recordings/schedule-options`
+- `POST /api/v1/live-tv/recordings/:id/cancel`
+- `DELETE /api/v1/live-tv/recordings/:id`
+- `POST /api/v1/live-tv/recordings/:id/playback`
+- `GET/HEAD /api/v1/live-tv/recordings/:id/stream?token=...`
 
 ## Drift og fejlsøgning
 

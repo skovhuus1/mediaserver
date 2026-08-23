@@ -139,7 +139,7 @@ async function runFfmpegLive(prisma: PrismaClient, job: LiveJob, leaseId: string
     '-map', '0:v:0?', '-map', '0:a:0?', ...(method === 'transcode'
       ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2']
       : ['-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-ac', '2']),
-    '-f', 'hls', '-hls_time', '4', '-hls_list_size', '12', '-hls_flags', 'delete_segments+append_list+omit_endlist+independent_segments',
+    '-f', 'hls', '-hls_time', '4', '-hls_list_size', String(liveTvPauseSegmentCount()), '-hls_flags', 'delete_segments+append_list+omit_endlist+independent_segments',
     '-hls_segment_filename', resolve(output, 'segment-%08d.ts'), resolve(output, 'index.m3u8')];
   await new Promise<void>((resolveJob, rejectJob) => {
     const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -162,6 +162,12 @@ async function runFfmpegLive(prisma: PrismaClient, job: LiveJob, leaseId: string
     child.once('error', (error) => { clearInterval(timer); rejectJob(error); });
     child.once('close', (code) => { clearInterval(timer); if (stopping) resolveJob(); else rejectJob(new Error(`FFmpeg Live TV sluttede med kode ${code}: ${stderr.trim() || 'ingen diagnosticering'}`)); });
   });
+}
+
+export function liveTvPauseSegmentCount(raw = process.env.BB_MEDIA_LIVE_TV_PAUSE_BUFFER_SECONDS): number {
+  const parsed = Number.parseInt(raw?.trim() ?? '', 10);
+  const seconds = Math.max(60, Math.min(7_200, Number.isFinite(parsed) ? parsed : 7_200));
+  return Math.ceil(seconds / 4);
 }
 
 async function probeVideoCodec(url: string) {

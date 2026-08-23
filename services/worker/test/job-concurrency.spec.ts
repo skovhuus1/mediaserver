@@ -59,7 +59,7 @@ describe('worker job concurrency', () => {
       workerMode: 'transcode',
       activeJobTypes: ['library.scan', 'playback.transcode'],
       limits,
-    })).toEqual(['playback.transcode', 'offline.prepare', 'live-tv.stream']);
+    })).toEqual(['playback.transcode', 'offline.prepare', 'live-tv.stream', 'live-tv.record']);
     expect(claimableWorkerJobTypes({
       workerMode: 'transcode',
       activeJobTypes: ['playback.transcode', 'playback.transcode'],
@@ -68,6 +68,11 @@ describe('worker job concurrency', () => {
     expect(claimableWorkerJobTypes({
       workerMode: 'transcode',
       activeJobTypes: ['offline.prepare', 'playback.transcode'],
+      limits,
+    })).toEqual([]);
+    expect(claimableWorkerJobTypes({
+      workerMode: 'transcode',
+      activeJobTypes: ['live-tv.record', 'live-tv.stream'],
       limits,
     })).toEqual([]);
   });
