@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseApkSignerOutput, parseKeytoolFingerprint, validateArtifactSet } from "./android-release-evidence.mjs";
+import { assertAndroidShrinkerMapping } from "./assert-android-shrinker.mjs";
 
 const certificate = "a".repeat(64);
 const manifests = {
@@ -43,4 +44,16 @@ test("parses signing fingerprints", () => {
   assert.equal(parsed.verifiedV2, true);
   assert.equal(parsed.verifiedV3, true);
   assert.equal(parseKeytoolFingerprint("SHA256: AA:BB:CC"), "aabbcc");
+});
+
+test("requires the reflected WorkManager database constructor after R8", () => {
+  const header = "androidx.work.impl.WorkDatabase_Impl -> androidx.work.impl.WorkDatabase_Impl:";
+  assert.equal(
+    assertAndroidShrinkerMapping(`${header}\n    1:1:void <init>():45:45 -> <init>\nandroidx.work.impl.WorkLauncher -> a:`),
+    true,
+  );
+  assert.throws(
+    () => assertAndroidShrinkerMapping(`${header}\n    1:1:void clearAllTables():200:200 -> a\nandroidx.work.impl.WorkLauncher -> a:`),
+    /R8 fjernede WorkDatabase_Impl/,
+  );
 });

@@ -5,10 +5,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -36,12 +37,12 @@ class AppUpdateBridge(
     init {
         channel.setMethodCallHandler(this)
         val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            activity.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            activity.registerReceiver(receiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            activity,
+            receiver,
+            filter,
+            ContextCompat.RECEIVER_EXPORTED,
+        )
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -61,13 +62,13 @@ class AppUpdateBridge(
             activity.startActivity(
                 Intent(
                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.parse("package:${activity.packageName}"),
+                    "package:${activity.packageName}".toUri(),
                 ),
             )
             result.success(mapOf("permissionRequired" to true))
             return
         }
-        val request = DownloadManager.Request(Uri.parse(url))
+        val request = DownloadManager.Request(url.toUri())
             .setTitle("BoltBytes Media $version")
             .setDescription("Downloader signeret app-opdatering")
             .setMimeType("application/vnd.android.package-archive")

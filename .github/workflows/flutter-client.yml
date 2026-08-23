@@ -7,6 +7,7 @@ on:
       - "clients/mobile-tv/**"
       - "scripts/android-release-evidence.mjs"
       - "scripts/android-release-evidence.test.mjs"
+      - "scripts/assert-android-shrinker.mjs"
       - ".github/workflows/flutter-client.yml"
       - ".github/workflows/android-release.yml"
   pull_request:
@@ -14,6 +15,7 @@ on:
       - "clients/mobile-tv/**"
       - "scripts/android-release-evidence.mjs"
       - "scripts/android-release-evidence.test.mjs"
+      - "scripts/assert-android-shrinker.mjs"
       - ".github/workflows/flutter-client.yml"
       - ".github/workflows/android-release.yml"
 
@@ -49,6 +51,8 @@ jobs:
         run: flutter analyze
       - name: Test
         run: flutter test
+      - name: Native Android lint
+        run: cd android && ./gradlew --console=plain :app:lintTvRelease
       - name: Build mobile flavor
         run: >-
           flutter build apk --debug --flavor mobile
@@ -56,26 +60,30 @@ jobs:
           --dart-define=BB_MEDIA_DEVICE_TYPE=mobile
       - name: Build TV flavor
         run: >-
-          flutter build apk --debug --flavor tv
+          flutter build apk --release --flavor tv
           --build-name=0.1.0 --build-number=${{ github.run_number }}
           --dart-define=BB_MEDIA_DEVICE_TYPE=tv
+      - name: Verify TV release shrinker output
+        run: >-
+          node ../../scripts/assert-android-shrinker.mjs
+          build/app/outputs/mapping/tvRelease/mapping.txt
       - name: Prepare CI artifacts
         run: |
           mkdir -p build/ci-artifacts build/release-gate
           cp build/app/outputs/flutter-apk/app-mobile-debug.apk build/ci-artifacts/boltbytes-media-mobile-debug.apk
-          cp build/app/outputs/flutter-apk/app-tv-debug.apk build/ci-artifacts/boltbytes-media-tv-debug.apk
+          cp build/app/outputs/flutter-apk/app-tv-release.apk build/ci-artifacts/boltbytes-media-tv-release.apk
       - name: Certify merged Android manifests and artifacts
         run: >-
           node ../../scripts/android-release-evidence.mjs
           --mobile build/ci-artifacts/boltbytes-media-mobile-debug.apk
-          --tv build/ci-artifacts/boltbytes-media-tv-debug.apk
+          --tv build/ci-artifacts/boltbytes-media-tv-release.apk
           --version 0.1.0
           --build-number ${{ github.run_number }}
           --commit ${{ github.sha }}
           --repository ${{ github.repository }}
           --output-dir build/release-gate
           --allow-debug-signing true
-      - name: Upload certified debug artifacts
+      - name: Upload certified CI artifacts
         uses: actions/upload-artifact@v4
         with:
           name: boltbytes-android-debug-${{ github.run_number }}
