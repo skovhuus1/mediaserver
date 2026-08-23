@@ -22,6 +22,7 @@ export function LiveTvAdmin() {
   const [search, setSearch] = useState('');
   const [visibility, setVisibility] = useState<'all' | 'visible' | 'hidden'>('all');
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
+  const [lastSelectedChannelId, setLastSelectedChannelId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const canWrite = user?.roles.includes('admin') ?? false;
@@ -53,7 +54,21 @@ export function LiveTvAdmin() {
   const bulkVisibility = (nextVisibility: 'show' | 'hide') => action(`bulk-${nextVisibility}`, async () => {
     await api('/live-tv/admin/channels/bulk', { method: 'PATCH', body: JSON.stringify({ channelIds: selectedChannelIds, action: nextVisibility }) });
     setSelectedChannelIds([]);
+    setLastSelectedChannelId(null);
   });
+  const selectChannel = (channelId: string, selected: boolean, extendRange: boolean) => {
+    setSelectedChannelIds((current) => {
+      const anchorIndex = lastSelectedChannelId ? filteredChannelIds.indexOf(lastSelectedChannelId) : -1;
+      const channelIndex = filteredChannelIds.indexOf(channelId);
+      const affectedIds = extendRange && anchorIndex >= 0 && channelIndex >= 0
+        ? filteredChannelIds.slice(Math.min(anchorIndex, channelIndex), Math.max(anchorIndex, channelIndex) + 1)
+        : [channelId];
+      return selected
+        ? [...new Set([...current, ...affectedIds])]
+        : current.filter((id) => !affectedIds.includes(id));
+    });
+    setLastSelectedChannelId(channelId);
+  };
   return (
     <AppShell rail={<LiveTvRail providers={providers} channels={channels} jobs={jobs} activeLeases={activeLeases} />}>
       <section className={styles.page}>
@@ -73,12 +88,12 @@ export function LiveTvAdmin() {
             </div>
             {canWrite && <div className={styles.bulkActions}>
               <button type="button" disabled={filteredChannels.length === 0 || busy !== null} onClick={() => setSelectedChannelIds((current) => allFilteredSelected ? current.filter((id) => !filteredChannelIds.includes(id)) : [...new Set([...current, ...filteredChannelIds])])}><ListChecks size={16} />{allFilteredSelected ? 'Ryd viste' : 'Vælg viste'}</button>
-              <span>{selectedChannelIds.length} valgt</span>
+              <span>{selectedChannelIds.length} valgt · Shift-klik for interval</span>
               <button type="button" disabled={selectedChannelIds.length === 0 || busy !== null} onClick={() => void bulkVisibility('show')}><Eye size={16} />Vis</button>
               <button type="button" className={styles.hideAction} disabled={selectedChannelIds.length === 0 || busy !== null} onClick={() => void bulkVisibility('hide')}><EyeOff size={16} />Skjul</button>
             </div>}
           </div>
-          <div className={styles.channelTable}>{filteredChannels.map((channel) => <ChannelRow channel={channel} canWrite={canWrite} busy={busy} key={channel.id} selected={selectedChannelIds.includes(channel.id)} onSelect={(id, selected) => setSelectedChannelIds((current) => selected ? [...new Set([...current, id])] : current.filter((item) => item !== id))} onAction={action} />)}{!filteredChannels.length && <p className={styles.empty}>Ingen kanaler matcher det valgte filter.</p>}</div>
+          <div className={styles.channelTable}>{filteredChannels.map((channel) => <ChannelRow channel={channel} canWrite={canWrite} busy={busy} key={channel.id} selected={selectedChannelIds.includes(channel.id)} onSelect={selectChannel} onAction={action} />)}{!filteredChannels.length && <p className={styles.empty}>Ingen kanaler matcher det valgte filter.</p>}</div>
         </section>
       </section>
     </AppShell>
@@ -99,9 +114,9 @@ function ProviderCard({ provider, canWrite, busy, onAction }: { provider: Provid
   </article>;
 }
 
-function ChannelRow({ channel, canWrite, busy, selected, onSelect, onAction }: { channel: Channel; canWrite: boolean; busy: string | null; selected: boolean; onSelect: (id: string, selected: boolean) => void; onAction: (key: string, operation: () => Promise<unknown>) => Promise<void> }) {
+function ChannelRow({ channel, canWrite, busy, selected, onSelect, onAction }: { channel: Channel; canWrite: boolean; busy: string | null; selected: boolean; onSelect: (id: string, selected: boolean, extendRange: boolean) => void; onAction: (key: string, operation: () => Promise<unknown>) => Promise<void> }) {
   const patch = (payload: Record<string, unknown>) => onAction(`channel-${channel.id}`, () => api(`/live-tv/admin/channels/${channel.id}`, { method: 'PATCH', body: JSON.stringify(payload) }));
-  return <article className={styles.channelRow} data-disabled={!channel.enabled}><input className={styles.channelSelect} type="checkbox" checked={selected} disabled={!canWrite || busy !== null} aria-label={`Vælg ${channel.name}`} onChange={(event) => onSelect(channel.id, event.target.checked)} /><span className={styles.channelLogo}>{channel.logoUrl ? <img alt="" src={channel.logoUrl} /> : <Antenna />}</span><label>Nr.<input defaultValue={channel.number ?? ''} disabled={!canWrite} min="1" onBlur={(event) => { const value = Number(event.target.value); if (value && value !== channel.number) void patch({ number: value, metadataLocked: true }); }} type="number" /></label><label>Navn<input defaultValue={channel.name} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== channel.name) void patch({ name: event.target.value.trim(), metadataLocked: true }); }} /></label><label>Gruppe<input defaultValue={channel.groupName ?? ''} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== (channel.groupName ?? '')) void patch({ groupName: event.target.value.trim(), metadataLocked: true }); }} /></label><div className={styles.flags}><button aria-pressed={channel.enabled} disabled={!canWrite || busy !== null} onClick={() => void patch({ enabled: !channel.enabled })}>{channel.enabled ? <Check /> : <CircleAlert />}Aktiv</button><button aria-pressed={channel.isAdult} disabled={!canWrite || busy !== null} onClick={() => void patch({ isAdult: !channel.isAdult })}>18+</button></div><details className={styles.sources}><summary>{channel.sources.length} kilde(r)</summary>{channel.sources.map((source) => <div key={source.id}><span><b>{source.providerName}</b><small>{source.connectionName}</small></span><select disabled={!canWrite} onChange={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ streamFormat: event.target.value }) }))} value={source.streamFormat}><option value="auto">Auto</option><option value="hls">HLS</option><option value="mpegts">MPEG-TS</option></select><input aria-label="Kildeprioritet" defaultValue={source.priority} disabled={!canWrite} min="0" onBlur={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ priority: Number(event.target.value) }) }))} type="number" /></div>)}</details>{canWrite && channel.suspectedDuplicates.length > 0 && <select className={styles.merge} defaultValue="" onChange={(event) => { if (event.target.value) void onAction(`merge-${channel.id}`, () => api(`/live-tv/admin/channels/${channel.id}/merge`, { method: 'POST', body: JSON.stringify({ sourceChannelId: event.target.value }) })); }}><option value="">Flet mulig dublet...</option>{channel.suspectedDuplicates.map((duplicate) => <option key={duplicate.id} value={duplicate.id}>{duplicate.name}</option>)}</select>}</article>;
+  return <article className={styles.channelRow} data-disabled={!channel.enabled}><input className={styles.channelSelect} type="checkbox" checked={selected} disabled={!canWrite || busy !== null} aria-label={`Vælg ${channel.name}`} title="Hold Shift nede for at markere et interval" onChange={(event) => onSelect(channel.id, event.target.checked, (event.nativeEvent as MouseEvent).shiftKey)} /><span className={styles.channelLogo}>{channel.logoUrl ? <img alt="" src={channel.logoUrl} /> : <Antenna />}</span><label>Nr.<input defaultValue={channel.number ?? ''} disabled={!canWrite} min="1" onBlur={(event) => { const value = Number(event.target.value); if (value && value !== channel.number) void patch({ number: value, metadataLocked: true }); }} type="number" /></label><label>Navn<input defaultValue={channel.name} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== channel.name) void patch({ name: event.target.value.trim(), metadataLocked: true }); }} /></label><label>Gruppe<input defaultValue={channel.groupName ?? ''} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== (channel.groupName ?? '')) void patch({ groupName: event.target.value.trim(), metadataLocked: true }); }} /></label><div className={styles.flags}><button aria-pressed={channel.enabled} disabled={!canWrite || busy !== null} onClick={() => void patch({ enabled: !channel.enabled })}>{channel.enabled ? <Check /> : <CircleAlert />}Aktiv</button><button aria-pressed={channel.isAdult} disabled={!canWrite || busy !== null} onClick={() => void patch({ isAdult: !channel.isAdult })}>18+</button></div><details className={styles.sources}><summary>{channel.sources.length} kilde(r)</summary>{channel.sources.map((source) => <div key={source.id}><span><b>{source.providerName}</b><small>{source.connectionName}</small></span><select disabled={!canWrite} onChange={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ streamFormat: event.target.value }) }))} value={source.streamFormat}><option value="auto">Auto</option><option value="hls">HLS</option><option value="mpegts">MPEG-TS</option></select><input aria-label="Kildeprioritet" defaultValue={source.priority} disabled={!canWrite} min="0" onBlur={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ priority: Number(event.target.value) }) }))} type="number" /></div>)}</details>{canWrite && channel.suspectedDuplicates.length > 0 && <select className={styles.merge} defaultValue="" onChange={(event) => { if (event.target.value) void onAction(`merge-${channel.id}`, () => api(`/live-tv/admin/channels/${channel.id}/merge`, { method: 'POST', body: JSON.stringify({ sourceChannelId: event.target.value }) })); }}><option value="">Flet mulig dublet...</option>{channel.suspectedDuplicates.map((duplicate) => <option key={duplicate.id} value={duplicate.id}>{duplicate.name}</option>)}</select>}</article>;
 }
 
 function JobRow({ job }: { job: Job }) { const progress = job.payload.progress; return <article className={styles.job} data-status={job.status}><span><b>{job.type === 'live-tv.import' ? 'M3U-import' : job.type === 'live-tv.epg' ? 'XMLTV' : 'Live stream'}</b><small>{progress?.stage ?? job.status} · {progress?.message ?? `forsøg ${job.attemptCount}`}</small></span><div><i style={{ width: `${progress?.percent ?? (job.status === 'completed' ? 100 : 8)}%` }} /></div><time>{date(job.updatedAt)}</time></article>; }
