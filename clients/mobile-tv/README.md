@@ -17,6 +17,17 @@ flutter run --flavor tv --dart-define=BB_MEDIA_DEVICE_TYPE=tv
 
 Standardflavoren er `mobile`. Produktionsbuilds får server-URL og Cast App ID via beskyttet releasekonfiguration; slutbrugeren skal ikke indtaste en teknisk URL i det normale loginflow.
 
+## TV-oplevelse
+
+TV-flavoren bruger et separat leanback-layout for biblioteket:
+
+- kompakt venstre ikon-rail og topnavigation, så D-pad fokus ikke skal igennem lange tekstmenuer.
+- fuldskærms-hero med Afspil/Fortsæt og Mere info, koblet til de eksisterende playback- og titelsider.
+- statusstribe for Fortsæt, Film, Serier og 4K/HDR samt deduplikerede medierækker.
+- TV-kort med tydelig fokusring, større play-overlay og unikke Hero-tags pr. række, så anbefalinger med samme titel i flere rækker ikke konflikter.
+
+Mobil-layoutet bruger fortsat den kompakte touch-navigation.
+
 ## CI
 
 `flutter-client.yml` udfører formatkontrol, analyze, tests og bygger begge debug-flavors. Derefter kontrollerer `scripts/android-release-evidence.mjs` de faktisk mergede manifests, versionsdata, signaturer og at APK-hashene er forskellige.

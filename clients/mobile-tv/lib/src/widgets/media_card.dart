@@ -13,6 +13,7 @@ class MediaPosterCard extends StatefulWidget {
     this.width = 154,
     this.isTv = false,
     this.showMeta = true,
+    this.heroTag,
     this.onFocus,
     super.key,
   });
@@ -23,6 +24,7 @@ class MediaPosterCard extends StatefulWidget {
   final double width;
   final bool isTv;
   final bool showMeta;
+  final Object? heroTag;
   final ValueChanged<bool>? onFocus;
 
   @override
@@ -46,16 +48,17 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
       imageSize: 'w500',
     );
     final progress = media.progress?.percent.clamp(0, 100) ?? 0;
-    final posterHeight = widget.width * (widget.isTv ? 1.47 : 1.48);
-    final focusScale = _focused ? 1.07 : 1.0;
+    final posterHeight = widget.width * (widget.isTv ? 1.49 : 1.48);
+    final focusScale = _focused ? (widget.isTv ? 1.09 : 1.07) : 1.0;
     final titleStyle = _focused ? FontWeight.w800 : FontWeight.w700;
+    final radius = widget.isTv ? 14.0 : 18.0;
     final focusRing = _focused
         ? <BoxShadow>[
             BoxShadow(
-              color: const Color(0x99E4AA52),
-              blurRadius: 22,
-              spreadRadius: 1,
-              offset: const Offset(0, 8),
+              color: const Color(0xAAE4AA52),
+              blurRadius: widget.isTv ? 28 : 22,
+              spreadRadius: widget.isTv ? 1.4 : 1,
+              offset: const Offset(0, 10),
             ),
           ]
         : const <BoxShadow>[
@@ -68,7 +71,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
           ];
 
     return Hero(
-      tag: 'media-card-${media.id}-${widget.width}',
+      tag: widget.heroTag ?? 'media-card-${media.id}-${widget.width}',
       child: AnimatedScale(
         scale: focusScale,
         duration: const Duration(milliseconds: 170),
@@ -77,12 +80,16 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
           duration: const Duration(milliseconds: 180),
           width: widget.width,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            color: const Color(0xFF111A24),
+            borderRadius: BorderRadius.circular(radius),
+            color: widget.isTv
+                ? const Color(0xFF090C10)
+                : const Color(0xFF111A24),
             border: Border.all(
-              width: _focused ? 2.5 : 1,
+              width: _focused ? (widget.isTv ? 2.8 : 2.5) : 1,
               color: _focused
-                  ? Theme.of(context).colorScheme.secondary
+                  ? const Color(0xFFE4AA52)
+                  : widget.isTv
+                  ? const Color(0xFF20252D)
                   : const Color(0xFF2B3540),
             ),
             boxShadow: focusRing,
@@ -93,7 +100,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
             child: InkWell(
               onTap: widget.onPressed,
               autofocus: false,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(radius),
               focusColor: Colors.transparent,
               highlightColor: Colors.transparent,
               splashColor: Colors.transparent,
@@ -157,7 +164,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                                     ),
                                     child: const Icon(
                                       Icons.play_circle_filled_rounded,
-                                      size: 40,
+                                      size: 46,
                                       color: Colors.white,
                                       shadows: [
                                         Shadow(
@@ -220,7 +227,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                                 value: progress / 100,
                                 backgroundColor: Colors.white10,
                                 valueColor: AlwaysStoppedAnimation(
-                                  Theme.of(context).colorScheme.secondary,
+                                  const Color(0xFFE4AA52),
                                 ),
                               ),
                             ),
@@ -241,7 +248,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontWeight: titleStyle,
-                                fontSize: widget.isTv ? 16 : 14,
+                                fontSize: widget.isTv ? 15.5 : 14,
                                 height: 1.12,
                               ),
                             ),
