@@ -2,6 +2,15 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.7 - 2026-08-23
+
+- Hærder Android TV-opstart ved at deaktivere Impeller på TV-flavoren og bruge den bredt kompatible Skia-renderer.
+- Initialiserer ikke Google Cast-sender/provider på TV; Chromecast forbliver aktiv i mobilflavoren.
+- Isolerer fejl i native playback-, updater-, download- og crashbroer, så en valgfri subsystemfejl ikke lukker hele appen.
+- Fanger fejl fra krypteret lokal session under boot og falder tilbage til login med en synlig fejl i stedet for et process-crash.
+- Certificerer automatisk, at TV-APK'en har Impeller slået fra og ikke indeholder mobilens Cast-provider.
+- Udvider releaseværktøjet, så README-versionen opdateres og kontrolleres sammen med server- og Android-versionerne.
+
 ## 0.2.6 - 2026-08-23
 
 - Lader TV- og mobilplayerens aktuelle undertekstvalg følge automatisk episodeafspilning, selv når spor-id'er skifter mellem episoder.

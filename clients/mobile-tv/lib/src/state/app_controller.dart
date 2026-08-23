@@ -29,30 +29,54 @@ class AppController extends ChangeNotifier {
   bool get isAdmin => user?.roles.any((role) => role == 'admin') ?? false;
 
   Future<void> initialize() async {
-    serverUrl = AppConfig.normalizeApiUrl(
-      await storage.readServerUrl() ?? AppConfig.defaultApiUrl,
-    );
-    api.configureBaseUrl(serverUrl);
-    await api.restoreTokens();
-    if (!api.hasRefreshToken) {
-      stage = AppStage.login;
-      notifyListeners();
-      return;
-    }
     try {
+      serverUrl = AppConfig.normalizeApiUrl(
+        await storage.readServerUrl() ?? AppConfig.defaultApiUrl,
+      );
+      api.configureBaseUrl(serverUrl);
+      await api.restoreTokens();
+      if (!api.hasRefreshToken) {
+        stage = AppStage.login;
+        notifyListeners();
+        return;
+      }
       await api.refresh();
       await _loadUser();
-    } on ApiException catch (failure) {
+    } on ApiException catch (failure, stack) {
       if (failure.statusCode == 401 || failure.statusCode == 403) {
-        await api.clearLocalSession();
-        stage = AppStage.login;
+        try {
+          await api.clearLocalSession();
+          stage = AppStage.login;
+        } catch (storageFailure, storageStack) {
+          await _recoverStartup(storageFailure, storageStack);
+        }
       } else {
-        await _restoreOffline();
+        try {
+          await _restoreOffline();
+        } catch (_) {
+          await _recoverStartup(failure, stack);
+        }
       }
-    } catch (_) {
-      await _restoreOffline();
+    } catch (failure, stack) {
+      try {
+        await _restoreOffline();
+      } catch (_) {
+        await _recoverStartup(failure, stack);
+      }
     }
     notifyListeners();
+  }
+
+  Future<void> _recoverStartup(Object failure, StackTrace stack) async {
+    serverUrl = AppConfig.defaultApiUrl;
+    api.configureBaseUrl(serverUrl);
+    stage = AppStage.login;
+    error = 'Den lokale session kunne ikke åbnes. Log ind igen.';
+    await ClientTelemetry.instance.capture(
+      failure,
+      stack,
+      kind: 'startup_recovery',
+    );
   }
 
   Future<void> login({

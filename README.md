@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.5**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.2.7**. Se [CHANGELOG](CHANGELOG.md).
 
 ## Live TV fra M3U
 

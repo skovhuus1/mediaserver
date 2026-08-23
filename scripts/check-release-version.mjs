@@ -24,5 +24,7 @@ if (!flutterVersionMatch) {
   if (flutterVersionMatch[1] !== version) errors.push(`Flutter-klienten har ${flutterVersionMatch[1]}, forventede ${version}`);
   if (!/^\d+$/u.test(flutterVersionMatch[2] ?? '') || Number(flutterVersionMatch[2]) < 1) errors.push('Flutter-klienten mangler et positivt Android buildnummer');
 }
+const readme = await readFile(resolve(root, 'README.md'), 'utf8');
+if (!readme.includes(`Aktuel release: **${version}**`)) errors.push(`README.md viser ikke aktuel release ${version}`);
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log(`Releaseversion ${version} er konsistent i alle workspaces, lockfil, API-kontrakt og Flutter-klient.`);
+console.log(`Releaseversion ${version} er konsistent i workspaces, lockfil, API-kontrakt, Flutter-klient og README.`);

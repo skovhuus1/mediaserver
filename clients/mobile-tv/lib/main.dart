@@ -27,7 +27,7 @@ Future<void> main() async {
   };
   PlatformDispatcher.instance.onError = (error, stack) {
     unawaited(ClientTelemetry.instance.capture(error, stack));
-    return false;
+    return true;
   };
   final store = DeviceSessionStore();
   final api = ApiClient(baseUrl: AppConfig.defaultApiUrl, storage: store);

@@ -49,6 +49,11 @@ function hasRequiredFeature(manifest, name) {
   return tags.some((tag) => tag.includes(`android:name=\"${name}\"`) && tag.includes('android:required="true"'));
 }
 
+function hasMetadataValue(manifest, name, value) {
+  const tags = manifest.match(/<meta-data\b[^>]*>/g) ?? [];
+  return tags.some((tag) => tag.includes(`android:name=\"${name}\"`) && tag.includes(`android:value=\"${value}\"`));
+}
+
 export function validateArtifactSet({ mobile, tv, aab, expected, allowDebugSigning = false }) {
   const gates = [];
   const gate = (id, passed, detail) => gates.push({ id, passed: Boolean(passed), detail });
@@ -63,8 +68,11 @@ export function validateArtifactSet({ mobile, tv, aab, expected, allowDebugSigni
   }
   gate("mobile.launcher", mobile.manifest.includes("android.intent.category.LAUNCHER"), "Mobile exposes the touch launcher");
   gate("mobile.not_tv_launcher", !mobile.manifest.includes("android.intent.category.LEANBACK_LAUNCHER"), "Mobile does not expose the TV launcher");
+  gate("mobile.cast_provider", mobile.manifest.includes("com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"), "Mobile initializes the Google Cast sender provider");
   gate("tv.launcher", tv.manifest.includes("android.intent.category.LEANBACK_LAUNCHER"), "TV exposes the Leanback launcher");
   gate("tv.leanback_required", hasRequiredFeature(tv.manifest, "android.software.leanback"), "TV requires android.software.leanback");
+  gate("tv.impeller_disabled", hasMetadataValue(tv.manifest, "io.flutter.embedding.android.EnableImpeller", "false"), "TV disables Impeller for broad graphics-driver compatibility");
+  gate("tv.no_cast_provider", !tv.manifest.includes("com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"), "TV does not initialize the mobile Cast sender provider");
   gate("variants.distinct", mobile.sha256 !== tv.sha256, "Mobile and TV APK hashes differ");
   gate("variants.same_certificate", mobile.signing.certificateSha256 === tv.signing.certificateSha256, "Mobile and TV certificates match");
   if (aab) {
