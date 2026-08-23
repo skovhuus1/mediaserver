@@ -69,6 +69,8 @@ function LivePlayer({ channels, session, onClose, onError, onSession }: { channe
   const [paused, setPaused] = useState(false);
   const [pausedAt, setPausedAt] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(Date.now());
+  const [timeline, setTimeline] = useState({ start: 0, end: 0, current: 0, programBounded: false });
+  const timelineAnchorRef = useRef<{ wallClock: number; mediaTime: number } | null>(null);
   const [casting, setCasting] = useState(false);
   const activeIndex = channels.findIndex((channel) => channel.id === session.channel.id);
   const channel = channels[activeIndex] ?? { ...session.channel, favorite: false, groupName: null, programs: [] } as Channel;
@@ -93,6 +95,32 @@ function LivePlayer({ channels, session, onClose, onError, onSession }: { channe
   }, [goLive, pausedAt]);
 
   useEffect(() => {
+    timelineAnchorRef.current = { wallClock: Date.now(), mediaTime: Number.NaN };
+    setTimeline({ start: 0, end: 0, current: 0, programBounded: false });
+  }, [session.channel.id, session.streamUrl]);
+
+  useEffect(() => {
+    const update = () => {
+      const video = videoRef.current;
+      if (!video?.seekable.length) return;
+      const windowStart = video.seekable.start(0);
+      const liveEdge = video.seekable.end(video.seekable.length - 1);
+      const storedAnchor = timelineAnchorRef.current;
+      const anchor = storedAnchor && Number.isFinite(storedAnchor.mediaTime)
+        ? storedAnchor
+        : { wallClock: storedAnchor?.wallClock ?? Date.now(), mediaTime: windowStart };
+      timelineAnchorRef.current = anchor;
+      const programStart = current ? Date.parse(current.startsAt) : anchor.wallClock;
+      const programMediaTime = anchor.mediaTime + Math.max(0, (programStart - anchor.wallClock) / 1_000);
+      const programBounded = programStart > anchor.wallClock && programMediaTime <= liveEdge;
+      setTimeline({ start: Math.min(liveEdge, Math.max(windowStart, programMediaTime)), end: liveEdge, current: Math.max(windowStart, Math.min(liveEdge, video.currentTime)), programBounded });
+    };
+    update();
+    const timer = window.setInterval(update, 500);
+    return () => window.clearInterval(timer);
+  }, [current, session.channel.id, session.streamUrl]);
+
+  useEffect(() => {
     if (!['ready', 'active'].includes(session.status)) return;
     const video = videoRef.current; if (!video) return;
     hlsRef.current?.destroy();
@@ -114,12 +142,15 @@ function LivePlayer({ channels, session, onClose, onError, onSession }: { channe
   const cast = async () => { try { const handoff = await api<LiveSession>(`/live-tv/playback/leases/${session.leaseId}/cast-handoff`, { method: 'POST', body: JSON.stringify({ streamToken: session.streamToken }) }); await loadCast(handoff, channel); videoRef.current?.pause(); setCasting(true); onSession(handoff); } catch (failure) { onError(message(failure)); } };
 
   const pauseRemaining = Math.max(0, 7_200_000 - (pausedAt === null ? 0 : clockTick - pausedAt));
-  return <section className={styles.player} aria-label={`Afspiller ${channel.name}`}><video autoPlay playsInline ref={videoRef} onPause={() => { setPaused(true); setPausedAt((value) => value ?? Date.now()); }} onPlay={() => { setPaused(false); setPausedAt(null); }} /><div className={styles.playerShade} /><header><span>{channel.logoUrl ? <img alt="" src={channel.logoUrl} /> : <Antenna />}</span><div><small>LIVE · {session.method.replaceAll('_', ' ')}</small><h2>{channel.name}</h2><p>{current?.title ?? 'Programinformation afventer'}</p></div><button aria-label="Luk Live TV" onClick={() => void close()}><X /></button></header>{session.status === 'preparing' && <div className={styles.preparing}><span><Antenna /><i /></span><h2>Forbereder Live TV</h2><p>Finder en ledig M3U-forbindelse og klargør streamen...</p></div>}<footer><button aria-label="Forrige kanal" onClick={() => void switchTo(activeIndex - 1)}><ChevronLeft /></button><button aria-label={paused ? 'Fortsæt' : 'Pause'} className={styles.primary} onClick={() => { const video = videoRef.current; if (!video) return; if (video.paused) void video.play(); else video.pause(); }}>{paused ? <Play fill="currentColor" /> : <Pause fill="currentColor" />}</button><button aria-label="Næste kanal" onClick={() => void switchTo(activeIndex + 1)}><ChevronRight /></button><span><b>{channel.number ?? '•'} · {channel.name}</b><small>{paused ? `Sat på pause · ${duration(pauseRemaining)} tilbage` : current ? `${clock(current.startsAt)}–${clock(current.endsAt)} · ${current.title}` : 'Live TV'}</small></span>{paused && <button className={styles.liveButton} onClick={goLive}><Radio />Gå til live</button>}<button aria-label="Afspil på Chromecast" className={styles.cast} onClick={() => void cast()}><Cast />{casting ? 'Caster' : 'Cast'}</button></footer></section>;
+  const behindLiveSeconds = Math.max(0, timeline.end - timeline.current);
+  const seek = (value: number) => { const video = videoRef.current; if (video) video.currentTime = Math.max(timeline.start, Math.min(timeline.end, value)); };
+  return <section className={styles.player} aria-label={`Afspiller ${channel.name}`}><video autoPlay playsInline ref={videoRef} onPause={() => { setPaused(true); setPausedAt((value) => value ?? Date.now()); }} onPlay={() => { setPaused(false); setPausedAt(null); }} /><div className={styles.playerShade} /><header><span>{channel.logoUrl ? <img alt="" src={channel.logoUrl} /> : <Antenna />}</span><div><small>LIVE · {session.method.replaceAll('_', ' ')}</small><h2>{channel.name}</h2><p>{current?.title ?? 'Programinformation afventer'}</p></div><button aria-label="Luk Live TV" onClick={() => void close()}><X /></button></header>{session.status === 'preparing' && <div className={styles.preparing}><span><Antenna /><i /></span><h2>Forbereder Live TV</h2><p>Finder en ledig M3U-forbindelse og klargør streamen...</p></div>}<footer><div className={styles.timeline}><button disabled={timeline.end <= timeline.start} onClick={() => seek(timeline.start)}>{timeline.programBounded ? 'Programstart' : 'Streamstart'}</button><input aria-label="Live TV-tidslinje" disabled={timeline.end <= timeline.start} max={timeline.end || 1} min={timeline.start} onChange={(event) => seek(Number(event.target.value))} step="1" type="range" value={timeline.current} /><span>{behindLiveSeconds <= 3 ? 'LIVE' : `${shortDuration(behindLiveSeconds)} bag live`}</span></div><button aria-label="Forrige kanal" onClick={() => void switchTo(activeIndex - 1)}><ChevronLeft /></button><button aria-label={paused ? 'Fortsæt' : 'Pause'} className={styles.primary} onClick={() => { const video = videoRef.current; if (!video) return; if (video.paused) void video.play(); else video.pause(); }}>{paused ? <Play fill="currentColor" /> : <Pause fill="currentColor" />}</button><button aria-label="Næste kanal" onClick={() => void switchTo(activeIndex + 1)}><ChevronRight /></button><span><b>{channel.number ?? '•'} · {channel.name}</b><small>{paused ? `Sat på pause · ${duration(pauseRemaining)} tilbage` : current ? `${clock(current.startsAt)}–${clock(current.endsAt)} · ${current.title}` : 'Live TV'}</small></span>{(paused || behindLiveSeconds > 3) && <button className={styles.liveButton} onClick={goLive}><Radio />Gå til live</button>}<button aria-label="Afspil på Chromecast" className={styles.cast} onClick={() => void cast()}><Cast />{casting ? 'Caster' : 'Cast'}</button></footer></section>;
 }
 
 type CastWindow = Window & { cast?: { framework?: { CastContext: { getInstance(): { setOptions(options: object): void; requestSession(): Promise<void>; getCurrentSession(): { loadMedia(request: object): Promise<void> } | null } }; AutoJoinPolicy?: { ORIGIN_SCOPED: string } } }; chrome?: { cast?: { AutoJoinPolicy?: { ORIGIN_SCOPED: string }; media?: { DEFAULT_MEDIA_RECEIVER_APP_ID: string; MediaInfo: new (url: string, type: string) => { metadata?: object; streamType?: string; customData?: object }; GenericMediaMetadata: new () => { title?: string; subtitle?: string }; LoadRequest: new (media: object) => object; StreamType: { LIVE: string } } } } };
 async function loadCast(session: LiveSession, channel: Channel) { if (!window.isSecureContext) throw new Error('Chromecast kræver HTTPS.'); const castWindow = window as CastWindow; const framework = castWindow.cast?.framework; const media = castWindow.chrome?.cast?.media; if (!framework || !media) throw new Error('Google Cast Framework er ikke klar. Prøv igen om et øjeblik.'); const context = framework.CastContext.getInstance(); context.setOptions({ receiverApplicationId: process.env.NEXT_PUBLIC_CAST_RECEIVER_APP_ID?.trim() || media.DEFAULT_MEDIA_RECEIVER_APP_ID, autoJoinPolicy: castWindow.chrome?.cast?.AutoJoinPolicy?.ORIGIN_SCOPED ?? framework.AutoJoinPolicy?.ORIGIN_SCOPED ?? 'origin_scoped' }); if (!context.getCurrentSession()) await context.requestSession(); const castSession = context.getCurrentSession(); if (!castSession) throw new Error('Chromecast-sessionen kunne ikke oprettes.'); const info = new media.MediaInfo(session.streamUrl, session.contentType); const metadata = new media.GenericMediaMetadata(); metadata.title = channel.name; metadata.subtitle = channel.programs.find((program) => Date.parse(program.startsAt) <= Date.now() && Date.parse(program.endsAt) > Date.now())?.title ?? 'Live TV'; info.metadata = metadata; info.streamType = media.StreamType.LIVE; info.customData = { heartbeatUrl: session.heartbeatUrl, releaseUrl: session.releaseUrl, title: channel.name, subtitle: metadata.subtitle, posterUrl: channel.logoUrl, methodLabel: 'Live TV', currentBitrate: null, currentHeight: null, subtitleTrack: null, timelineOffsetMs: 0, fullDurationMs: null }; await castSession.loadMedia(new media.LoadRequest(info)); }
 function clock(value: string) { return new Date(value).toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' }); }
 function duration(value: number) { const minutes = Math.ceil(value / 60_000); return `${Math.floor(minutes / 60)} t ${String(minutes % 60).padStart(2, '0')} min`; }
+function shortDuration(value: number) { const seconds = Math.max(0, Math.round(value)); return seconds < 60 ? `${seconds} sek.` : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }
 function bufferAhead(video: HTMLVideoElement | null) { if (!video) return 0; for (let index = 0; index < video.buffered.length; index += 1) if (video.currentTime >= video.buffered.start(index) && video.currentTime <= video.buffered.end(index)) return Math.round((video.buffered.end(index) - video.currentTime) * 1000); return 0; }
 function message(error: unknown) { return (error as ApiFailure)?.message ?? (error instanceof Error ? error.message : 'Live TV-handlingen fejlede.'); }

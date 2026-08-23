@@ -38,7 +38,7 @@ Aktive optagelser og aktive seersessioner deler de samme fysiske forbindelses- o
 - Hvis probe eller remux viser inkompatibel video, bruges H.264/AAC softwaretranscoding, når planen tillader det.
 - Streamjobbet stopper FFmpeg, når leasen frigives eller udløber.
 - Chromecast-handoff bevarer lease og får kun BoltBytes' absolutte, tokeniserede stream-URL.
-- Auto vælger Direct Stream HLS, når planen tillader det, så serveren kan holde en skjult, rullende pausebuffer på op til 2 timer. UI'et tilbyder Pause, Fortsæt og Gå til live; tilbagespoling er ikke eksponeret.
+- Auto vælger Direct Stream HLS, når planen tillader det, så serveren kan holde en sessionsafgrænset pausebuffer på op til 2 timer. Kunden kan spole tilbage til kanalstart eller til det aktuelle programs start, når dette punkt allerede findes i den aktive buffer. Bufferen oprettes først ved kanalstart, stopper med leasen og er ikke en permanent 24/7-timeshift-optagelse.
 - Nginx-ruterne for live-streams og optagelser har buffering slået fra, Range-understøttelse og 7.500 sekunders read/send-timeout.
 
 ## PVR-optagelser
