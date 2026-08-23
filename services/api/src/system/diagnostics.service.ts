@@ -9,6 +9,7 @@ import { type DiagnosticCheck, storageDiagnosticState, summarizeDiagnostics } fr
 import { resolveLibraryWatcherStatus } from './library-watcher-status';
 import { resolveTranscoderStatus } from './transcoder-status';
 import { UpdaterService } from './updater.service';
+import { corsAllowsPublicUrl, readCorsOrigins } from '../config/environment';
 
 type TimedResult<T> = { ok: true; value: T; latencyMs: number } | { ok: false; error: string; latencyMs: number };
 
@@ -118,14 +119,15 @@ export class DiagnosticsService {
 
     const effectivePublicUrl = process.env.BB_MEDIA_PUBLIC_URL?.trim() || account?.externalUrl?.trim() || null;
     const securePublicUrl = Boolean(effectivePublicUrl?.startsWith('https://') && !/localhost|127\.0\.0\.1/i.test(effectivePublicUrl));
-    const corsOrigins = (process.env.CORS_ORIGIN ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+    const corsOrigins = readCorsOrigins(process.env.CORS_ORIGIN, process.env.BB_MEDIA_PUBLIC_URL);
+    const corsConfigured = corsAllowsPublicUrl(corsOrigins, effectivePublicUrl);
     checks.push({
       id: 'public-url',
       group: 'Netværk og sikkerhed',
       label: 'Public URL og Cast',
-      state: securePublicUrl && effectivePublicUrl && corsOrigins.includes(effectivePublicUrl) ? 'ok' : securePublicUrl ? 'warning' : 'error',
-      summary: !securePublicUrl ? 'En offentlig HTTPS-URL mangler; Cast og eksterne stream-URLer er ikke sikre.' : corsOrigins.includes(effectivePublicUrl!) ? `${effectivePublicUrl} er klar til HTTPS, CORS og Cast.` : 'Public URL bruger HTTPS, men findes ikke i CORS_ORIGIN.',
-      details: { serverName: account?.serverName ?? null, effectivePublicUrl, corsConfigured: Boolean(effectivePublicUrl && corsOrigins.includes(effectivePublicUrl)), castReady: securePublicUrl },
+      state: securePublicUrl && corsConfigured ? 'ok' : securePublicUrl ? 'warning' : 'error',
+      summary: !securePublicUrl ? 'En offentlig HTTPS-URL mangler; Cast og eksterne stream-URLer er ikke sikre.' : corsConfigured ? `${effectivePublicUrl} er klar til HTTPS, CORS og Cast.` : 'Public URL bruger HTTPS, men findes ikke i den effektive CORS allow-list.',
+      details: { serverName: account?.serverName ?? null, effectivePublicUrl, corsConfigured, castReady: securePublicUrl, corsOriginCount: corsOrigins.length, corsOriginList: corsOrigins.join(', ') },
     });
 
     const secretsReady = Boolean(process.env.JWT_SECRET?.trim() && process.env.ENCRYPTION_KEY?.trim());

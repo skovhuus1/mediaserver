@@ -14,6 +14,33 @@ export type Environment = {
   mediaHostPath: string;
 };
 
+export function publicUrlOrigin(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readCorsOrigins(rawCorsOrigin: string | undefined, publicUrl: string | undefined): string[] {
+  const configured = rawCorsOrigin ?? 'http://localhost:5555';
+  const origins = configured
+    .split(',')
+    .map((origin) => normalizeCorsOrigin(origin))
+    .filter((origin): origin is string => Boolean(origin));
+  const publicOrigin = publicUrlOrigin(publicUrl);
+  if (publicOrigin) origins.push(publicOrigin);
+  return [...new Set(origins)];
+}
+
+export function corsAllowsPublicUrl(corsOrigins: string[], publicUrl: string | null | undefined): boolean {
+  const origin = publicUrlOrigin(publicUrl);
+  return Boolean(origin && (corsOrigins.includes(origin) || corsOrigins.includes('*')));
+}
+
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
@@ -42,10 +69,7 @@ export function readEnvironment(): Environment {
     apiPort: boundedInteger('API_PORT', 3001, 1, 65535),
     databaseUrl: required('DATABASE_URL'),
     redisUrl: required('REDIS_URL'),
-    corsOrigins: (process.env.CORS_ORIGIN ?? 'http://localhost:5555')
-      .split(',')
-      .map((origin) => origin.trim())
-      .filter(Boolean),
+    corsOrigins: readCorsOrigins(process.env.CORS_ORIGIN, process.env.BB_MEDIA_PUBLIC_URL),
     jwtSecret,
     jwtAccessTtlSeconds: boundedInteger('JWT_ACCESS_TTL_SECONDS', 900, 60, 86400),
     jwtRefreshTtlDays: boundedInteger('JWT_REFRESH_TTL_DAYS', 30, 1, 365),
@@ -55,4 +79,11 @@ export function readEnvironment(): Environment {
     mediaMountPath: process.env.MEDIA_MOUNT_PATH?.trim() || process.env.MEDIA_PATH?.trim() || '/media',
     mediaHostPath: process.env.MEDIA_PATH?.trim() || '/media',
   };
+}
+
+function normalizeCorsOrigin(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed === '*') return trimmed;
+  return publicUrlOrigin(trimmed) ?? trimmed.replace(/\/+$/u, '');
 }

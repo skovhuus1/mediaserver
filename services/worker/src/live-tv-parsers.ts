@@ -8,22 +8,38 @@ export type ParsedM3uEntry = {
   channelNumber: number | null;
 };
 
+export type ParsedM3uDocument = {
+  entries: ParsedM3uEntry[];
+  epgUrls: string[];
+};
+
 export type ParsedXmlTv = {
   channels: Map<string, { name: string | null; logoUrl: string | null }>;
   programs: Array<{ channelExternalId: string; startsAt: Date; endsAt: Date; title: string; subtitle: string | null; description: string | null; category: string | null; iconUrl: string | null; episode: string | null }>;
 };
 
 export function parseM3u(content: string): ParsedM3uEntry[] {
+  return parseM3uDocument(content).entries;
+}
+
+export function parseM3uDocument(content: string): ParsedM3uDocument {
   const entries: ParsedM3uEntry[] = [];
+  const epgUrls: string[] = [];
   let metadata: Record<string, string> | null = null;
   let displayName = '';
   let extGroup: string | null = null;
   for (const raw of iterateLines(content)) {
     const line = raw.trim();
     if (!line) continue;
+    if (line.startsWith('#EXTM3U')) {
+      const header = parseAttributes(line);
+      for (const key of ['url-tvg', 'x-tvg-url', 'tvg-url']) {
+        for (const url of splitEpgUrls(header[key])) epgUrls.push(url);
+      }
+      continue;
+    }
     if (line.startsWith('#EXTINF:')) {
-      metadata = {};
-      for (const match of line.matchAll(/([A-Za-z0-9_-]+)="([^"]*)"/g)) metadata[match[1]!.toLowerCase()] = decodeEntities(match[2]!);
+      metadata = parseAttributes(line);
       const comma = line.indexOf(',');
       displayName = decodeEntities(comma >= 0 ? line.slice(comma + 1).trim() : metadata['tvg-name'] ?? 'Ukendt kanal');
       extGroup = null;
@@ -40,7 +56,7 @@ export function parseM3u(content: string): ParsedM3uEntry[] {
       channelNumber: Number.isInteger(number) && number > 0 ? number : null });
     metadata = null; displayName = ''; extGroup = null;
   }
-  return entries;
+  return { entries, epgUrls: [...new Set(epgUrls)] };
 }
 
 export function parseXmlTv(content: string): ParsedXmlTv {
@@ -65,6 +81,16 @@ export function parseXmlTv(content: string): ParsedXmlTv {
 }
 
 function clean(value: string | undefined) { const result = value?.trim(); return result ? result : null; }
+function parseAttributes(value: string) {
+  const result: Record<string, string> = {};
+  for (const match of value.matchAll(/([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    result[match[1]!.toLowerCase()] = decodeEntities(match[2] ?? match[3] ?? '');
+  }
+  return result;
+}
+function splitEpgUrls(value: string | undefined) {
+  return (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+}
 function attribute(value: string, name: string) { const match = value.match(new RegExp(`\\b${name}=(?:"([^"]*)"|'([^']*)')`, 'i')); return match ? decodeEntities(match[1] ?? match[2] ?? '') : null; }
 function tag(value: string, name: string) { const match = value.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)<\\/${name}>`, 'i')); return match ? decodeEntities(match[1]!.replace(/<[^>]+>/g, '').trim()) || null : null; }
 function tagAttribute(value: string, name: string, attr: string) { const match = value.match(new RegExp(`<${name}\\b([^>]*)\\/?\\s*>`, 'i')); return match ? attribute(match[1]!, attr) : null; }
