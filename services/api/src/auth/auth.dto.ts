@@ -63,3 +63,58 @@ export class CompletePasswordChangeDto {
   @MinLength(12)
   newPassword!: string;
 }
+
+export class StartTvLoginDto {
+  @IsString()
+  @Length(8, 160)
+  deviceFingerprint!: string;
+
+  @IsString()
+  @Length(1, 100)
+  deviceName!: string;
+
+  @IsString()
+  @Length(1, 40)
+  deviceType!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  platform?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  appVersion?: string;
+}
+
+export class PollTvLoginDto {
+  @IsUUID()
+  pairingId!: string;
+
+  @IsString()
+  @MinLength(32)
+  pollToken!: string;
+}
+
+export class ApproveTvLoginDto {
+  @IsOptional()
+  @IsString()
+  @Length(32, 160)
+  approveToken?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(6, 16)
+  @Matches(/^[A-Z0-9-]+$/i)
+  userCode?: string;
+
+  @IsOptional()
+  @IsUUID()
+  profileId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4,8}$/)
+  profilePin?: string;
+}

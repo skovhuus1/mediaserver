@@ -4,7 +4,15 @@ import { Throttle } from '@nestjs/throttler';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Public } from '../common/auth';
 import { AuthService } from './auth.service';
-import { CompletePasswordChangeDto, LoginDto, LogoutDto, RefreshDto } from './auth.dto';
+import {
+  ApproveTvLoginDto,
+  CompletePasswordChangeDto,
+  LoginDto,
+  LogoutDto,
+  PollTvLoginDto,
+  RefreshDto,
+  StartTvLoginDto,
+} from './auth.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -33,6 +41,29 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   completePasswordChange(@Body() dto: CompletePasswordChangeDto) {
     return this.auth.completePasswordChange(dto);
+  }
+
+  @Public()
+  @Post('tv/start')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  startTvLogin(@Body() dto: StartTvLoginDto) {
+    return this.auth.startTvLogin(dto);
+  }
+
+  @Public()
+  @Post('tv/poll')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  pollTvLogin(@Body() dto: PollTvLoginDto) {
+    return this.auth.pollTvLogin(dto);
+  }
+
+  @Post('tv/approve')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  approveTvLogin(@CurrentUser() actor: AuthenticatedUser, @Body() dto: ApproveTvLoginDto) {
+    return this.auth.approveTvLogin(actor, dto);
   }
 
   @Post('logout')

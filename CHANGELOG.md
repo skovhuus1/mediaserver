@@ -2,6 +2,12 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.4 - 2026-08-23
+
+- Tilføjer server-side QR/TV-login med `start`, `poll` og `approve`, separat poll-token til TV’et og separat approve-token til QR-linket.
+- TV-login udsteder først access/refresh-token én gang, når en allerede logget ind bruger har godkendt QR’en, og auditlogger både godkendelse og forbrug uden at logge hemmelige tokens.
+- Tilføjer `/login/tv` godkendelsesside, så QR-linket ikke peger på et dødt endpoint.
+
 ## 0.2.3 - 2026-08-23
 
 - Tilføjer server-side `Skjul alle` og `Vis alle` i Live TV-kanalstyringen via et account-scopet bulk-endpoint, så hele kataloget kan ændres uden at sende op til 50.000 kanal-id'er gennem browseren.

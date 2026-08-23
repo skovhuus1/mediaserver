@@ -276,6 +276,33 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+model TvLoginPairing {
+  id                String    @id @default(uuid())
+  approveTokenHash  String    @unique @map("approve_token_hash")
+  pollTokenHash     String    @unique @map("poll_token_hash")
+  userCodeHash      String    @unique @map("user_code_hash")
+  status            String    @default("pending")
+  accountId         String?   @map("account_id")
+  userId            String?   @map("user_id")
+  profileId         String?   @map("profile_id")
+  deviceId          String?   @map("device_id")
+  refreshTokenId    String?   @map("refresh_token_id")
+  deviceFingerprint String    @map("device_fingerprint")
+  deviceName        String    @map("device_name")
+  deviceType        String    @map("device_type")
+  platform          String?
+  appVersion        String?   @map("app_version")
+  expiresAt         DateTime  @map("expires_at")
+  approvedAt        DateTime? @map("approved_at")
+  consumedAt        DateTime? @map("consumed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, expiresAt])
+  @@index([accountId, userId, status])
+  @@map("tv_login_pairings")
+}
+
 model Plan {
   id           String        @id @default(uuid())
   accountId    String        @map("account_id")

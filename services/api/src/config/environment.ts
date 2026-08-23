@@ -4,6 +4,7 @@ export type Environment = {
   databaseUrl: string;
   redisUrl: string;
   corsOrigins: string[];
+  publicUrl: string | null;
   jwtSecret: string;
   jwtAccessTtlSeconds: number;
   jwtRefreshTtlDays: number;
@@ -63,6 +64,7 @@ export function readEnvironment(): Environment {
   if (!encryptionKey.startsWith('base64:') || Buffer.from(encryptionKey.slice(7), 'base64').length !== 32) {
     throw new Error('ENCRYPTION_KEY must be base64: followed by exactly 32 decoded bytes');
   }
+  const publicUrl = publicUrlOrigin(process.env.BB_MEDIA_PUBLIC_URL);
 
   return {
     nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -70,6 +72,7 @@ export function readEnvironment(): Environment {
     databaseUrl: required('DATABASE_URL'),
     redisUrl: required('REDIS_URL'),
     corsOrigins: readCorsOrigins(process.env.CORS_ORIGIN, process.env.BB_MEDIA_PUBLIC_URL),
+    publicUrl,
     jwtSecret,
     jwtAccessTtlSeconds: boundedInteger('JWT_ACCESS_TTL_SECONDS', 900, 60, 86400),
     jwtRefreshTtlDays: boundedInteger('JWT_REFRESH_TTL_DAYS', 30, 1, 365),
