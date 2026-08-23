@@ -7,7 +7,7 @@ BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde me
 - Opret og administrer udbydere, forbindelser, kanalrækkefølge og EPG under `Live TV` i administratorpanelet.
 - Kanalstyringen understøtter søgning, filtrering og bulkvisning/-skjul af op til 1.000 kanaler. Skjulte kanaler fjernes server-side fra kundernes guide; aktive streams stoppes, og planlagte eller aktive optagelser annulleres atomisk.
 - Kilde-URL'er krypteres med AES-256-GCM og returneres aldrig til browseren eller Chromecast-modtageren.
-- Store M3U-kilder understøttes op til 256 MiB som standard med streaming bytekontrol og fem minutters timeout; grænsen kan konfigureres for betroede udbydere.
+- Store M3U-kilder understøttes op til 256 MiB som standard med streaming bytekontrol, synlig byte-/procentprogress, løbende job-lease renewal og fem minutters timeout; grænsen kan konfigureres for betroede udbydere.
 - En PostgreSQL advisory lock reserverer forbindelser atomisk og håndhæver både abonnementets samlede streamgrænse, udbyderens brugergrænse og hver forbindelses kapacitet.
 - Afspilleren bruger Direct HLS, når kilden er kompatibel, ellers FFmpeg-remux og softwaretranscoding via den eksisterende worker/transcoder-arkitektur.
 - Kundeportalen viser kanalguide, nu/næste, favoritter og hurtig kanalnavigation på `/watch/live`.
@@ -16,7 +16,7 @@ BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde me
 - Ved et aktivt upstream-svigt markerer stream-worker forbindelsen som fejlramt og forsøger næste prioriterede kilde under samme atomiske puljelås.
 - TV-drift på `/live-tv/operations` automatiserer M3U/XMLTV, viser linjehealth, jobs og aktive streams samt giver sikker admin-afbrydelse.
 - Den stabile version før Live TV kan gendannes fra tagget `backup-pre-live-tv-20260823`.
-- Live TV-leverancen er lokalt verificeret 23. august 2026 med gyldig Prisma-schema, grøn lint og typecheck, 194 API-tests, 36 worker-tests, 7 release-tests samt production builds af contracts, API, worker og admin.
+- Live TV-leverancen er lokalt verificeret 23. august 2026 med gyldig Prisma-schema, grøn lint og typecheck, 194 API-tests, 37 worker-tests, 7 release-tests samt production builds af contracts, API, worker og admin.
 - Den sidste driftsaccept kræver en rigtig M3U/XMLTV-konto på serveren til en kontrolleret to-timers pausetest, provider-failover og en komplet PVR-optagelse; automatiske tests bruger ikke kundens provider-credentials.
 
 Den komplette drift-, sikkerheds- og rollbackvejledning findes i [Live TV-dokumentationen](docs/live-tv.md).
