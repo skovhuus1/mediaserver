@@ -1,7 +1,7 @@
 'use client';
 
 import Hls from 'hls.js';
-import { Antenna, Cast, ChevronLeft, ChevronRight, Heart, LoaderCircle, Pause, Play, Radio, X } from 'lucide-react';
+import { Antenna, Cast, ChevronLeft, ChevronRight, CircleStop, Heart, LoaderCircle, Pause, Play, Radio, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ApiFailure, type SessionUser } from '@/lib/api';
@@ -57,11 +57,35 @@ export function LiveTvExperience() {
     <header className={styles.hero}><div><span>LIVE FRA DIN SERVER</span><h1>TV lige nu</h1><p>Én samlet kanalguide med automatisk valg af næste ledige M3U-forbindelse.</p></div><span className={styles.signal}><i /><b>{guide?.channels.length ?? 0}</b><small>kanaler online</small></span></header>
     {error && <div className={styles.error} role="alert">{error}<button onClick={() => setError(null)}><X /></button></div>}
     <nav className={styles.filters} aria-label="Live TV-kategorier"><button aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly((value) => !value)}><Heart fill={favoritesOnly ? 'currentColor' : 'none'} />Favoritter</button>{groups.map((name) => <button aria-pressed={!favoritesOnly && group === name} key={name} onClick={() => { setFavoritesOnly(false); setGroup(name); }}>{name}</button>)}</nav>
-    <section className={styles.guide}><header><span>KANAL</span><span>NU OG SENERE</span><time>{new Date().toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })}</time></header><div>{channels.map((channel) => <article className={styles.channel} key={channel.id}><button className={styles.identity} onClick={() => void start(channel)}><i>{channel.logoUrl ? <img alt="" src={channel.logoUrl} /> : <Antenna />}</i><span><b>{channel.number ?? '•'}</b><strong>{channel.name}</strong><small>{channel.groupName ?? 'Live TV'}</small></span>{startingChannel === channel.id ? <LoaderCircle className={styles.spin} /> : <Play fill="currentColor" />}</button><button aria-label={`${channel.favorite ? 'Fjern' : 'Tilføj'} ${channel.name} som favorit`} className={styles.favorite} onClick={() => void favorite(channel)}><Heart fill={channel.favorite ? 'currentColor' : 'none'} /></button><div className={styles.programs}>{channel.programs.length ? channel.programs.slice(0, 6).map((program) => <ProgramCard key={program.id} program={program} />) : <span className={styles.noEpg}>Ingen programdata</span>}</div></article>)}</div>{!channels.length && <div className={styles.empty}><Radio /><h2>Ingen kanaler i denne visning</h2><p>Vælg en anden gruppe eller bed administratoren importere en M3U-kilde.</p></div>}</section>
+    <section className={styles.guide}><header><span>KANAL</span><span>NU OG SENERE</span><time>{new Date().toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })}</time></header><div>{channels.map((channel) => <article className={styles.channel} key={channel.id}><button className={styles.identity} onClick={() => void start(channel)}><i>{channel.logoUrl ? <img alt="" src={channel.logoUrl} /> : <Antenna />}</i><span><b>{channel.number ?? '•'}</b><strong>{channel.name}</strong><small>{channel.groupName ?? 'Live TV'}</small></span>{startingChannel === channel.id ? <LoaderCircle className={styles.spin} /> : <Play fill="currentColor" />}</button><button aria-label={`${channel.favorite ? 'Fjern' : 'Tilføj'} ${channel.name} som favorit`} className={styles.favorite} onClick={() => void favorite(channel)}><Heart fill={channel.favorite ? 'currentColor' : 'none'} /></button><div className={styles.programs}>{channel.programs.length ? channel.programs.slice(0, 6).map((program) => <ProgramCard key={program.id} onError={setError} program={program} />) : <span className={styles.noEpg}>Ingen programdata</span>}</div></article>)}</div>{!channels.length && <div className={styles.empty}><Radio /><h2>Ingen kanaler i denne visning</h2><p>Vælg en anden gruppe eller bed administratoren importere en M3U-kilde.</p></div>}</section>
   </section>{session && <LivePlayer channels={guide?.channels ?? []} session={session} onClose={() => setSession(null)} onError={setError} onSession={setSession} />}</CustomerShell>;
 }
 
-function ProgramCard({ program }: { program: Program }) { const now = Date.now(); const active = Date.parse(program.startsAt) <= now && Date.parse(program.endsAt) > now; const duration = Date.parse(program.endsAt) - Date.parse(program.startsAt); const progress = active ? Math.max(0, Math.min(100, ((now - Date.parse(program.startsAt)) / duration) * 100)) : 0; return <article className={styles.program} data-active={active}><time>{clock(program.startsAt)}–{clock(program.endsAt)}</time><strong>{program.title}</strong><small>{program.subtitle ?? program.category ?? 'Programinformation'}</small>{active && <i><b style={{ width: `${progress}%` }} /></i>}</article>; }
+function ProgramCard({ program, onError }: { program: Program; onError: (value: string | null) => void }) {
+  const [recording, setRecording] = useState<{ id: string; status: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const now = Date.now(); const active = Date.parse(program.startsAt) <= now && Date.parse(program.endsAt) > now; const programDuration = Date.parse(program.endsAt) - Date.parse(program.startsAt); const progress = active ? Math.max(0, Math.min(100, ((now - Date.parse(program.startsAt)) / programDuration) * 100)) : 0;
+  useEffect(() => { let mounted = true; void scheduledPrograms().then((items) => { if (mounted) setRecording(items.get(program.id) ?? null); }).catch(() => undefined); return () => { mounted = false; }; }, [program.id]);
+  const toggleRecording = async () => {
+    setBusy(true); onError(null);
+    try {
+      if (recording) { await api(`/live-tv/recordings/${recording.id}/cancel`, { method: 'POST' }); setRecording(null); }
+      else { const created = await api<{ id: string; status: string }>('/live-tv/recordings', { method: 'POST', body: JSON.stringify({ programId: program.id, prePaddingSeconds: 60, postPaddingSeconds: 180 }) }); setRecording({ id: created.id, status: created.status }); }
+      recordingScheduleCache = null;
+    } catch (failure) { onError(message(failure)); }
+    finally { setBusy(false); }
+  };
+  const recordingLabel = recording?.status === 'recording' ? 'Optager' : recording ? 'Planlagt' : 'Optag';
+  return <article className={styles.program} data-active={active} data-recording={Boolean(recording)}><time>{clock(program.startsAt)}–{clock(program.endsAt)}</time><strong>{program.title}</strong><small>{program.subtitle ?? program.category ?? 'Programinformation'}</small><button aria-label={`${recording ? 'Annuller optagelse af' : 'Optag'} ${program.title}`} className={styles.recordButton} disabled={busy} onClick={() => void toggleRecording()}>{busy ? <LoaderCircle className={styles.spin} /> : <CircleStop fill={recording ? 'currentColor' : 'none'} />}{recordingLabel}</button>{active && <i><b style={{ width: `${progress}%` }} /></i>}</article>;
+}
+
+let recordingScheduleCache: { expiresAt: number; promise: Promise<Map<string, { id: string; status: string }>> } | null = null;
+function scheduledPrograms() {
+  if (recordingScheduleCache && recordingScheduleCache.expiresAt > Date.now()) return recordingScheduleCache.promise;
+  const promise = api<Array<{ id: string; recording: { id: string; status: string } | null }>>('/live-tv/recordings/schedule-options').then((items) => new Map(items.flatMap((item) => item.recording ? [[item.id, item.recording] as const] : [])));
+  recordingScheduleCache = { expiresAt: Date.now() + 15_000, promise };
+  return promise;
+}
 
 function LivePlayer({ channels, session, onClose, onError, onSession }: { channels: Channel[]; session: LiveSession; onClose: () => void; onError: (value: string | null) => void; onSession: (value: LiveSession) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);

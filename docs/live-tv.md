@@ -43,7 +43,7 @@ Aktive optagelser og aktive seersessioner deler de samme fysiske forbindelses- o
 
 ## PVR-optagelser
 
-- EPG-programmer kan planlægges på `/watch/recordings`; samme side understøtter manuel kanal, titel, start og slut.
+- EPG-programmer kan planlægges og annulleres direkte på programkortene i `/watch/live`. `/watch/recordings` viser hele optagelsesbiblioteket og understøtter manuel kanal, titel, start og slut.
 - Schedulerjobbet reserverer den bedst prioriterede, ledige kilde kort før programstart og markerer for sene jobs som mistet.
 - Workerens optagelse kører som et durable `live-tv.record`-job med lease renewal, progress og annulleringskontrol.
 - H.264 kopieres, mens anden video transkodes til H.264. Lyd normaliseres til AAC, og resultatet skrives som faststart-optimeret MP4 i den delte transcode-volume.
