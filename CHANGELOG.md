@@ -2,6 +2,13 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.6 - 2026-08-23
+
+- Lader TV- og mobilplayerens aktuelle undertekstvalg følge automatisk episodeafspilning, selv når spor-id'er skifter mellem episoder.
+- Matcher næste episodes spor efter sprog, tekst/burn-in, forced-status og label i stedet for at genbruge et ugyldigt spor-id.
+- Bevarer et eksplicit valg af `Undertekster: Fra` gennem resten af episodekøen.
+- Lader releaseværktøjet opdatere og kontrollere Flutter-versionen samt Android buildnummeret sammen med resten af monorepoet.
+
 ## 0.2.5 - 2026-08-23
 
 - Kobler Flutter TV-login på serverens QR-loginkontrakt med start, sikker polling, absolut QR-URL og krypteret tokenlagring efter godkendelse.

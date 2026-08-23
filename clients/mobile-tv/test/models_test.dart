@@ -134,6 +134,67 @@ void main() {
     expect(preferredSubtitleTrack(tracks, off), isNull);
   });
 
+  test(
+    'subtitle queue selection follows language across episode track ids',
+    () {
+      const firstEpisodeTrack = SubtitleTrack(
+        id: 'episode-1-da',
+        label: 'Dansk',
+        language: 'da-DK',
+        delivery: 'webvtt',
+        forced: false,
+        src: '/episode-1-da.vtt',
+      );
+      const nextEpisodeTracks = [
+        SubtitleTrack(
+          id: 'episode-2-en',
+          label: 'English',
+          language: 'en',
+          delivery: 'webvtt',
+          forced: false,
+          src: '/episode-2-en.vtt',
+        ),
+        SubtitleTrack(
+          id: 'episode-2-da-forced',
+          label: 'Dansk (tvungen)',
+          language: 'da',
+          delivery: 'webvtt',
+          forced: true,
+          src: '/episode-2-da-forced.vtt',
+        ),
+        SubtitleTrack(
+          id: 'episode-2-da',
+          label: 'Dansk',
+          language: 'da',
+          delivery: 'webvtt',
+          forced: false,
+          src: '/episode-2-da.vtt',
+        ),
+      ];
+
+      final selection = SubtitleQueueSelection.fromTrack(firstEpisodeTrack);
+
+      expect(selection.resolve(nextEpisodeTracks)?.id, 'episode-2-da');
+    },
+  );
+
+  test('subtitle queue can explicitly keep subtitles disabled', () {
+    const tracks = [
+      SubtitleTrack(
+        id: 'episode-2-da',
+        label: 'Dansk',
+        language: 'da',
+        delivery: 'webvtt',
+        forced: false,
+        src: '/episode-2-da.vtt',
+      ),
+    ];
+    const selection = SubtitleQueueSelection.off();
+
+    expect(selection.disabled, isTrue);
+    expect(selection.resolve(tracks), isNull);
+  });
+
   test('series experience preserves seasons and resume episode', () {
     final experience = TitleExperience.fromJson({
       'mode': 'series',

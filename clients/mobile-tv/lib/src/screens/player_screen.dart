@@ -19,12 +19,14 @@ class PlayerScreen extends StatefulWidget {
     required this.api,
     required this.media,
     required this.resumePositionMs,
+    this.subtitleSelection,
     super.key,
   });
 
   final ApiClient api;
   final MediaItem media;
   final int resumePositionMs;
+  final SubtitleQueueSelection? subtitleSelection;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -75,10 +77,12 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _qualityChanging = false;
   bool _subtitleChoiceMade = false;
   String? _chosenSubtitleTrackId;
+  SubtitleQueueSelection? _subtitleQueueSelection;
 
   @override
   void initState() {
     super.initState();
+    _subtitleQueueSelection = widget.subtitleSelection;
     WidgetsBinding.instance.addObserver(this);
     _fullscreen = true;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -407,6 +411,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             api: widget.api,
             media: media,
             resumePositionMs: intValue(next['resumePositionMs']) ?? 0,
+            subtitleSelection: _subtitleQueueSelection,
           ),
         ),
       );
@@ -661,6 +666,18 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _selectDefaultSubtitle() async {
     final auth = _authorization;
     if (auth == null) return;
+    final queueSelection = _subtitleQueueSelection;
+    if (queueSelection != null) {
+      if (queueSelection.disabled) {
+        await _setSubtitle(null, rememberChoice: false);
+        return;
+      }
+      final selected = queueSelection.resolve(auth.subtitleTracks);
+      if (selected != null) {
+        await _setSubtitle(selected, rememberChoice: false);
+        return;
+      }
+    }
     if (_subtitleChoiceMade) {
       final selected = _chosenSubtitleTrackId == null
           ? null
@@ -908,6 +925,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (rememberChoice) {
       _subtitleChoiceMade = true;
       _chosenSubtitleTrackId = track?.id;
+      _subtitleQueueSelection = track == null
+          ? const SubtitleQueueSelection.off()
+          : SubtitleQueueSelection.fromTrack(track);
     }
     if (previous != null &&
         !previous.isText &&
