@@ -78,6 +78,7 @@ M3U er som standard begrænset til 256 MiB og XMLTV til 200 MiB. Begge kilder l�
 - `POST /api/v1/live-tv/providers/:id/epg/import`
 - `GET/PATCH /api/v1/live-tv/admin/channels`
 - `PATCH /api/v1/live-tv/admin/channels/bulk`
+- `PATCH /api/v1/live-tv/admin/channels/all/visibility`
 - `POST /api/v1/live-tv/admin/channels/:id/merge`
 - `GET /api/v1/live-tv/guide?search=&group=&favorites=true&page=1&pageSize=75` returnerer højst 200 kanaler pr. side samt gruppetællere og samlet antal.
 - `PUT/DELETE /api/v1/live-tv/channels/:id/favorite`

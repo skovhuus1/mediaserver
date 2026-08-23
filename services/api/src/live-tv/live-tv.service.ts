@@ -5,7 +5,7 @@ import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { encryptSecret, decryptSecret } from '../system/secret-value';
 import type {
-  BulkUpdateLiveTvChannelGroupDto, BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto,
+  BulkUpdateLiveTvAllChannelsDto, BulkUpdateLiveTvChannelGroupDto, BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto,
   ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto,
   UpdateLiveTvSourceDto,
 } from './live-tv.dto';
@@ -320,6 +320,80 @@ export class LiveTvService {
       return {
         action: dto.action, requestedCount: channelIds.length, matchedCount: channels.length,
         changedCount: changedIds.length, releasedStreams, cancelledRecordings,
+      };
+    });
+  }
+
+  async bulkUpdateAllChannels(actor: AuthenticatedUser, dto: BulkUpdateLiveTvAllChannelsDto) {
+    const enabled = dto.action === 'show';
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const matchedCount = await tx.liveTvChannel.count({ where: { accountId: actor.accountId } });
+      const changedCount = (await tx.liveTvChannel.updateMany({
+        where: { accountId: actor.accountId, enabled: !enabled },
+        data: { enabled },
+      })).count;
+
+      let releasedStreams = 0;
+      let cancelledRecordings = 0;
+
+      if (!enabled) {
+        const activeLeases = await tx.liveTvLease.findMany({
+          where: {
+            accountId: actor.accountId,
+            status: { in: ['preparing', 'ready', 'active'] },
+            leaseExpiresAt: { gt: now },
+          },
+          select: { id: true, jobId: true },
+        });
+        const activeRecordings = await tx.liveTvRecording.findMany({
+          where: {
+            accountId: actor.accountId,
+            status: { in: ['scheduled', 'queued', 'recording'] },
+          },
+          select: { id: true, jobId: true },
+        });
+
+        if (activeLeases.length > 0) {
+          releasedStreams = (await tx.liveTvLease.updateMany({
+            where: { id: { in: activeLeases.map((lease) => lease.id) } },
+            data: {
+              status: 'released', runtimeState: 'channel_hidden', endedAt: now,
+              leaseExpiresAt: now, lastError: 'all_channels_hidden_by_admin',
+            },
+          })).count;
+        }
+        if (activeRecordings.length > 0) {
+          cancelledRecordings = (await tx.liveTvRecording.updateMany({
+            where: { id: { in: activeRecordings.map((recording) => recording.id) } },
+            data: {
+              status: 'cancelled', error: 'Alle kanaler blev skjult af administratoren', recordingEndedAt: now,
+            },
+          })).count;
+        }
+
+        const jobIds = [...new Set([...activeLeases, ...activeRecordings]
+          .flatMap((item) => item.jobId ? [item.jobId] : []))];
+        if (jobIds.length > 0) {
+          await tx.systemJob.updateMany({
+            where: { accountId: actor.accountId, id: { in: jobIds }, status: { in: ['queued', 'running'] } },
+            data: { status: 'cancelled' },
+          });
+        }
+      }
+
+      await tx.auditLog.create({ data: {
+        accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId,
+        action: 'live_tv.channel.all_visibility', outcome: 'success', code: dto.action,
+        details: {
+          scope: 'all', matchedCount, changedCount, releasedStreams, cancelledRecordings,
+        },
+      } });
+
+      return {
+        action: dto.action, scope: 'all', matchedCount, changedCount,
+        releasedStreams, cancelledRecordings,
       };
     });
   }
