@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { describeLiveTvChannel } from '@boltbytes/contracts';
 import { parseM3u, parseXmlTv } from './live-tv-parsers.js';
 
 describe('Live TV parsers', () => {
@@ -25,5 +26,25 @@ describe('Live TV parsers', () => {
 
     expect(result.channels.get('dr1')?.logoUrl).toBe('https://img.test/dr1.png');
     expect(result.programs[0]?.iconUrl).toBe('https://img.test/news.png');
+  });
+
+  it('merges quality and locale suffixes without merging distinct channel names', () => {
+    const variants = ['DR 1 FHD DK', 'DR 1 FH DK', 'DR 1 HD DK', 'DR 1 DK'].map((name) => describeLiveTvChannel({ name }));
+    expect(new Set(variants.map((item) => item.canonicalKey))).toHaveLength(1);
+    expect(variants.map((item) => item.displayName)).toEqual(['DR 1', 'DR 1', 'DR 1', 'DR 1']);
+    expect(variants.map((item) => item.qualityLabel)).toEqual(['fhd', 'fhd', 'hd', 'standard']);
+    expect(describeLiveTvChannel({ name: 'DR 2 HD DK' }).canonicalKey).not.toBe(variants[0]?.canonicalKey);
+  });
+
+  it('merges name-like quality tvg ids but keeps unrelated external ids distinct', () => {
+    const fhd = describeLiveTvChannel({ name: 'DR 1 FHD DK', tvgId: 'DR1-FHD-DK' });
+    const hd = describeLiveTvChannel({ name: 'DR 1 HD DK', tvgId: 'DR1-HD-DK' });
+    expect(fhd.canonicalKey).toBe(hd.canonicalKey);
+    expect(describeLiveTvChannel({ name: 'Regional TV', tvgId: 'region-east-001' }).canonicalKey)
+      .not.toBe(describeLiveTvChannel({ name: 'Regional TV', tvgId: 'region-west-002' }).canonicalKey);
+  });
+
+  it('keeps meaningful plus signs distinct in canonical identities', () => {
+    expect(describeLiveTvChannel({ name: 'Disney+' }).canonicalKey).not.toBe(describeLiveTvChannel({ name: 'Disney' }).canonicalKey);
   });
 });

@@ -1,8 +1,12 @@
+import { liveTvConnectionHealthRank } from '@boltbytes/contracts';
+
 export type LiveTvSourceCandidate = {
   sourceId: string;
   connectionId: string;
   providerId: string;
   streamFormat: string;
+  connectionHealth: string;
+  qualityRank: number;
   sourcePriority: number;
   connectionPriority: number;
   providerPriority: number;
@@ -42,7 +46,9 @@ export function selectLiveTvSource(
   activeByProviderForUser: ReadonlyMap<string, number>,
 ): LiveTvSourceCandidate | null {
   return [...candidates]
-    .sort((left, right) => left.providerPriority - right.providerPriority
+    .sort((left, right) => liveTvConnectionHealthRank(left.connectionHealth) - liveTvConnectionHealthRank(right.connectionHealth)
+      || left.qualityRank - right.qualityRank
+      || left.providerPriority - right.providerPriority
       || left.connectionPriority - right.connectionPriority
       || left.sourcePriority - right.sourcePriority
       || left.sourceId.localeCompare(right.sourceId))

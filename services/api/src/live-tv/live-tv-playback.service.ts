@@ -144,7 +144,8 @@ export class LiveTvPlaybackService {
       if (!method) continue;
       methodBySource.set(source.id, method);
       candidates.push({ sourceId: source.id, connectionId: source.connectionId, providerId: source.connection.providerId,
-        streamFormat: source.streamFormat, sourcePriority: source.priority, connectionPriority: source.connection.priority,
+        streamFormat: source.streamFormat, connectionHealth: source.connection.healthStatus, qualityRank: source.qualityRank,
+        sourcePriority: source.priority, connectionPriority: source.connection.priority,
         providerPriority: source.connection.provider.priority, connectionLimit: source.connection.maxConcurrentStreams,
         providerUserLimit: source.connection.provider.perUserStreamLimit });
     }

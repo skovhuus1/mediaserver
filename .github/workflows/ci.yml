@@ -58,6 +58,8 @@ jobs:
         run: npm ci
       - name: Generate Prisma client
         run: npm run prisma:generate
+      - name: Validate release version
+        run: npm run version:check
       - name: Apply migrations
         run: npm run prisma:migrate
       - name: Lint

@@ -13,6 +13,8 @@ export * from './series-identity.js';
 export * from './direct-stream-remux.js';
 export * from './series-continuity.js';
 export * from './transcode-timeline.js';
+export * from './live-tv-channel.js';
+export * from './release.js';
 
 export const entitlementActionSchema = z.enum(['playback', 'cast', 'offline_download']);
 export type EntitlementAction = z.infer<typeof entitlementActionSchema>;

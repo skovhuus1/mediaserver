@@ -19,6 +19,7 @@ import {
   MAX_ADMIN_CHANNEL_PAGE_SIZE,
   MAX_ADMIN_LIVE_TV_CHANNELS,
 } from './live-tv-channel-catalog';
+import { DEFAULT_LIVE_TV_GUIDE_PAGE_SIZE, MAX_LIVE_TV_GUIDE_PAGE_SIZE } from './live-tv-guide';
 
 const urlOptions = { protocols: ['http', 'https'], require_protocol: true, require_tld: false };
 
@@ -84,6 +85,21 @@ export class ListAdminLiveTvChannelsDto {
   @IsOptional() @IsIn(['all', 'visible', 'hidden']) visibility: 'all' | 'visible' | 'hidden' = 'all';
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) page = 1;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(MAX_ADMIN_CHANNEL_PAGE_SIZE) pageSize = DEFAULT_ADMIN_CHANNEL_PAGE_SIZE;
+}
+
+export class ListLiveTvGuideDto {
+  @IsOptional() @IsString() @MaxLength(64) from?: string;
+  @IsOptional() @IsString() @MaxLength(64) to?: string;
+  @IsOptional() @IsString() @MaxLength(160) search?: string;
+  @IsOptional() @IsString() @MaxLength(120) group?: string;
+  @IsOptional() @IsIn(['true', 'false']) favorites: 'true' | 'false' = 'false';
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10_000) page = 1;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(MAX_LIVE_TV_GUIDE_PAGE_SIZE) pageSize = DEFAULT_LIVE_TV_GUIDE_PAGE_SIZE;
+}
+
+export class LiveTvGuideNeighborDto {
+  @IsIn(['next', 'previous'])
+  direction!: 'next' | 'previous';
 }
 
 export class BulkUpdateLiveTvChannelGroupDto {

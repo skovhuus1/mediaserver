@@ -1,4 +1,5 @@
-import type { PrismaClient, SystemJob } from '@prisma/client';
+import { liveTvConnectionHealthRank } from '@boltbytes/contracts';
+import { Prisma, type PrismaClient, type SystemJob } from '@prisma/client';
 import { runLiveTvStream } from './live-tv.js';
 
 type ClaimedJob = SystemJob & { attemptNumber: number };
@@ -9,22 +10,29 @@ export async function processLiveTvStreamJobWithFailover(prisma: PrismaClient, j
   try { await runLiveTvStream(prisma, job, transcodeRoot, renewLease); }
   catch (error) {
     const leaseId = objectValue(job.payload).leaseId;
-    if (typeof leaseId === 'string') await selectFailoverSource(prisma, leaseId, job.id, error);
+    if (typeof leaseId === 'string') await selectFailoverSource(prisma, leaseId, job, error);
     throw error;
   }
 }
 
-async function selectFailoverSource(prisma: PrismaClient, leaseId: string, jobId: string, failure: unknown) {
+async function selectFailoverSource(prisma: PrismaClient, leaseId: string, job: ClaimedJob, failure: unknown) {
   const message = failure instanceof Error ? failure.message : String(failure);
   await prisma.$transaction(async (tx) => {
-    const initial = await tx.liveTvLease.findFirst({ where: { id: leaseId, jobId, status: { in: recoverableStatuses } } });
+    const initial = await tx.liveTvLease.findFirst({ where: { id: leaseId, jobId: job.id, status: { in: recoverableStatuses } } });
     if (!initial) return;
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('bbmedia:live-tv-pool'), hashtext(CAST(${initial.accountId} AS text)))::text AS lock_result`;
-    const lease = await tx.liveTvLease.findFirst({ where: { id: initial.id, jobId, status: { in: recoverableStatuses } } });
+    const lease = await tx.liveTvLease.findFirst({ where: { id: initial.id, jobId: job.id, status: { in: recoverableStatuses } } });
     if (!lease) return;
+    const attemptedSourceIds = [...new Set([...stringArray(objectValue(job.payload).failedSourceIds), lease.sourceId])];
+    await tx.systemJob.updateMany({ where: { id: job.id }, data: { payload: {
+      ...objectValue(job.payload), failedSourceIds: attemptedSourceIds,
+    } as Prisma.InputJsonValue } });
     await tx.liveTvConnection.updateMany({ where: { id: lease.connectionId }, data: { healthStatus: 'failed', lastError: message.slice(0, 2_000) } });
-    const sources = await tx.liveTvChannelSource.findMany({ where: { channelId: lease.channelId, id: { not: lease.sourceId }, enabled: true, connection: { enabled: true, provider: { enabled: true } } }, include: { connection: { include: { provider: { include: { connections: { select: { id: true } } } } } } } });
-    const ordered = sources.sort((left, right) => healthRank(left.connection.healthStatus) - healthRank(right.connection.healthStatus) || left.connection.provider.priority - right.connection.provider.priority || left.connection.priority - right.connection.priority || left.priority - right.priority);
+    if (job.attemptNumber >= job.maxAttempts) return;
+    const sources = await tx.liveTvChannelSource.findMany({ where: { channelId: lease.channelId, id: { notIn: attemptedSourceIds }, enabled: true, connection: { enabled: true, provider: { enabled: true } } }, include: { connection: { include: { provider: { include: { connections: { select: { id: true } } } } } } } });
+    const ordered = sources.sort((left, right) => liveTvConnectionHealthRank(left.connection.healthStatus) - liveTvConnectionHealthRank(right.connection.healthStatus)
+      || left.qualityRank - right.qualityRank || left.connection.provider.priority - right.connection.provider.priority
+      || left.connection.priority - right.connection.priority || left.priority - right.priority);
     for (const source of ordered) {
       const providerConnections = source.connection.provider.connections.map((connection) => connection.id);
       const [connectionLeases, connectionRecordings, userLeases, userRecordings] = await Promise.all([
@@ -35,7 +43,7 @@ async function selectFailoverSource(prisma: PrismaClient, leaseId: string, jobId
       ]);
       if (connectionLeases + connectionRecordings >= source.connection.maxConcurrentStreams) continue;
       if (userLeases + userRecordings >= source.connection.provider.perUserStreamLimit) continue;
-      await tx.liveTvLease.update({ where: { id: lease.id }, data: { sourceId: source.id, connectionId: source.connectionId, status: 'preparing', runtimeState: 'failover', lastError: `Primær kilde fejlede; skifter til ${source.connection.name}` } });
+      await tx.liveTvLease.update({ where: { id: lease.id }, data: { sourceId: source.id, connectionId: source.connectionId, status: 'preparing', runtimeState: 'failover', lastError: `Kilden fejlede; skifter til ${source.qualityLabel.toUpperCase()} via ${source.connection.name}` } });
       return;
     }
     await tx.liveTvLease.update({ where: { id: lease.id }, data: { lastError: `Ingen failover-kilde er ledig: ${message}` } });
@@ -43,4 +51,4 @@ async function selectFailoverSource(prisma: PrismaClient, leaseId: string, jobId
 }
 
 function objectValue(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
-function healthRank(value: string) { return value === 'healthy' ? 0 : value === 'unknown' ? 1 : 2; }
+function stringArray(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []; }

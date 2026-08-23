@@ -21,9 +21,10 @@ Live TV-domænet importerer M3U-kanaler, samler dubletter, prioriterer redundant
 4. Kør kanalimport og derefter EPG-import. Begge kører som durable jobs med status og fejl i opgaveoversigten.
 5. Ret kanalnavn, nummer, gruppe, voksenmarkering og aktivering efter behov.
 6. Filtrér på synlige eller skjulte kanaler, søg efter kanal eller gruppe, og navigér server-side i kataloger på op til 50.000 kanaler. Klik første checkbox og Shift-klik den sidste for at markere et interval på siden; brug `Vis`/`Skjul`, eller vælg en eksakt gruppe og brug `Vis hele gruppen`/`Skjul hele gruppen`.
-7. Flere forbindelseslinjer under samme udbyder bruger samme kanoniske kanal, når `tvg-id` eller det normaliserede navn matcher. Første gyldige kanalnummer bevares; en senere redundant linje kan kun udfylde et manglende nummer.
-7. Sæt kildeprioritet og format. Ved fejl går reservationen videre til næste ledige, prioriterede forbindelse.
-8. Saml bekræftede dubletter. Samlingen flytter kilder og EPG-match til den valgte kanal.
+7. Flere forbindelseslinjer og kvalitetsvarianter bruger samme `channel:v2`-identitet efter kontrolleret fjernelse af tekniske slutmarkører som 4K, UHD, FHD, FH, HD, SD og DK. `DR 1 FHD DK`, `DR 1 FH DK`, `DR 1 HD DK` og `DR 1 DK` bliver derfor én kanal; `DR 2` forbliver separat. Forskellige vilkårlige `tvg-id`-værdier holdes adskilt, medmindre id'erne selv normaliseres til den samme dokumenterede kvalitetsvariant.
+8. Et manuelt navn, nummer eller gruppe sætter metadata-låsen. Identiteten ligger separat og ændres ikke, så senere import og failover fortsat virker.
+9. Kilder vælges efter connection-health og kvalitet (`4K`, `FHD`, `HD`, standard, `SD`) før provider-, forbindelses- og kildeprioritet. Ved fejl gemmes den prøvede kilde i jobledgeren, så samme defekte URL ikke vælges igen i næste forsøg.
+10. Saml resterende bekræftede dubletter manuelt. Samlingen flytter favoritter, historiske leases, optagelser og kilder, mens overlappende EPG-data genopbygges ved næste XMLTV-import.
 
 Bulkændringer er account-scoped og kræver administratorrolle. Skjul udføres i samme databasetransaktion som auditloggen, frigiver aktive leases, annullerer deres streamjobs og annullerer planlagte, køsatte eller aktive optagelser. Operators kan filtrere og inspicere, men ikke ændre kanalstatus.
 
@@ -42,6 +43,7 @@ Aktive optagelser og aktive seersessioner deler de samme fysiske forbindelses- o
 - Hvis probe eller remux viser inkompatibel video, bruges H.264/AAC softwaretranscoding, når planen tillader det.
 - Streamjobbet stopper FFmpeg, når leasen frigives eller udløber.
 - Chromecast-handoff bevarer lease og får kun BoltBytes' absolutte, tokeniserede stream-URL.
+- Forrige/næste kanal slås op server-side i hele det account- og profilfiltrerede katalog og er derfor ikke begrænset til den aktuelle guideside.
 - Auto vælger Direct Stream HLS, når planen tillader det, så serveren kan holde en sessionsafgrænset pausebuffer på op til 2 timer. Kunden kan spole tilbage til kanalstart eller til det aktuelle programs start, når dette punkt allerede findes i den aktive buffer. Bufferen oprettes først ved kanalstart, stopper med leasen og er ikke en permanent 24/7-timeshift-optagelse.
 - Nginx-ruterne for live-streams og optagelser har buffering slået fra, Range-understøttelse og 7.500 sekunders read/send-timeout.
 
@@ -53,6 +55,7 @@ Aktive optagelser og aktive seersessioner deler de samme fysiske forbindelses- o
 - H.264 kopieres, mens anden video transkodes til H.264. Lyd normaliseres til AAC, og resultatet skrives som faststart-optimeret MP4 i den delte transcode-volume.
 - Afspilning kræver et kortlivet token, understøtter `HEAD` og `Range`/`206`, og providerens credentials returneres aldrig.
 - Ved streamfejl markeres den konkrete forbindelse som fejlet. Live-sessionens næste jobforsøg reserverer automatisk næste prioriterede kilde med ledig kapacitet.
+- PVR-retries sætter optagelsen tilbage i kø mellem forsøg, udelukker allerede fejlede kilder og markerer først optagelsen endeligt fejlet, når jobforsøgene er opbrugt.
 
 ## Konfiguration
 
@@ -75,7 +78,7 @@ M3U er som standard begrænset til 256 MiB og XMLTV til 200 MiB. Begge kilder l�
 - `GET/PATCH /api/v1/live-tv/admin/channels`
 - `PATCH /api/v1/live-tv/admin/channels/bulk`
 - `POST /api/v1/live-tv/admin/channels/:id/merge`
-- `GET /api/v1/live-tv/guide`
+- `GET /api/v1/live-tv/guide?search=&group=&favorites=true&page=1&pageSize=75` returnerer højst 200 kanaler pr. side samt gruppetællere og samlet antal.
 - `PUT/DELETE /api/v1/live-tv/channels/:id/favorite`
 - `POST /api/v1/live-tv/playback/authorize`
 - `GET /api/v1/live-tv/playback/:leaseId/status`

@@ -3,7 +3,8 @@ import { chooseLiveTvMethod, selectLiveTvSource, type LiveTvSourceCandidate } fr
 
 const source = (overrides: Partial<LiveTvSourceCandidate>): LiveTvSourceCandidate => ({
   sourceId: 'source-1', connectionId: 'connection-1', providerId: 'provider-1', streamFormat: 'hls',
-  sourcePriority: 100, connectionPriority: 100, providerPriority: 100, connectionLimit: 1, providerUserLimit: 1,
+  connectionHealth: 'healthy', qualityRank: 30, sourcePriority: 100, connectionPriority: 100,
+  providerPriority: 100, connectionLimit: 1, providerUserLimit: 1,
   ...overrides,
 });
 
@@ -19,6 +20,13 @@ describe('Live TV pool policy', () => {
 
   it('enforces the provider user limit independently of connection capacity', () => {
     expect(selectLiveTvSource([source({ connectionLimit: 5 })], new Map(), new Map([['provider-1', 1]]))).toBeNull();
+  });
+
+  it('prefers a healthy FHD source and falls back to healthy HD when FHD is failed', () => {
+    const fhd = source({ sourceId: 'fhd', connectionId: 'fhd-line', qualityRank: 10 });
+    const hd = source({ sourceId: 'hd', connectionId: 'hd-line', qualityRank: 20 });
+    expect(selectLiveTvSource([hd, fhd], new Map(), new Map())?.sourceId).toBe('fhd');
+    expect(selectLiveTvSource([{ ...fhd, connectionHealth: 'failed' }, hd], new Map(), new Map())?.sourceId).toBe('hd');
   });
 
   it('prefers direct HLS and falls back to remux or transcode by entitlement', () => {
