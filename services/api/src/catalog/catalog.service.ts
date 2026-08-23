@@ -21,9 +21,12 @@ import { metadataSettingsStatus, resolveMetadataSettings } from '../system/metad
 import { listTvdbEpisodeOrders, resolveTvdbEpisodeOrder, searchMetadataProviders, validateMetadataSelection } from './metadata-provider';
 
 import { buildCatalogCategoryFacets, catalogCategoryAliases } from './catalog-categories';
+import { CatalogFacetCache } from './catalog-facet-cache';
 
 @Injectable()
 export class CatalogService {
+  private readonly facetCache = new CatalogFacetCache();
+
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly redis?: RedisService,
@@ -224,25 +227,27 @@ export class CatalogService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 24;
     const where = this.catalogWhere(actor, query);
-    const [categories, libraries] = await this.prisma.$transaction([
-      this.prisma.mediaItem.findMany({
-        where: { accountId: actor.accountId, category: { not: null } },
-        distinct: ['category'],
-        select: { category: true },
-        orderBy: { category: 'asc' },
-      }),
-      this.prisma.library.findMany({
-        where: { accountId: actor.accountId },
-        select: { id: true, name: true, type: true },
-        orderBy: { name: 'asc' },
-      }),
-    ]);
-    const facets = {
-      categories: buildCatalogCategoryFacets(
-        categories.flatMap(({ category }) => (category ? [category] : [])),
-      ),
-      libraries,
-    };
+    const facets = await this.facetCache.get(actor.accountId, async () => {
+      const [categories, libraries] = await this.prisma.$transaction([
+        this.prisma.mediaItem.findMany({
+          where: { accountId: actor.accountId, category: { not: null } },
+          distinct: ['category'],
+          select: { category: true },
+          orderBy: { category: 'asc' },
+        }),
+        this.prisma.library.findMany({
+          where: { accountId: actor.accountId },
+          select: { id: true, name: true, type: true },
+          orderBy: { name: 'asc' },
+        }),
+      ]);
+      return {
+        categories: buildCatalogCategoryFacets(
+          categories.flatMap(({ category }) => (category ? [category] : [])),
+        ),
+        libraries,
+      };
+    });
 
     if (query.type === 'series') {
       const aggregates = await this.prisma.mediaItem.groupBy({

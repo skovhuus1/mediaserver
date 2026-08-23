@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { updateJobProgress } from './job-progress.js';
 import { parseM3u, parseXmlTv, normalizeLiveTvIdentity } from './live-tv-parsers.js';
+import { disableMissingLiveTvSources, forEachLiveTvEntryByIdentity } from './live-tv-import-batching.js';
 import { decryptSecret, encryptSecret } from './secret-value.js';
 
 type LiveJob = SystemJob & { attemptNumber?: number };
@@ -45,10 +46,17 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
       const entries = parseM3u(text);
       if (!entries.length) throw new Error('M3U-listen indeholder ingen gyldige HTTP-kanaler');
       const seen: string[] = [];
-      for (const [index, entry] of entries.entries()) {
-        if (index % 100 === 0) {
+      let processed = 0;
+      let nextProgressAt = Date.now() + 5_000;
+      await forEachLiveTvEntryByIdentity(entries, (entry) => (
+        entry.tvgId
+          ? `tvg:${normalizeLiveTvIdentity(entry.tvgId)}`
+          : `name:${normalizeLiveTvIdentity(entry.tvgName ?? entry.name)}`
+      ), async (entry) => {
+        if (Date.now() >= nextProgressAt) {
+          nextProgressAt = Date.now() + 5_000;
           await renew();
-          await updateJobProgress(prisma, job, { stage: 'Importerer kanaler', current: imported + index, total: imported + entries.length, message: connection.name });
+          await updateJobProgress(prisma, job, { stage: 'Importerer kanaler', current: imported + processed, total: imported + entries.length, message: connection.name });
         }
         const streamUrl = new URL(entry.url, playlistUrl).toString();
         const streamFingerprint = hash(streamUrl);
@@ -69,8 +77,9 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
             encryptedStreamUrl: encryptSecret(streamUrl) as unknown as Prisma.InputJsonValue, streamFormat: inferFormat(streamUrl), enabled: true, lastSeenAt: new Date() },
         });
         seen.push(streamFingerprint);
-      }
-      await prisma.liveTvChannelSource.updateMany({ where: { connectionId: connection.id, ...(seen.length ? { streamFingerprint: { notIn: seen } } : {}) }, data: { enabled: false } });
+        processed += 1;
+      });
+      await disableMissingLiveTvSources(prisma, connection.id, seen);
       await prisma.liveTvConnection.update({ where: { id: connection.id }, data: { healthStatus: 'healthy', lastError: null, lastImportedAt: new Date() } });
       imported += entries.length;
     } catch (error) {
