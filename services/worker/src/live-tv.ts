@@ -14,6 +14,12 @@ const execFileAsync = promisify(execFile);
 const MEBIBYTE = 1024 * 1024;
 export const DEFAULT_LIVE_TV_IMPORT_MAX_BYTES = 256 * MEBIBYTE;
 export const DEFAULT_LIVE_TV_EPG_MAX_BYTES = 200 * MEBIBYTE;
+export interface LiveTvSourceProgress { receivedBytes: number; totalBytes: number | null }
+export interface LiveTvSourceFetchOptions {
+  allowGzip?: boolean;
+  timeoutMs?: number;
+  onProgress?: (progress: LiveTvSourceProgress) => Promise<void> | void;
+}
 
 export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, renew: () => Promise<void>) {
   const providerId = stringPayload(job, 'providerId');
@@ -26,7 +32,16 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
     try {
       await renew();
       const playlistUrl = decryptSecret(connection.playlistUrl);
-      const text = await fetchLiveTvSourceText(playlistUrl, maxBytes('BB_MEDIA_LIVE_TV_IMPORT_MAX_BYTES', DEFAULT_LIVE_TV_IMPORT_MAX_BYTES));
+      const text = await fetchLiveTvSourceText(playlistUrl, maxBytes('BB_MEDIA_LIVE_TV_IMPORT_MAX_BYTES', DEFAULT_LIVE_TV_IMPORT_MAX_BYTES), {
+        onProgress: async ({ receivedBytes, totalBytes }) => {
+          await renew();
+          await updateJobProgress(prisma, job, {
+            stage: 'Henter M3U', current: receivedBytes, total: totalBytes,
+            percent: totalBytes ? Math.min(99, (receivedBytes / totalBytes) * 100) : null,
+            message: sourceDownloadMessage(connection.name, receivedBytes, totalBytes),
+          });
+        },
+      });
       const entries = parseM3u(text);
       if (!entries.length) throw new Error('M3U-listen indeholder ingen gyldige HTTP-kanaler');
       const seen: string[] = [];
@@ -76,7 +91,17 @@ export async function importLiveTvEpg(prisma: PrismaClient, job: LiveJob, renew:
   if (!source) throw new Error('XMLTV source was not found');
   try {
     await updateJobProgress(prisma, job, { stage: 'Henter XMLTV', current: 0, total: null, message: source.provider.name });
-    const xml = await fetchLiveTvSourceText(decryptSecret(source.encryptedUrl), maxBytes('BB_MEDIA_LIVE_TV_EPG_MAX_BYTES', DEFAULT_LIVE_TV_EPG_MAX_BYTES), true);
+    const xml = await fetchLiveTvSourceText(decryptSecret(source.encryptedUrl), maxBytes('BB_MEDIA_LIVE_TV_EPG_MAX_BYTES', DEFAULT_LIVE_TV_EPG_MAX_BYTES), {
+      allowGzip: true,
+      onProgress: async ({ receivedBytes, totalBytes }) => {
+        await renew();
+        await updateJobProgress(prisma, job, {
+          stage: 'Henter XMLTV', current: receivedBytes, total: totalBytes,
+          percent: totalBytes ? Math.min(99, (receivedBytes / totalBytes) * 100) : null,
+          message: sourceDownloadMessage(source.provider.name, receivedBytes, totalBytes),
+        });
+      },
+    });
     await renew();
     const parsed = parseXmlTv(xml);
     const channels = await prisma.liveTvChannel.findMany({ where: { accountId: job.accountId } });
@@ -178,30 +203,44 @@ async function probeVideoCodec(url: string) {
   return stdout.trim().toLowerCase();
 }
 
-export async function fetchLiveTvSourceText(url: string, limit: number, allowGzip = false, timeoutMs = sourceFetchTimeoutMs()) {
+export async function fetchLiveTvSourceText(url: string, limit: number, options: LiveTvSourceFetchOptions = {}) {
+  const { allowGzip = false, onProgress } = options;
+  const timeoutMs = options.timeoutMs ?? sourceFetchTimeoutMs();
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { redirect: 'follow', signal: controller.signal, headers: { 'user-agent': 'BoltBytes-Media/1.0', accept: '*/*' } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const declaredLength = Number.parseInt(response.headers.get('content-length') ?? '', 10);
-    if (Number.isFinite(declaredLength) && declaredLength > limit) throw sourceLimitError(limit);
+    const declaredLengthValue = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+    const totalBytes = Number.isFinite(declaredLengthValue) && declaredLengthValue >= 0 ? declaredLengthValue : null;
+    if (totalBytes !== null && totalBytes > limit) throw sourceLimitError(limit);
     if (!response.body) return '';
 
     const reader = response.body.getReader();
     const chunks: Buffer[] = [];
-    let totalBytes = 0;
+    let receivedBytes = 0;
+    let lastProgressAt = 0;
+    const reportProgress = async (force = false) => {
+      if (!onProgress) return;
+      const now = Date.now();
+      if (!force && now - lastProgressAt < 1_000) return;
+      lastProgressAt = now;
+      await onProgress({ receivedBytes, totalBytes });
+    };
+    await reportProgress(true);
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      totalBytes += value.byteLength;
-      if (totalBytes > limit) {
+      receivedBytes += value.byteLength;
+      if (receivedBytes > limit) {
         await reader.cancel().catch(() => undefined);
         throw sourceLimitError(limit);
       }
       chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+      await reportProgress();
     }
+    await reportProgress(true);
 
-    const bytes = Buffer.concat(chunks, totalBytes);
+    const bytes = Buffer.concat(chunks, receivedBytes);
     let decoded = bytes;
     if (allowGzip && bytes[0] === 0x1f && bytes[1] === 0x8b) {
       try { decoded = gunzipSync(bytes, { maxOutputLength: limit }); }
@@ -221,4 +260,6 @@ function hash(value: string) { return createHash('sha256').update(value).digest(
 function maxBytes(name: string, fallback: number) { const value = Number.parseInt(process.env[name] ?? '', 10); return Number.isFinite(value) && value >= 1024 * 1024 ? value : fallback; }
 function sourceFetchTimeoutMs() { const value = Number.parseInt(process.env.BB_MEDIA_LIVE_TV_FETCH_TIMEOUT_MS ?? '', 10); return Number.isFinite(value) ? Math.max(30_000, Math.min(900_000, value)) : 300_000; }
 function sourceLimitError(limit: number) { return new Error(`Kilden overstiger sikkerhedsgrænsen på ${Math.max(1, Math.ceil(limit / MEBIBYTE))} MiB. Hæv BB_MEDIA_LIVE_TV_IMPORT_MAX_BYTES eller BB_MEDIA_LIVE_TV_EPG_MAX_BYTES, hvis kilden er betroet.`); }
+function sourceDownloadMessage(name: string, receivedBytes: number, totalBytes: number | null) { return `${name} · ${formatMebibytes(receivedBytes)}${totalBytes !== null ? ` / ${formatMebibytes(totalBytes)}` : ''}`; }
+function formatMebibytes(bytes: number) { return `${(bytes / MEBIBYTE).toFixed(bytes >= 10 * MEBIBYTE ? 0 : 1)} MiB`; }
 function safeError(error: unknown) { return error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000); }

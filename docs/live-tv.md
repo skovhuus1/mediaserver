@@ -63,7 +63,7 @@ BB_MEDIA_LIVE_TV_PAUSE_BUFFER_SECONDS=7200
 BB_MEDIA_LIVE_TV_RECORDING_SCHEDULER_SECONDS=15
 ```
 
-M3U er som standard begrænset til 256 MiB og XMLTV til 200 MiB. Begge kilder læses som streams og afbrydes, så snart den effektive grænse overskrides; deklareret `Content-Length` afvises før body-download. Hentning har som standard fem minutters timeout. Grænserne kan hæves for en betroet udbyder, men kræver genoprettelse af worker-containeren. Workerens eksisterende `DATABASE_URL`, `ENCRYPTION_KEY`, FFmpeg og transcode-volume er påkrævet.
+M3U er som standard begrænset til 256 MiB og XMLTV til 200 MiB. Begge kilder læses som streams og afbrydes, så snart den effektive grænse overskrides; deklareret `Content-Length` afvises før body-download. Under hentning vises modtagne bytes og procent i opgaveoversigten, og worker-leasen fornyes højst én gang i sekundet plus ved start og slut. Hentning har som standard fem minutters timeout. Grænserne kan hæves for en betroet udbyder, men kræver genoprettelse af worker-containeren. Workerens eksisterende `DATABASE_URL`, `ENCRYPTION_KEY`, FFmpeg og transcode-volume er påkrævet.
 
 ## API-overblik
 
