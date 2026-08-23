@@ -77,13 +77,17 @@ android {
     buildTypes {
         release {
             signingConfig = productionSigning ?: signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
 
 dependencies {
     implementation("com.google.android.gms:play-services-cast-framework:22.3.1")
-    implementation("androidx.work:work-runtime-ktx:2.10.5")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
 }
 
 kotlin {

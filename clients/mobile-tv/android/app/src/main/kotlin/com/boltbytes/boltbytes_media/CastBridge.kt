@@ -2,7 +2,7 @@ package com.boltbytes.boltbytes_media
 
 import android.app.Activity
 import android.content.Context
-import android.net.Uri
+import androidx.core.net.toUri
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -155,7 +155,7 @@ class CastBridge(
                 putString(MediaMetadata.KEY_SUBTITLE, call.argument<String>("subtitle").orEmpty())
                 call.argument<String>("posterUrl")
                     ?.takeIf { it.isNotBlank() }
-                    ?.let { addImage(WebImage(Uri.parse(it))) }
+                    ?.let { addImage(WebImage(it.toUri())) }
             }
             val tracks = (call.argument<List<Map<String, Any?>>>("tracks") ?: emptyList())
                 .mapNotNull(::mediaTrack)

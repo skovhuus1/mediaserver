@@ -3,3 +3,6 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 Dockerfile text eol=lf
+clients/mobile-tv/android/gradlew text eol=lf
+clients/mobile-tv/android/gradlew.bat text eol=crlf
+clients/mobile-tv/android/gradle/wrapper/gradle-wrapper.jar binary

@@ -1,6 +1,7 @@
 package com.boltbytes.boltbytes_media
 
 import android.content.Context
+import androidx.core.content.edit
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -22,7 +23,7 @@ class CrashBridge(context: Context, messenger: BinaryMessenger) : MethodChannel.
             .put("thread", thread.name.take(120))
             .put("occurredAt", utcTimestamp())
             .toString()
-        preferences.edit().putString(KEY_PENDING, value).commit()
+        preferences.edit(commit = true) { putString(KEY_PENDING, value) }
         previous?.uncaughtException(thread, error)
     }
 
@@ -37,7 +38,7 @@ class CrashBridge(context: Context, messenger: BinaryMessenger) : MethodChannel.
             return
         }
         val raw = preferences.getString(KEY_PENDING, null)
-        preferences.edit().remove(KEY_PENDING).commit()
+        preferences.edit(commit = true) { remove(KEY_PENDING) }
         if (raw == null) {
             result.success(emptyList<Map<String, Any?>>())
             return

@@ -1,6 +1,29 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.7**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.2.8**. Se [CHANGELOG](CHANGELOG.md).
+
+### Android TV release-start og runtime-gate
+
+TV-klienten har fra `0.2.8` en eksplicit R8-regel, der bevarer Room/WorkManagers
+refleksionskrævede `WorkDatabase_Impl`-constructor. Uden reglen kunne en minificeret
+release-APK lukke i AndroidX `InitializationProvider`, før Flutter viste første frame.
+
+Flutter-CI bygger derfor TV-varianten som rigtig release, validerer R8-mappingen og
+certificerer APK-manifest, ABI og signatur. En tilsluttet Android/Google TV-enhed
+eller emulator kan desuden køre den faktiske launch-gate:
+
+```bash
+node scripts/smoke-android-tv-launch.mjs clients/mobile-tv/build/app/outputs/flutter-apk/app-tv-release.apk
+```
+
+Gaten installerer APK'en, rydder crash-bufferen, starter Leanback-activity og fejler,
+hvis processen ikke overlever eller Android registrerer et app-crash.
+
+Native Android lint køres desuden mod `tvRelease`. Klienten understøtter minSdk 24,
+Ethernet-TV uden Wi-Fi-krav, eksplicit no-backup af tokens/offline-nøgler og de nyere
+Android-regler for dynamiske updater-receivere og eksporterede Leanback activities.
+Gradles Linux- og Windows-wrappers samt wrapper-JAR er versionsstyrede, så den samme
+native lint- og release-kæde kan køres reproducerbart lokalt og på GitHub Actions.
 
 ## Live TV fra M3U
 

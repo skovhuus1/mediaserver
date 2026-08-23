@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -118,7 +119,13 @@ class MediaPlaybackService : Service() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return Notification.Builder(this, CHANNEL_ID)
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        return builder
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(subtitle)
@@ -137,16 +144,19 @@ class MediaPlaybackService : Service() {
             .build()
     }
 
-    private fun action(icon: Int, title: String, action: String) = Notification.Action.Builder(
-        icon,
-        title,
-        PendingIntent.getService(
+    private fun action(icon: Int, title: String, action: String): Notification.Action {
+        val pendingIntent = PendingIntent.getService(
             this,
             action.hashCode(),
             Intent(this, MediaPlaybackService::class.java).setAction(action),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        ),
-    ).build()
+        )
+        return Notification.Action.Builder(
+            Icon.createWithResource(this, icon),
+            title,
+            pendingIntent,
+        ).build()
+    }
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

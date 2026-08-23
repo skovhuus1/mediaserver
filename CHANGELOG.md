@@ -2,6 +2,20 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.8 - 2026-08-24
+
+- Rettet TV-releasecrash før første Flutter-frame ved at bevare WorkManagers
+  refleksionsindlæste Room-databaseconstructor gennem R8.
+- Flutter-CI bygger og kontrollerer nu en minificeret TV-release-APK i stedet for
+  kun en debug-APK.
+- Tilføjet mapping-regressionstest og rigtig ADB/Leanback launch-smoke-test.
+- Reproduceret den oprindelige fejl på en officiel Google TV API 36-emulator og
+  fastholdt den konkrete Android-stacktrace i release-gaten.
+- Rettet API 24/25 playback-notifikation, Android 14 updater-receiver,
+  TV-launcher-export, Ethernet-TV-kompatibilitet, no-backup-policy og PiP-transition.
+- Native Android lint er nu en obligatorisk Flutter-CI-gate.
+- Gradle-wrapperen er komplet versionsstyret for både Linux- og Windows-runners.
+
 ## 0.2.7 - 2026-08-23
 
 - Hærder Android TV-opstart ved at deaktivere Impeller på TV-flavoren og bruge den bredt kompatible Skia-renderer.

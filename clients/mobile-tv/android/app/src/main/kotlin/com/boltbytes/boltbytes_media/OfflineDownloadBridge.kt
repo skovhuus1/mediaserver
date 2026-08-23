@@ -1,6 +1,7 @@
 package com.boltbytes.boltbytes_media
 
 import android.content.Context
+import androidx.core.content.edit
 import androidx.work.Constraints
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
@@ -114,7 +115,7 @@ class OfflineDownloadBridge(
         val nativeId = call.argument<Number>("downloadId")?.toLong()
         nativeId?.let {
             mappings.getString(it.toString(), null)?.let(UUID::fromString)?.let(workManager::cancelWorkById)
-            mappings.edit().remove(it.toString()).apply()
+            mappings.edit { remove(it.toString()) }
         }
         val path = call.argument<String>("localPath")
         val id = path?.let(::ownedMediaId)
@@ -160,7 +161,7 @@ class OfflineDownloadBridge(
         var candidate = (workId.mostSignificantBits xor workId.leastSignificantBits).absoluteValue
         if (candidate == 0L) candidate = System.currentTimeMillis()
         while (mappings.contains(candidate.toString())) candidate += 1
-        mappings.edit().putString(candidate.toString(), workId.toString()).commit()
+        mappings.edit(commit = true) { putString(candidate.toString(), workId.toString()) }
         return candidate
     }
 

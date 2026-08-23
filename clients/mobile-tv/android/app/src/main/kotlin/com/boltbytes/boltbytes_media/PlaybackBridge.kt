@@ -1,6 +1,7 @@
 package com.boltbytes.boltbytes_media
 
 import android.app.PictureInPictureParams
+import android.graphics.Rect
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Rational
@@ -95,6 +96,10 @@ class PlaybackBridge(
         val ratioHeight = videoHeight.coerceAtLeast(ratioWidth * 100 / 239)
         val builder = PictureInPictureParams.Builder()
             .setAspectRatio(Rational(ratioWidth, ratioHeight))
+        val sourceRect = Rect()
+        if (activity.window.decorView.getGlobalVisibleRect(sourceRect) && !sourceRect.isEmpty) {
+            builder.setSourceRectHint(sourceRect)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.setAutoEnterEnabled(active && playing && allowPictureInPicture)
                 .setSeamlessResizeEnabled(true)
@@ -107,11 +112,13 @@ class PlaybackBridge(
             !active || !allowPictureInPicture ||
             !activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
         ) return false
-        return activity.enterPictureInPictureMode(
-            PictureInPictureParams.Builder()
-                .setAspectRatio(Rational(videoWidth.coerceAtLeast(1), videoHeight.coerceAtLeast(1)))
-                .build(),
-        )
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(videoWidth.coerceAtLeast(1), videoHeight.coerceAtLeast(1)))
+        val sourceRect = Rect()
+        if (activity.window.decorView.getGlobalVisibleRect(sourceRect) && !sourceRect.isEmpty) {
+            builder.setSourceRectHint(sourceRect)
+        }
+        return activity.enterPictureInPictureMode(builder.build())
     }
 
     override fun onListen(arguments: Any?, sink: EventChannel.EventSink) {
