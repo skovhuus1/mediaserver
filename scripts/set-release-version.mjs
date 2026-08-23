@@ -45,4 +45,12 @@ await writeFile(
     `version: ${version}+${nextBuildNumber}`,
   ),
 );
+
+const readmePath = resolve(root, 'README.md');
+const readme = await readFile(readmePath, 'utf8');
+if (!/^Aktuel release: \*\*[^*]+\*\*/mu.test(readme)) throw new Error('README.md mangler Aktuel release-linjen');
+await writeFile(
+  readmePath,
+  readme.replace(/^Aktuel release: \*\*[^*]+\*\*/mu, `Aktuel release: **${version}**`),
+);
 console.log(`BoltBytes Media Server version sat til ${version}.`);

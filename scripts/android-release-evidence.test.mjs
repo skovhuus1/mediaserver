@@ -4,8 +4,8 @@ import { parseApkSignerOutput, parseKeytoolFingerprint, validateArtifactSet } fr
 
 const certificate = "a".repeat(64);
 const manifests = {
-  mobile: '<category android:name="android.intent.category.LAUNCHER" />',
-  tv: '<uses-feature android:name="android.software.leanback" android:required="true" /><category android:name="android.intent.category.LEANBACK_LAUNCHER" />',
+  mobile: '<category android:name="android.intent.category.LAUNCHER" /><meta-data android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME" android:value="com.boltbytes.CastOptionsProvider" />',
+  tv: '<uses-feature android:name="android.software.leanback" android:required="true" /><category android:name="android.intent.category.LEANBACK_LAUNCHER" /><meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />',
 };
 
 function artifact(variant, overrides = {}) {
@@ -19,6 +19,14 @@ function validate(overrides = {}) {
 test("accepts distinct mobile and TV flavors", () => assert.equal(validate().passed, true));
 test("rejects identical APKs", () => assert.equal(validate({ tv: { sha256: "mobile-hash" } }).gates.find((gate) => gate.id === "variants.distinct")?.passed, false));
 test("rejects Leanback in mobile", () => assert.equal(validate({ mobile: { manifest: `${manifests.mobile}${manifests.tv}` } }).gates.find((gate) => gate.id === "mobile.not_tv_launcher")?.passed, false));
+test("requires the Cast provider only in mobile", () => {
+  assert.equal(validate({ mobile: { manifest: '<category android:name="android.intent.category.LAUNCHER" />' } }).gates.find((gate) => gate.id === "mobile.cast_provider")?.passed, false);
+  assert.equal(validate({ tv: { manifest: `${manifests.tv}<meta-data android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME" />` } }).gates.find((gate) => gate.id === "tv.no_cast_provider")?.passed, false);
+});
+test("requires Impeller to be disabled in TV artifacts", () => {
+  const manifest = manifests.tv.replace('android:value="false"', 'android:value="true"');
+  assert.equal(validate({ tv: { manifest } }).gates.find((gate) => gate.id === "tv.impeller_disabled")?.passed, false);
+});
 test("rejects production debug signing but permits explicit CI debug signing", () => {
   const signing = { ...artifact("mobile").signing, debugCertificate: true };
   assert.equal(validate({ mobile: { signing }, tv: { signing } }).passed, false);

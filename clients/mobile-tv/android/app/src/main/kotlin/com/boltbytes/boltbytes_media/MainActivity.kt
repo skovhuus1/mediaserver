@@ -1,5 +1,6 @@
 package com.boltbytes.boltbytes_media
 
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
@@ -10,18 +11,31 @@ class MainActivity : FlutterActivity() {
     private var offlineDownloadBridge: OfflineDownloadBridge? = null
     private var crashBridge: CrashBridge? = null
 
+    private val isTvBuild: Boolean
+        get() = getString(R.string.device_variant).equals("tv", ignoreCase = true)
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        PushNotificationChannels.ensure(this)
-        flutterEngine
-            .platformViewsController
-            .registry
-            .registerViewFactory(CastBridge.BUTTON_VIEW_TYPE, CastRouteButtonFactory())
-        castBridge = CastBridge(this, flutterEngine.dartExecutor.binaryMessenger)
-        playbackBridge = PlaybackBridge(this, flutterEngine.dartExecutor.binaryMessenger)
-        updateBridge = AppUpdateBridge(this, flutterEngine.dartExecutor.binaryMessenger)
-        offlineDownloadBridge = OfflineDownloadBridge(this, flutterEngine.dartExecutor.binaryMessenger)
-        crashBridge = CrashBridge(this, flutterEngine.dartExecutor.binaryMessenger)
+        runCatching { PushNotificationChannels.ensure(this) }
+            .onFailure { Log.e(TAG, "Notification channels could not initialize", it) }
+
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
+        if (!isTvBuild) {
+            runCatching {
+                flutterEngine
+                    .platformViewsController
+                    .registry
+                    .registerViewFactory(CastBridge.BUTTON_VIEW_TYPE, CastRouteButtonFactory())
+                CastBridge(this, messenger)
+            }.onSuccess { castBridge = it }
+                .onFailure { Log.e(TAG, "Cast bridge could not initialize", it) }
+        }
+        playbackBridge = optionalBridge("playback") { PlaybackBridge(this, messenger) }
+        updateBridge = optionalBridge("updater") { AppUpdateBridge(this, messenger) }
+        offlineDownloadBridge = optionalBridge("offline downloads") {
+            OfflineDownloadBridge(this, messenger)
+        }
+        crashBridge = optionalBridge("crash reporting") { CrashBridge(this, messenger) }
     }
 
     override fun onUserLeaveHint() {
@@ -49,5 +63,14 @@ class MainActivity : FlutterActivity() {
         offlineDownloadBridge = null
         crashBridge = null
         super.onDestroy()
+    }
+
+    private inline fun <T> optionalBridge(name: String, factory: () -> T): T? =
+        runCatching(factory)
+            .onFailure { Log.e(TAG, "$name bridge could not initialize", it) }
+            .getOrNull()
+
+    companion object {
+        private const val TAG = "BoltBytesMainActivity"
     }
 }

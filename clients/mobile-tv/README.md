@@ -7,6 +7,8 @@ Flutter-klienten deler domæne- og netværkskode, men Android leveres som to rig
 
 Det forhindrer, at samme APK blot omdøbes til både mobil og TV.
 
+TV-flavoren bruger Flutter Skia-rendereren for kompatibilitet med ældre og leverandørspecifikke TV-grafikdrivere. Google Cast-senderen initialiseres kun i mobilflavoren; en fejl i en valgfri native bro eller lokal sessionslagring må ikke længere lukke appen under opstart.
+
 ## Lokal udvikling
 
 ~~~bash
