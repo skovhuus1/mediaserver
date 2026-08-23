@@ -56,13 +56,14 @@ Aktive optagelser og aktive seersessioner deler de samme fysiske forbindelses- o
 ## Konfiguration
 
 ```env
-BB_MEDIA_LIVE_TV_IMPORT_MAX_BYTES=52428800
+BB_MEDIA_LIVE_TV_IMPORT_MAX_BYTES=268435456
 BB_MEDIA_LIVE_TV_EPG_MAX_BYTES=209715200
+BB_MEDIA_LIVE_TV_FETCH_TIMEOUT_MS=300000
 BB_MEDIA_LIVE_TV_PAUSE_BUFFER_SECONDS=7200
 BB_MEDIA_LIVE_TV_RECORDING_SCHEDULER_SECONDS=15
 ```
 
-M3U er som standard begrænset til 50 MiB og XMLTV til 200 MiB. Workerens eksisterende `DATABASE_URL`, `ENCRYPTION_KEY`, FFmpeg og transcode-volume er påkrævet.
+M3U er som standard begrænset til 256 MiB og XMLTV til 200 MiB. Begge kilder læses som streams og afbrydes, så snart den effektive grænse overskrides; deklareret `Content-Length` afvises før body-download. Hentning har som standard fem minutters timeout. Grænserne kan hæves for en betroet udbyder, men kræver genoprettelse af worker-containeren. Workerens eksisterende `DATABASE_URL`, `ENCRYPTION_KEY`, FFmpeg og transcode-volume er påkrævet.
 
 ## API-overblik
 
