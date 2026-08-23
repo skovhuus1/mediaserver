@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../app.dart';
+import '../core/models.dart';
 import '../state/app_controller.dart';
 import '../widgets/brand.dart';
 
@@ -23,6 +27,11 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailFocus = FocusNode();
   final _passwordFocus = FocusNode();
   final _loginButtonFocus = FocusNode();
+  Timer? _qrPollTimer;
+  TvLoginPairing? _tvPairing;
+  String? _qrMessage;
+  bool _qrStarting = false;
+  bool _showPasswordLogin = false;
   bool _showPassword = false;
   bool _editServer = false;
 
@@ -35,6 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _qrPollTimer?.cancel();
     _server.dispose();
     _email.dispose();
     _password.dispose();
@@ -53,6 +63,96 @@ class _LoginScreenState extends State<LoginScreen> {
       password: _password.text,
       requestedServerUrl: _server.text,
     );
+  }
+
+  Future<void> _startQrLogin() async {
+    _server.text = _normalizeServerInput(_server.text);
+    final serverError = _validateServerInput(_server.text);
+    if (serverError != null) {
+      setState(() => _qrMessage = serverError);
+      return;
+    }
+    _qrPollTimer?.cancel();
+    setState(() {
+      _qrStarting = true;
+      _tvPairing = null;
+      _qrMessage = 'Opretter sikker QR-kode...';
+    });
+    final pairing = await widget.controller.startTvLogin(
+      requestedServerUrl: _server.text,
+    );
+    if (!mounted) return;
+    setState(() {
+      _qrStarting = false;
+      _tvPairing = pairing;
+      _qrMessage = pairing == null
+          ? null
+          : 'Scan QR-koden med en mobil eller browser, hvor du allerede er logget ind.';
+    });
+    if (pairing != null) {
+      _scheduleQrPoll(const Duration(milliseconds: 700));
+    }
+  }
+
+  void _scheduleQrPoll([Duration? delay]) {
+    _qrPollTimer?.cancel();
+    final pairing = _tvPairing;
+    if (pairing == null) return;
+    final seconds = pairing.pollIntervalSeconds.clamp(1, 10);
+    _qrPollTimer = Timer(delay ?? Duration(seconds: seconds), _pollQrLogin);
+  }
+
+  Future<void> _pollQrLogin() async {
+    final pairing = _tvPairing;
+    if (!mounted || pairing == null) return;
+    if (DateTime.now().isAfter(pairing.expiresAt)) {
+      setState(() {
+        _tvPairing = null;
+        _qrMessage = 'QR-koden er udløbet. Opret en ny kode.';
+      });
+      return;
+    }
+    try {
+      final result = await widget.controller.pollTvLogin(pairing);
+      if (!mounted) return;
+      if (result.isApproved) {
+        _qrPollTimer?.cancel();
+        setState(() => _qrMessage = 'Godkendt. Logger ind...');
+        return;
+      }
+      if (result.isExpired) {
+        setState(() {
+          _tvPairing = null;
+          _qrMessage = 'QR-koden er udløbet. Opret en ny kode.';
+        });
+        return;
+      }
+      if (result.isConsumed) {
+        setState(() {
+          _tvPairing = null;
+          _qrMessage = 'QR-koden er allerede brugt. Opret en ny kode.';
+        });
+        return;
+      }
+      setState(() {
+        _qrMessage = 'Venter på godkendelse... Kode ${pairing.userCode}.';
+      });
+      _scheduleQrPoll(
+        Duration(seconds: (result.pollIntervalSeconds ?? 2).clamp(1, 10)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _qrMessage = 'QR-login fejlede. Opret en ny kode.');
+    }
+  }
+
+  void _cancelQrLogin() {
+    _qrPollTimer?.cancel();
+    setState(() {
+      _tvPairing = null;
+      _qrMessage = null;
+      _qrStarting = false;
+    });
   }
 
   String _normalizeServerInput(String value) {
@@ -118,6 +218,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final tv = useTvLayout(context);
+    final showPasswordLogin = !tv || _showPasswordLogin;
     final form = ConstrainedBox(
       constraints: BoxConstraints(maxWidth: tv ? 520 : 460),
       child: Form(
@@ -137,7 +238,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             const SizedBox(height: 14),
             const Text(
-              'Log ind på din egen BoltBytes-server. Dine tokens gemmes krypteret på enheden.',
+              'Log ind på din egen BoltBytes-server. På TV kan du bruge QR-login uden at skrive e-mail og adgangskode med fjernbetjeningen.',
               style: TextStyle(color: Colors.white60, height: 1.5),
             ),
             const SizedBox(height: 28),
@@ -204,85 +305,121 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
               ),
-            const SizedBox(height: 14),
-            Focus(
-              onKeyEvent: tv
-                  ? (node, event) => _handleUpDown(
-                      event,
-                      _passwordFocus,
-                      _editServer ? _serverFocus : null,
-                    )
-                  : null,
-              child: TextFormField(
-                controller: _email,
-                focusNode: _emailFocus,
-                autofocus: tv,
-                keyboardType: TextInputType.emailAddress,
-                textInputAction: TextInputAction.next,
-                onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
-                autofillHints: const [AutofillHints.email],
-                decoration: const InputDecoration(
-                  labelText: 'E-mail',
-                  prefixIcon: Icon(Icons.alternate_email),
-                ),
-                validator: (value) {
-                  final raw = value?.trim() ?? '';
-                  if (raw.isEmpty) return 'Indtast din e-mail.';
-                  if (_isUrlLike(raw)) {
-                    return 'Indtast kun e-mail, ikke URL.';
-                  }
-                  return raw.contains('@') ? null : 'Indtast en gyldig e-mail.';
-                },
+            if (tv) ...[
+              const SizedBox(height: 18),
+              _TvQrLoginPanel(
+                pairing: _tvPairing,
+                starting: _qrStarting || widget.controller.busy,
+                message: _qrMessage,
+                error: widget.controller.error,
+                onStart: _startQrLogin,
+                onCancel: _cancelQrLogin,
               ),
-            ),
-            const SizedBox(height: 14),
-            Focus(
-              onKeyEvent: tv
-                  ? (node, event) =>
-                        _handleUpDown(event, _loginButtonFocus, _emailFocus)
-                  : null,
-              child: TextFormField(
-                controller: _password,
-                focusNode: _passwordFocus,
-                obscureText: !_showPassword,
-                textInputAction: TextInputAction.done,
-                onFieldSubmitted: (_) => _submit(),
-                autofillHints: const [AutofillHints.password],
-                decoration: InputDecoration(
-                  labelText: 'Adgangskode',
-                  prefixIcon: const Icon(Icons.lock_outline),
-                  suffixIcon: IconButton(
-                    onPressed: () =>
-                        setState(() => _showPassword = !_showPassword),
-                    icon: Icon(
-                      _showPassword ? Icons.visibility_off : Icons.visibility,
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: () =>
+                    setState(() => _showPasswordLogin = !_showPasswordLogin),
+                icon: Icon(
+                  _showPasswordLogin
+                      ? Icons.qr_code_2_outlined
+                      : Icons.keyboard_outlined,
+                ),
+                label: Text(
+                  _showPasswordLogin
+                      ? 'Brug QR-login i stedet'
+                      : 'Log ind med e-mail og adgangskode',
+                ),
+              ),
+            ],
+            if (showPasswordLogin) ...[
+              const SizedBox(height: 14),
+              Focus(
+                onKeyEvent: tv
+                    ? (node, event) => _handleUpDown(
+                        event,
+                        _passwordFocus,
+                        _editServer ? _serverFocus : null,
+                      )
+                    : null,
+                child: TextFormField(
+                  controller: _email,
+                  focusNode: _emailFocus,
+                  autofocus: !tv,
+                  keyboardType: TextInputType.emailAddress,
+                  textInputAction: TextInputAction.next,
+                  onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
+                  autofillHints: const [AutofillHints.email],
+                  decoration: const InputDecoration(
+                    labelText: 'E-mail',
+                    prefixIcon: Icon(Icons.alternate_email),
+                  ),
+                  validator: (value) {
+                    if (!showPasswordLogin) return null;
+                    final raw = value?.trim() ?? '';
+                    if (raw.isEmpty) return 'Indtast din e-mail.';
+                    if (_isUrlLike(raw)) {
+                      return 'Indtast kun e-mail, ikke URL.';
+                    }
+                    return raw.contains('@')
+                        ? null
+                        : 'Indtast en gyldig e-mail.';
+                  },
+                ),
+              ),
+              const SizedBox(height: 14),
+              Focus(
+                onKeyEvent: tv
+                    ? (node, event) =>
+                          _handleUpDown(event, _loginButtonFocus, _emailFocus)
+                    : null,
+                child: TextFormField(
+                  controller: _password,
+                  focusNode: _passwordFocus,
+                  obscureText: !_showPassword,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _submit(),
+                  autofillHints: const [AutofillHints.password],
+                  decoration: InputDecoration(
+                    labelText: 'Adgangskode',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      onPressed: () =>
+                          setState(() => _showPassword = !_showPassword),
+                      icon: Icon(
+                        _showPassword ? Icons.visibility_off : Icons.visibility,
+                      ),
                     ),
                   ),
+                  validator: (value) {
+                    if (!showPasswordLogin) return null;
+                    return value == null || value.isEmpty
+                        ? 'Indtast adgangskoden.'
+                        : null;
+                  },
                 ),
-                validator: (value) => value == null || value.isEmpty
-                    ? 'Indtast adgangskoden.'
-                    : null,
               ),
-            ),
+            ],
             if (widget.controller.error != null) ...[
               const SizedBox(height: 14),
               _ErrorMessage(widget.controller.error!),
             ],
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              focusNode: _loginButtonFocus,
-              onPressed: widget.controller.busy ? null : _submit,
-              icon: widget.controller.busy
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.login),
-              label: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 14),
-                child: Text('Log ind'),
+            if (showPasswordLogin) ...[
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                focusNode: _loginButtonFocus,
+                onPressed: widget.controller.busy ? null : _submit,
+                icon: widget.controller.busy
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.login),
+                label: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 14),
+                  child: Text('Log ind'),
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -304,6 +441,149 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
       ),
     );
+  }
+}
+
+class _TvQrLoginPanel extends StatelessWidget {
+  const _TvQrLoginPanel({
+    required this.pairing,
+    required this.starting,
+    required this.message,
+    required this.error,
+    required this.onStart,
+    required this.onCancel,
+  });
+
+  final TvLoginPairing? pairing;
+  final bool starting;
+  final String? message;
+  final String? error;
+  final VoidCallback onStart;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final activePairing = pairing;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F151D),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFF263241)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 28,
+            offset: Offset(0, 16),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.qr_code_2_outlined, color: Color(0xFFF7C66A)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'TV-login med QR',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (activePairing == null)
+            FilledButton.icon(
+              onPressed: starting ? null : onStart,
+              icon: starting
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.qr_code_scanner_outlined),
+              label: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 14),
+                child: Text('Vis QR-kode'),
+              ),
+            )
+          else ...[
+            Center(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: QrImageView(
+                    data: activePairing.approveUrl,
+                    version: QrVersions.auto,
+                    size: 220,
+                    eyeStyle: const QrEyeStyle(
+                      eyeShape: QrEyeShape.square,
+                      color: Color(0xFF071018),
+                    ),
+                    dataModuleStyle: const QrDataModuleStyle(
+                      dataModuleShape: QrDataModuleShape.square,
+                      color: Color(0xFF071018),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Center(
+              child: SelectableText(
+                activePairing.userCode,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  color: const Color(0xFFF7C66A),
+                  letterSpacing: 4,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Godkend inden ${_minutesLeft(activePairing.expiresAt)} min.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white54),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: onCancel,
+              icon: const Icon(Icons.refresh_outlined),
+              label: const Text('Opret ny kode'),
+            ),
+          ],
+          if ((message ?? '').isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              message!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, height: 1.35),
+            ),
+          ],
+          if ((error ?? '').isNotEmpty && activePairing == null) ...[
+            const SizedBox(height: 12),
+            Text(
+              error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static int _minutesLeft(DateTime expiresAt) {
+    final seconds = expiresAt.difference(DateTime.now()).inSeconds;
+    if (seconds <= 0) return 0;
+    return (seconds / 60).ceil();
   }
 }
 

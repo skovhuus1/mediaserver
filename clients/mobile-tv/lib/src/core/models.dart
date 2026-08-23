@@ -98,6 +98,71 @@ class SessionUser {
   }
 }
 
+class TvLoginPairing {
+  const TvLoginPairing({
+    required this.pairingId,
+    required this.status,
+    required this.userCode,
+    required this.approveUrl,
+    required this.approvePath,
+    required this.pollToken,
+    required this.pollIntervalSeconds,
+    required this.expiresAt,
+  });
+
+  final String pairingId;
+  final String status;
+  final String userCode;
+  final String approveUrl;
+  final String approvePath;
+  final String pollToken;
+  final int pollIntervalSeconds;
+  final DateTime expiresAt;
+
+  factory TvLoginPairing.fromJson(dynamic value) {
+    final json = jsonMap(value);
+    final expiresAt =
+        DateTime.tryParse(stringValue(json['expiresAt']) ?? '') ??
+        DateTime.now().add(const Duration(minutes: 5));
+    return TvLoginPairing(
+      pairingId: stringValue(json['pairingId']) ?? '',
+      status: stringValue(json['status']) ?? 'pending',
+      userCode: stringValue(json['userCode']) ?? '',
+      approveUrl: stringValue(json['approveUrl']) ?? '',
+      approvePath: stringValue(json['approvePath']) ?? '',
+      pollToken: stringValue(json['pollToken']) ?? '',
+      pollIntervalSeconds: intValue(json['pollIntervalSeconds']) ?? 2,
+      expiresAt: expiresAt,
+    );
+  }
+}
+
+class TvLoginPollResult {
+  const TvLoginPollResult({
+    required this.status,
+    this.pollIntervalSeconds,
+    this.expiresAt,
+  });
+
+  final String status;
+  final int? pollIntervalSeconds;
+  final DateTime? expiresAt;
+
+  bool get isApproved => status == 'approved';
+  bool get isPending => status == 'pending';
+  bool get isExpired => status == 'expired';
+  bool get isConsumed => status == 'consumed';
+
+  factory TvLoginPollResult.fromJson(dynamic value) {
+    final json = jsonMap(value);
+    return TvLoginPollResult(
+      status: stringValue(json['status']) ?? 'pending',
+      pollIntervalSeconds: intValue(json['pollIntervalSeconds']),
+      expiresAt: DateTime.tryParse(stringValue(json['expiresAt']) ?? ''),
+    );
+  }
+}
+
 class PlaybackProgress {
   const PlaybackProgress({
     required this.positionMs,

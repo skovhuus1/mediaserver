@@ -139,4 +139,67 @@ void main() {
       ),
     );
   });
+
+  test('starts and consumes TV QR login with absolute approval URL', () async {
+    final storage = _MemoryStorage();
+    final client = MockClient((request) async {
+      if (request.url.path.endsWith('/auth/tv/start')) {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['deviceFingerprint'], 'fingerprint-123');
+        expect(body['deviceName'], 'BoltBytes Android TV');
+        expect(body['deviceType'], 'tv');
+        return http.Response(
+          jsonEncode({
+            'pairingId': '00000000-0000-0000-0000-000000000001',
+            'status': 'pending',
+            'userCode': '123 456',
+            'approveUrl': '/login/tv?token=approve-token',
+            'approvePath': '/login/tv?token=approve-token',
+            'pollToken': 'poll-token-with-enough-length-to-pass-client',
+            'pollIntervalSeconds': 2,
+            'expiresAt': '2026-08-23T12:00:00.000Z',
+          }),
+          200,
+        );
+      }
+      if (request.url.path.endsWith('/auth/tv/poll')) {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['pairingId'], '00000000-0000-0000-0000-000000000001');
+        expect(body['pollToken'], 'poll-token');
+        return http.Response(
+          jsonEncode({
+            'status': 'approved',
+            'accessToken': 'access-tv',
+            'refreshToken': 'refresh-tv',
+            'expiresIn': 900,
+          }),
+          200,
+        );
+      }
+      return http.Response('not found', 404);
+    });
+    final api = ApiClient(
+      baseUrl: 'https://media.example.test/api/v1',
+      storage: storage,
+      httpClient: client,
+    );
+
+    final pairing = await api.startTvLogin(
+      deviceFingerprint: 'fingerprint-123',
+      deviceName: 'BoltBytes Android TV',
+      deviceType: 'tv',
+    );
+    final approved = await api.pollTvLogin(
+      pairingId: '00000000-0000-0000-0000-000000000001',
+      pollToken: 'poll-token',
+    );
+
+    expect(
+      pairing['approveUrl'],
+      'https://media.example.test/login/tv?token=approve-token',
+    );
+    expect(approved['status'], 'approved');
+    expect(storage.access, 'access-tv');
+    expect(storage.refresh, 'refresh-tv');
+  });
 }

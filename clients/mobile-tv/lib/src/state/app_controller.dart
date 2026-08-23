@@ -83,6 +83,61 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  Future<TvLoginPairing?> startTvLogin({
+    required String requestedServerUrl,
+  }) async {
+    busy = true;
+    error = null;
+    notifyListeners();
+    try {
+      serverUrl = AppConfig.normalizeApiUrl(requestedServerUrl);
+      api.configureBaseUrl(serverUrl);
+      await storage.writeServerUrl(serverUrl);
+      offlineMode = false;
+      final result = await api.startTvLogin(
+        deviceFingerprint: await storage.deviceFingerprint(),
+        deviceName: AppConfig.isTvBuild
+            ? 'BoltBytes Android TV'
+            : 'BoltBytes Android',
+        deviceType: AppConfig.isTvBuild ? 'tv' : 'mobile',
+      );
+      return TvLoginPairing.fromJson(result);
+    } on ApiException catch (failure) {
+      error = failure.message;
+      return null;
+    } catch (_) {
+      error = 'Forbindelsen til serveren fejlede. Prøv igen.';
+      return null;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<TvLoginPollResult> pollTvLogin(TvLoginPairing pairing) async {
+    try {
+      final result = TvLoginPollResult.fromJson(
+        await api.pollTvLogin(
+          pairingId: pairing.pairingId,
+          pollToken: pairing.pollToken,
+        ),
+      );
+      if (result.isApproved) {
+        error = null;
+        await _loadUser(forceLibrary: true);
+      }
+      return result;
+    } on ApiException catch (failure) {
+      error = failure.message;
+      notifyListeners();
+      rethrow;
+    } catch (_) {
+      error = 'Forbindelsen til serveren fejlede. Prøv igen.';
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<void> completePasswordChange(String password) async {
     await _guard(() async {
       final token = _passwordChangeToken;
