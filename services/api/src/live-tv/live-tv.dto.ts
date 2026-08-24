@@ -84,6 +84,11 @@ export class BulkUpdateLiveTvAllChannelsDto {
   action!: 'show' | 'hide';
 }
 
+export class ReorderLiveTvChannelDto {
+  @IsUUID('4') targetChannelId!: string;
+  @IsIn(['before', 'after']) placement: 'before' | 'after' = 'before';
+}
+
 export class ListAdminLiveTvChannelsDto {
   @IsOptional() @IsString() @MaxLength(160) search?: string;
   @IsOptional() @IsString() @MaxLength(120) group?: string;

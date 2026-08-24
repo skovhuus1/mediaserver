@@ -14,6 +14,7 @@ export * from './direct-stream-remux.js';
 export * from './series-continuity.js';
 export * from './transcode-timeline.js';
 export * from './live-tv-channel.js';
+export * from './live-tv-danish-channel-order.js';
 export * from './tv-login.js';
 export * from './release.js';
 
