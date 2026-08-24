@@ -11,6 +11,7 @@
             tools:node="remove" />
         <activity
             android:name=".MainActivity"
+            android:banner="@drawable/tv_banner"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
