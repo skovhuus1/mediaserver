@@ -9,12 +9,15 @@ import type {
   ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto,
   UpdateLiveTvSourceDto,
 } from './live-tv.dto';
-import { changedChannelIds, uniqueChannelIds } from './live-tv-channel-visibility';
+import {
+  changedChannelIds,
+  LIVE_TV_VISIBILITY_TRANSACTION_OPTIONS,
+  uniqueChannelIds,
+} from './live-tv-channel-visibility';
 import {
   channelGroupFacets,
   DEFAULT_ADMIN_CHANNEL_PAGE_SIZE,
   MAX_ADMIN_CHANNEL_PAGE_SIZE,
-  MAX_ADMIN_LIVE_TV_CHANNELS,
   visibilityCounts,
 } from './live-tv-channel-catalog';
 import { presentLiveTvGuidePrograms, resolveLiveTvGuideWindow } from './live-tv-guide';
@@ -325,55 +328,98 @@ export class LiveTvService {
   }
 
   async bulkUpdateAllChannels(actor: AuthenticatedUser, dto: BulkUpdateLiveTvAllChannelsDto) {
-    const enabled = dto.action === 'show';
+    const result = await this.bulkUpdateChannelScope(
+      actor,
+      dto.action,
+      {},
+      'live_tv.channel.all_visibility',
+      { scope: 'all' },
+    );
+    return { ...result, scope: 'all' };
+  }
+
+  async bulkUpdateChannelGroup(actor: AuthenticatedUser, dto: BulkUpdateLiveTvChannelGroupDto) {
+    const groupName = dto.groupName.trim();
+    if (!groupName) throw new BadRequestException({ code: 'live_tv_group_required', message: 'Vælg en kanalgruppe' });
+    const result = await this.bulkUpdateChannelScope(
+      actor,
+      dto.action,
+      { groupName: { equals: groupName, mode: 'insensitive' } },
+      'live_tv.channel.group_visibility',
+      { scope: 'group', groupName },
+    );
+    if (result.matchedCount === 0) {
+      throw new NotFoundException({ code: 'live_tv_group_missing', message: 'Kanalgruppen blev ikke fundet' });
+    }
+    return { ...result, groupName };
+  }
+
+  private async bulkUpdateChannelScope(
+    actor: AuthenticatedUser,
+    action: 'show' | 'hide',
+    scope: Prisma.LiveTvChannelWhereInput,
+    auditAction: string,
+    auditScope: Record<string, string>,
+  ) {
+    const enabled = action === 'show';
     const now = new Date();
+    const channelWhere: Prisma.LiveTvChannelWhereInput = { ...scope, accountId: actor.accountId };
 
     return this.prisma.$transaction(async (tx) => {
-      const matchedCount = await tx.liveTvChannel.count({ where: { accountId: actor.accountId } });
+      const matchedCount = await tx.liveTvChannel.count({ where: channelWhere });
       const changedCount = (await tx.liveTvChannel.updateMany({
-        where: { accountId: actor.accountId, enabled: !enabled },
+        where: { ...channelWhere, enabled: !enabled },
         data: { enabled },
       })).count;
-
       let releasedStreams = 0;
       let cancelledRecordings = 0;
 
-      if (!enabled) {
-        const activeLeases = await tx.liveTvLease.findMany({
-          where: {
-            accountId: actor.accountId,
-            status: { in: ['preparing', 'ready', 'active'] },
-            leaseExpiresAt: { gt: now },
-          },
-          select: { id: true, jobId: true },
-        });
-        const activeRecordings = await tx.liveTvRecording.findMany({
-          where: {
-            accountId: actor.accountId,
-            status: { in: ['scheduled', 'queued', 'recording'] },
-          },
-          select: { id: true, jobId: true },
-        });
+      if (!enabled && changedCount > 0) {
+        const [activeLeases, activeRecordings] = await Promise.all([
+          tx.liveTvLease.findMany({
+            where: {
+              accountId: actor.accountId,
+              status: { in: ['preparing', 'ready', 'active'] },
+              leaseExpiresAt: { gt: now },
+            },
+            select: { id: true, jobId: true, channelId: true },
+          }),
+          tx.liveTvRecording.findMany({
+            where: {
+              accountId: actor.accountId,
+              status: { in: ['scheduled', 'queued', 'recording'] },
+            },
+            select: { id: true, jobId: true, channelId: true },
+          }),
+        ]);
+        const activeChannelIds = [...new Set([...activeLeases, ...activeRecordings].map((item) => item.channelId))];
+        const affectedChannelIds = activeChannelIds.length > 0
+          ? new Set((await tx.liveTvChannel.findMany({
+              where: { ...channelWhere, id: { in: activeChannelIds } },
+              select: { id: true },
+            })).map((channel) => channel.id))
+          : new Set<string>();
+        const affectedLeases = activeLeases.filter((lease) => affectedChannelIds.has(lease.channelId));
+        const affectedRecordings = activeRecordings.filter((recording) => affectedChannelIds.has(recording.channelId));
 
-        if (activeLeases.length > 0) {
+        if (affectedLeases.length > 0) {
           releasedStreams = (await tx.liveTvLease.updateMany({
-            where: { id: { in: activeLeases.map((lease) => lease.id) } },
+            where: { id: { in: affectedLeases.map((lease) => lease.id) } },
             data: {
               status: 'released', runtimeState: 'channel_hidden', endedAt: now,
-              leaseExpiresAt: now, lastError: 'all_channels_hidden_by_admin',
+              leaseExpiresAt: now, lastError: 'channel_hidden_by_admin',
             },
           })).count;
         }
-        if (activeRecordings.length > 0) {
+        if (affectedRecordings.length > 0) {
           cancelledRecordings = (await tx.liveTvRecording.updateMany({
-            where: { id: { in: activeRecordings.map((recording) => recording.id) } },
+            where: { id: { in: affectedRecordings.map((recording) => recording.id) } },
             data: {
-              status: 'cancelled', error: 'Alle kanaler blev skjult af administratoren', recordingEndedAt: now,
+              status: 'cancelled', error: 'Kanalen blev skjult af administratoren', recordingEndedAt: now,
             },
           })).count;
         }
-
-        const jobIds = [...new Set([...activeLeases, ...activeRecordings]
+        const jobIds = [...new Set([...affectedLeases, ...affectedRecordings]
           .flatMap((item) => item.jobId ? [item.jobId] : []))];
         if (jobIds.length > 0) {
           await tx.systemJob.updateMany({
@@ -385,39 +431,11 @@ export class LiveTvService {
 
       await tx.auditLog.create({ data: {
         accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId,
-        action: 'live_tv.channel.all_visibility', outcome: 'success', code: dto.action,
-        details: {
-          scope: 'all', matchedCount, changedCount, releasedStreams, cancelledRecordings,
-        },
+        action: auditAction, outcome: 'success', code: action,
+        details: { ...auditScope, matchedCount, changedCount, releasedStreams, cancelledRecordings },
       } });
-
-      return {
-        action: dto.action, scope: 'all', matchedCount, changedCount,
-        releasedStreams, cancelledRecordings,
-      };
-    });
-  }
-
-  async bulkUpdateChannelGroup(actor: AuthenticatedUser, dto: BulkUpdateLiveTvChannelGroupDto) {
-    const groupName = dto.groupName.trim();
-    if (!groupName) throw new BadRequestException({ code: 'live_tv_group_required', message: 'Vælg en kanalgruppe' });
-    const channels = await this.prisma.liveTvChannel.findMany({
-      where: { accountId: actor.accountId, groupName: { equals: groupName, mode: 'insensitive' } },
-      select: { id: true },
-      take: MAX_ADMIN_LIVE_TV_CHANNELS + 1,
-    });
-    if (!channels.length) throw new NotFoundException({ code: 'live_tv_group_missing', message: 'Kanalgruppen blev ikke fundet' });
-    if (channels.length > MAX_ADMIN_LIVE_TV_CHANNELS) {
-      throw new BadRequestException({
-        code: 'live_tv_group_too_large',
-        message: `Gruppen overstiger grænsen på ${MAX_ADMIN_LIVE_TV_CHANNELS.toLocaleString('da-DK')} kanaler`,
-      });
-    }
-    const result = await this.bulkUpdateChannels(actor, {
-      channelIds: channels.map((channel) => channel.id),
-      action: dto.action,
-    });
-    return { ...result, groupName };
+      return { action, matchedCount, changedCount, releasedStreams, cancelledRecordings };
+    }, LIVE_TV_VISIBILITY_TRANSACTION_OPTIONS);
   }
 
   async updateSource(actor: AuthenticatedUser, sourceId: string, dto: UpdateLiveTvSourceDto) {
