@@ -2,6 +2,10 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## Unreleased
+
+- Rettet global og gruppebaseret Live TV-kanalsynlighed for kataloger over 50.000 kanaler; scope-opdateringer kører direkte i PostgreSQL med kontrolleret transaktionstid, og adminpanelet viser stabilt layout samt afsluttet status.
+
 ## 0.2.12 - 2026-08-24
 
 - Gør Android TV-playerens kvalitet og undertekster fuldt D-pad-styrede med

@@ -30,6 +30,7 @@ export function LiveTvAdmin() {
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [lastSelectedChannelId, setLastSelectedChannelId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const canWrite = user?.roles.includes('admin') ?? false;
 
@@ -51,9 +52,9 @@ export function LiveTvAdmin() {
   useEffect(() => { void load().catch((failure) => setError(message(failure))); }, [load]);
   useEffect(() => { const timer = window.setInterval(() => void load().catch(() => undefined), 10_000); return () => window.clearInterval(timer); }, [load]);
 
-  const action = async (key: string, operation: () => Promise<unknown>) => {
-    setBusy(key); setError(null);
-    try { await operation(); await load(); } catch (failure) { setError(message(failure)); } finally { setBusy(null); }
+  const action = async (key: string, operation: () => Promise<unknown>, successMessage?: string) => {
+    setBusy(key); setError(null); setNotice(null);
+    try { await operation(); await load(); setNotice(successMessage ?? null); } catch (failure) { setError(message(failure)); } finally { setBusy(null); }
   };
 
   if (!user) return <main className="watch-loading" aria-busy="true">{error}</main>;
@@ -81,7 +82,9 @@ export function LiveTvAdmin() {
       setSelectedChannelIds([]);
       setLastSelectedChannelId(null);
       setPage(1);
-    });
+    }, nextVisibility === 'hide'
+      ? `${affectedCount.toLocaleString('da-DK')} kanaler er nu skjult.`
+      : `${affectedCount.toLocaleString('da-DK')} kanaler er nu synlige.`);
   };
   const bulkGroupVisibility = (nextVisibility: 'show' | 'hide') => {
     if (!exactGroup) return Promise.resolve();
@@ -107,6 +110,7 @@ export function LiveTvAdmin() {
       <section className={styles.page}>
         <header className={styles.hero}><div><span>LIVE CONTROL PLANE</span><h1>Live TV</h1><p>M3U-puljer, kanalstyring, XMLTV og aktive tunerpladser.</p></div><Antenna aria-hidden="true" /></header>
         {error && <div className={styles.error} role="alert"><CircleAlert />{error}</div>}
+        {notice && <div className={styles.notice} role="status" aria-live="polite"><Check />{notice}</div>}
         {canWrite && <ProviderCreate onCreate={(payload) => action('create-provider', () => api('/live-tv/admin/providers', { method: 'POST', body: JSON.stringify(payload) }))} busy={busy === 'create-provider'} />}
         <section className={styles.jobs}><header><div><span>OPGAVER</span><h2>Import og EPG-progress</h2></div><Activity /></header><div>{jobs.slice(0, 8).map((job) => <JobRow job={job} key={job.id} />)}{!jobs.length && <p>Ingen Live TV-opgaver endnu.</p>}</div></section>
         <section className={styles.providers}><header><div><span>KILDEPULJE</span><h2>Providers og M3U-linjer</h2></div><b>{activeLeases} aktive</b></header>
@@ -115,12 +119,12 @@ export function LiveTvAdmin() {
         <section className={styles.channels}><header><div><span>KANALSTYRING</span><h2>{catalog.total.toLocaleString('da-DK')} importerede · {visibleCount.toLocaleString('da-DK')} synlige</h2><small>{catalog.filteredTotal.toLocaleString('da-DK')} matcher det aktive filter</small></div><div className={styles.channelSearches}><input aria-label="Søg kanaler" onChange={(event) => setSearch(event.target.value)} placeholder="Søg kanal..." value={search} /><input aria-label="Søg kanalgrupper" list="live-tv-channel-groups" onChange={(event) => setGroupSearch(event.target.value)} placeholder="Søg gruppe..." value={groupSearch} /><datalist id="live-tv-channel-groups">{catalog.groups.map((group) => <option key={group.name} value={group.name}>{group.total} kanaler</option>)}</datalist></div></header>
           <div className={styles.channelToolbar}>
             <div className={styles.visibilityTabs} aria-label="Filtrer kanalvisning">
-              <button type="button" aria-pressed={visibility === 'all'} onClick={() => { setVisibility('all'); setPage(1); }}>Alle <strong>{catalog.total}</strong></button>
-              <button type="button" aria-pressed={visibility === 'visible'} onClick={() => { setVisibility('visible'); setPage(1); }}><Eye size={15} />Synlige <strong>{visibleCount}</strong></button>
-              <button type="button" aria-pressed={visibility === 'hidden'} onClick={() => { setVisibility('hidden'); setPage(1); }}><EyeOff size={15} />Skjulte <strong>{catalog.hiddenCount}</strong></button>
+              <button type="button" aria-pressed={visibility === 'all'} onClick={() => { setVisibility('all'); setPage(1); }}>Alle <strong>{catalog.total.toLocaleString('da-DK')}</strong></button>
+              <button type="button" aria-pressed={visibility === 'visible'} onClick={() => { setVisibility('visible'); setPage(1); }}><Eye size={15} />Synlige <strong>{visibleCount.toLocaleString('da-DK')}</strong></button>
+              <button type="button" aria-pressed={visibility === 'hidden'} onClick={() => { setVisibility('hidden'); setPage(1); }}><EyeOff size={15} />Skjulte <strong>{catalog.hiddenCount.toLocaleString('da-DK')}</strong></button>
             </div>
-            {canWrite && <div className={styles.globalActions}><b>Hele kataloget</b><button type="button" disabled={busy !== null || catalog.hiddenCount === 0} onClick={() => void allVisibility('show')}><Eye size={16} />Vis alle</button><button type="button" className={styles.hideAction} disabled={busy !== null || visibleCount === 0} onClick={() => void allVisibility('hide')}><EyeOff size={16} />Skjul alle</button></div>}
-            {canWrite && exactGroup && <div className={styles.groupActions}><b>{exactGroup.name} · {exactGroup.total.toLocaleString('da-DK')}</b><button type="button" disabled={busy !== null || exactGroup.visible === exactGroup.total} onClick={() => void bulkGroupVisibility('show')}><Eye size={16} />Vis hele gruppen</button><button type="button" className={styles.hideAction} disabled={busy !== null || exactGroup.hidden === exactGroup.total} onClick={() => void bulkGroupVisibility('hide')}><EyeOff size={16} />Skjul hele gruppen</button></div>}
+            {canWrite && <div className={styles.globalActions}><span><b>Hele kataloget</b><small>Ændrer alle importerede kanaler, uanset søgning og side.</small></span><div><button type="button" disabled={busy !== null || catalog.hiddenCount === 0} onClick={() => void allVisibility('show')}><Eye size={16} />{busy === 'all-show' ? 'Viser...' : 'Vis alle'}</button><button type="button" className={styles.hideAction} disabled={busy !== null || visibleCount === 0} onClick={() => void allVisibility('hide')}><EyeOff size={16} />{busy === 'all-hide' ? 'Skjuler...' : 'Skjul alle'}</button></div></div>}
+            {canWrite && exactGroup && <div className={styles.groupActions}><span><b>{exactGroup.name} · {exactGroup.total.toLocaleString('da-DK')}</b><small>Ændrer hele den valgte gruppe.</small></span><div><button type="button" disabled={busy !== null || exactGroup.visible === exactGroup.total} onClick={() => void bulkGroupVisibility('show')}><Eye size={16} />Vis hele gruppen</button><button type="button" className={styles.hideAction} disabled={busy !== null || exactGroup.hidden === exactGroup.total} onClick={() => void bulkGroupVisibility('hide')}><EyeOff size={16} />Skjul hele gruppen</button></div></div>}
             {canWrite && <div className={styles.bulkActions}>
               <button type="button" disabled={filteredChannels.length === 0 || busy !== null} onClick={() => setSelectedChannelIds((current) => allFilteredSelected ? current.filter((id) => !filteredChannelIds.includes(id)) : [...new Set([...current, ...filteredChannelIds])])}><ListChecks size={16} />{allFilteredSelected ? 'Ryd viste' : 'Vælg viste'}</button>
               <span>{selectedChannelIds.length} valgt · Shift-klik for interval</span>

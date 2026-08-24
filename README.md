@@ -223,3 +223,9 @@ udvider sig til fulde etiketter under D-pad-navigation og kollapser igen, når
 fokus forlader menuen.
 
 Licens er ikke fastlagt i repositoryet. Tilføj en licensfil, før projektet distribueres uden for den nuværende private anvendelse.
+
+### Live TV-kanalstyring ved store kataloger
+
+- Vis alle og Skjul alle arbejder på hele kontoens katalog direkte i PostgreSQL og er ikke begrænset af den valgte side eller 50.000-kanalsgrænsen for manuel UUID-bulkmarkering.
+- Gruppevisning kan ændres uden at indlæse alle kanal-id'er i API-processens hukommelse. Skjulning frigiver berørte aktive streams, annullerer berørte optagelser og skriver resultatet til auditloggen atomisk.
+- Adminpanelet holder globale handlinger, gruppehandlinger og manuel markering i separate responsive rækker og viser både igangværende status og afsluttet antal.

@@ -3,6 +3,11 @@ export interface LiveTvChannelVisibilityRow {
   enabled: boolean;
 }
 
+export const LIVE_TV_VISIBILITY_TRANSACTION_OPTIONS = {
+  maxWait: 15_000,
+  timeout: 120_000,
+} as const;
+
 export function uniqueChannelIds(channelIds: string[]): string[] {
   return [...new Set(channelIds)];
 }
