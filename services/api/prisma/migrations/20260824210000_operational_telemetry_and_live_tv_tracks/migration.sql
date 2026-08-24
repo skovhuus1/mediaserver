@@ -5,7 +5,7 @@ ALTER TABLE "live_tv_leases"
 
 CREATE TABLE "system_metric_samples" (
   "id" UUID NOT NULL,
-  "account_id" UUID NOT NULL,
+  "account_id" TEXT NOT NULL,
   "sampled_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "cpu_percent" DOUBLE PRECISION NOT NULL,
   "memory_percent" DOUBLE PRECISION NOT NULL,
@@ -27,7 +27,7 @@ CREATE INDEX "system_metric_samples_account_sampled_idx"
 
 CREATE TABLE "system_alert_events" (
   "id" UUID NOT NULL,
-  "account_id" UUID NOT NULL,
+  "account_id" TEXT NOT NULL,
   "alert_key" TEXT NOT NULL,
   "severity" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'open',
@@ -37,7 +37,7 @@ CREATE TABLE "system_alert_events" (
   "first_seen_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "last_seen_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "acknowledged_at" TIMESTAMPTZ,
-  "acknowledged_by" UUID,
+  "acknowledged_by" TEXT,
   "resolved_at" TIMESTAMPTZ,
   CONSTRAINT "system_alert_events_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "system_alert_events_account_id_fkey" FOREIGN KEY ("account_id") REFERENCES "accounts"("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -52,4 +52,3 @@ CREATE INDEX "system_alert_events_account_status_idx"
 CREATE UNIQUE INDEX "system_alert_events_open_key_unique"
   ON "system_alert_events"("account_id", "alert_key")
   WHERE "status" IN ('open', 'acknowledged');
-
