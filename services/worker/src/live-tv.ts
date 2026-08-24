@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { updateJobProgress } from './job-progress.js';
-import { parseM3uDocument, parseXmlTv } from './live-tv-parsers.js';
+import { parseM3uDocument, parseXmlTv, resolveM3uEpgUrl } from './live-tv-parsers.js';
 import {
   disableMissingLiveTvSources,
   forEachLiveTvEntryByIdentity,
@@ -34,7 +34,12 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
   const providerId = stringPayload(job, 'providerId');
   const provider = await prisma.liveTvProvider.findFirst({ where: { id: providerId, accountId: job.accountId }, include: { connections: { where: { enabled: true } }, epgSource: true } });
   if (!provider) throw new Error('Live TV provider was not found');
-  let epgSourceDiscovered = Boolean(provider.epgSource);
+  let epgSourceConfigured = Boolean(provider.epgSource);
+  let epgSourceEnabled = provider.epgSource?.enabled ?? false;
+  let epgSourceDiscovered = false;
+  const epgNeedsRecovery = Boolean(provider.epgSource?.enabled && (
+    provider.epgSource.healthStatus !== 'healthy' || !provider.epgSource.lastImportedAt
+  ));
   const channelIndex = await loadLiveTvChannelImportIndex(prisma, job.accountId);
   await updateJobProgress(prisma, job, { stage: 'Henter M3U', current: 0, total: provider.connections.length, message: provider.name });
   let imported = 0;
@@ -71,9 +76,11 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
         },
       });
       const sourceIndex = new Map(existingSources.map((source) => [source.streamFingerprint, source]));
-      const discoveredEpgUrl = firstResolvedM3uEpgUrl(document.epgUrls, playlistUrl);
-      if (discoveredEpgUrl && !epgSourceDiscovered) {
+      const discoveredEpgUrl = resolveM3uEpgUrl(document.epgUrls, playlistUrl);
+      if (discoveredEpgUrl && !epgSourceConfigured) {
         await ensureDiscoveredEpgSource(prisma, job, providerId, discoveredEpgUrl);
+        epgSourceConfigured = true;
+        epgSourceEnabled = true;
         epgSourceDiscovered = true;
       }
       const seen: string[] = [];
@@ -154,6 +161,20 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
   }
   if (!imported) throw new Error(errors.join(' | ') || 'Ingen M3U-forbindelser kunne importeres');
   if (provider.connections.length && errors.length === provider.connections.length) throw new Error(errors.join(' | '));
+  let epgQueued = false;
+  if (epgSourceEnabled) {
+    const futurePrograms = await prisma.liveTvProgram.count({
+      where: { accountId: job.accountId, providerId, endsAt: { gt: new Date() } },
+    });
+    if (epgSourceDiscovered || epgNeedsRecovery || futurePrograms === 0) {
+      epgQueued = await queueProviderEpgAfterPlaylistImport(
+        prisma,
+        job,
+        providerId,
+        epgSourceDiscovered ? 'm3u_epg_discovery' : 'playlist_epg_recovery',
+      );
+    }
+  }
   const result = {
     processed: imported,
     createdSources,
@@ -162,6 +183,7 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
     disabledSources,
     updatedChannels,
     sourceErrors: errors.length,
+    epgQueued,
     durationMs: Date.now() - startedAt,
     auditAction: 'live_tv.import.completed',
   };
@@ -178,7 +200,7 @@ export async function importLiveTvPlaylist(prisma: PrismaClient, job: LiveJob, r
   } });
   await updateJobProgress(prisma, job, {
     stage: 'Færdig', current: imported, total: imported, percent: 100,
-    message: `${createdSources} nye · ${updatedSources} ændret · ${unchangedSources} uændret · ${disabledSources} deaktiveret${errors.length ? ` · ${errors.length} kildefejl` : ''}`,
+    message: `${createdSources} nye · ${updatedSources} ændret · ${unchangedSources} uændret · ${disabledSources} deaktiveret${errors.length ? ` · ${errors.length} kildefejl` : ''}${epgQueued ? ' · XMLTV sat i kø' : ''}`,
   });
 }
 
@@ -208,8 +230,10 @@ export async function importLiveTvEpg(prisma: PrismaClient, job: LiveJob, renew:
       .map((name) => [describeLiveTvChannel({ name }).canonicalKey, channel] as const)));
     const from = new Date(Date.now() - 6 * 60 * 60_000);
     const until = new Date(Date.now() + 14 * 24 * 60 * 60_000);
-    const rows = parsed.programs.flatMap((program) => {
-      if (program.endsAt <= from || program.startsAt >= until) return [];
+    if (!parsed.programs.length) throw new Error('XMLTV-kilden indeholder ingen gyldige programmer');
+    const relevantPrograms = parsed.programs.filter((program) => program.endsAt > from && program.startsAt < until);
+    if (!relevantPrograms.length) throw new Error('XMLTV-kilden indeholder ingen programmer i det aktuelle 14-dages vindue; kontrollér kildens data og tidszone');
+    const rows = relevantPrograms.flatMap((program) => {
       const metadata = parsed.channels.get(program.channelExternalId);
       const channel = byTvg.get(normalizeLiveTvIdentity(program.channelExternalId))
         ?? (metadata?.name ? byCanonicalName.get(describeLiveTvChannel({ name: metadata.name }).canonicalKey) : undefined);
@@ -217,6 +241,11 @@ export async function importLiveTvEpg(prisma: PrismaClient, job: LiveJob, renew:
         title: program.title, subtitle: program.subtitle, description: program.description, category: program.category,
         iconUrl: program.iconUrl, episode: program.episode }] : [];
     });
+    if (!rows.length) {
+      const sampleIds = [...new Set(relevantPrograms.slice(0, 5).map((program) => program.channelExternalId))].join(', ');
+      throw new Error(`XMLTV hentede ${relevantPrograms.length} aktuelle programmer, men ingen kunne matches med M3U-kanalernes tvg-id eller navn${sampleIds ? ` (eksempler: ${sampleIds})` : ''}`);
+    }
+    const unmatchedPrograms = relevantPrograms.length - rows.length;
     await prisma.liveTvProgram.deleteMany({ where: { providerId, accountId: job.accountId, endsAt: { gte: from } } });
     for (let index = 0; index < rows.length; index += 500) {
       await renew();
@@ -224,7 +253,10 @@ export async function importLiveTvEpg(prisma: PrismaClient, job: LiveJob, renew:
       await updateJobProgress(prisma, job, { stage: 'Importerer programguide', current: Math.min(index + 500, rows.length), total: rows.length, percent: rows.length ? Math.min(100, ((index + 500) / rows.length) * 100) : 100 });
     }
     await prisma.liveTvEpgSource.update({ where: { id: source.id }, data: { healthStatus: 'healthy', lastError: null, lastImportedAt: new Date() } });
-    await updateJobProgress(prisma, job, { stage: 'Færdig', current: rows.length, total: rows.length, percent: 100, message: `${rows.length} programmer importeret` });
+    await updateJobProgress(prisma, job, {
+      stage: 'Færdig', current: rows.length, total: rows.length, percent: 100,
+      message: `${rows.length} programmer importeret${unmatchedPrograms ? ` · ${unmatchedPrograms} kunne ikke matches` : ''}`,
+    });
   } catch (error) {
     await prisma.liveTvEpgSource.update({ where: { id: source.id }, data: { healthStatus: 'failed', lastError: safeError(error) } });
     throw error;
@@ -364,36 +396,33 @@ function sourceDownloadMessage(name: string, receivedBytes: number, totalBytes: 
 function formatMebibytes(bytes: number) { return `${(bytes / MEBIBYTE).toFixed(bytes >= 10 * MEBIBYTE ? 0 : 1)} MiB`; }
 function safeError(error: unknown) { return error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000); }
 
-function firstResolvedM3uEpgUrl(epgUrls: string[], playlistUrl: string) {
-  for (const epgUrl of epgUrls) {
-    try {
-      const resolved = new URL(epgUrl, playlistUrl);
-      if (['http:', 'https:'].includes(resolved.protocol)) return resolved.toString();
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
 async function ensureDiscoveredEpgSource(prisma: PrismaClient, job: LiveJob, providerId: string, epgUrl: string) {
+  const encryptedUrl = encryptSecret(epgUrl) as unknown as Prisma.InputJsonValue;
   await prisma.liveTvEpgSource.upsert({
     where: { providerId },
     create: {
       accountId: job.accountId,
       providerId,
-      encryptedUrl: encryptSecret(epgUrl) as unknown as Prisma.InputJsonValue,
+      encryptedUrl,
       enabled: true,
       healthStatus: 'unknown',
       lastError: null,
     },
-    update: { enabled: true, healthStatus: 'unknown', lastError: null },
+    update: { encryptedUrl, enabled: true, healthStatus: 'unknown', lastError: null },
   });
+}
+
+async function queueProviderEpgAfterPlaylistImport(
+  prisma: PrismaClient,
+  job: LiveJob,
+  providerId: string,
+  trigger: 'm3u_epg_discovery' | 'playlist_epg_recovery',
+) {
   const active = await prisma.systemJob.findMany({
     where: { accountId: job.accountId, type: 'live-tv.epg', status: { in: ['queued', 'running'] } },
     take: 100,
   });
-  if (active.some((pending) => (pending.payload as Record<string, unknown>)?.providerId === providerId)) return;
+  if (active.some((pending) => (pending.payload as Record<string, unknown>)?.providerId === providerId)) return false;
   await prisma.$transaction([
     prisma.systemJob.create({
       data: {
@@ -401,9 +430,10 @@ async function ensureDiscoveredEpgSource(prisma: PrismaClient, job: LiveJob, pro
         type: 'live-tv.epg',
         status: 'queued',
         maxAttempts: 3,
-        payload: { providerId, trigger: 'm3u_epg_discovery', sourceJobId: job.id },
+        payload: { providerId, trigger, sourceJobId: job.id },
       },
     }),
     prisma.liveTvProvider.update({ where: { id: providerId }, data: { lastEpgQueuedAt: new Date() } }),
   ]);
+  return true;
 }

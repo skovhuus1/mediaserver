@@ -4,6 +4,8 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+- Retter Live TV-EPG ved at autoopdage standard Xtream XMLTV, fjerne kapløbet mellem kanal- og EPG-import samt afvise tomme eller umatchede XMLTV-resultater med konkret diagnostik.
+
 - Redesignet webplayerens Live TV-klargøring med kanalbranding, responsiv statusvisning, tilgængelig reduced-motion-adfærd og mulighed for at afbryde under reservationen.
 
 - Aktiverer kun danske Live TV-kanaler som standard, anvender Canal Digital Danmarks kanalliste fra 20. august 2020 som stabil basisrækkefølge og tilføjer atomisk drag-and-drop-rækkefølge i administratorpanelet.
