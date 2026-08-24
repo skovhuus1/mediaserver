@@ -270,6 +270,7 @@ export class CatalogService {
         },
         _max: {
           updatedAt: true,
+          releaseDate: true,
         },
       });
       const rows = aggregates.flatMap((row) => row._min.id && row._min.title ? [{
@@ -284,6 +285,7 @@ export class CatalogService {
         backdropPath: row.backdropPath,
         metadataProvider: row.metadataProvider,
         releaseYear: row._min.releaseYear,
+        releaseDate: row._max.releaseDate ?? null,
         updatedAt: row._max.updatedAt ?? new Date(0),
         episodeCount: row._count._all,
       }] : []);
@@ -293,6 +295,9 @@ export class CatalogService {
         )[0]!;
         const releaseYears = episodes.flatMap((episode) =>
           episode.releaseYear === null ? [] : [episode.releaseYear],
+        );
+        const releaseDates = episodes.flatMap((episode) =>
+          episode.releaseDate === null ? [] : [episode.releaseDate],
         );
         return {
           id: representative.id,
@@ -308,12 +313,18 @@ export class CatalogService {
           posterPath: episodes.find((episode) => episode.posterPath)?.posterPath ?? null,
           backdropPath: episodes.find((episode) => episode.backdropPath)?.backdropPath ?? null,
           releaseYear: releaseYears.length ? Math.min(...releaseYears) : null,
+          releaseDate: releaseDates.length
+            ? new Date(Math.max(...releaseDates.map((releaseDate) => releaseDate.getTime())))
+            : null,
           episodeCount: episodes.reduce((total, episode) => total + episode.episodeCount, 0),
           updatedAt: new Date(Math.max(...episodes.map((episode) => episode.updatedAt.getTime()))),
         };
       });
       grouped.sort((left, right) => {
         if (query.sort === 'title') return left.title.localeCompare(right.title, 'da');
+        if (query.sort === 'released') return (right.releaseDate?.getTime() ?? 0) - (left.releaseDate?.getTime() ?? 0)
+          || (right.releaseYear ?? 0) - (left.releaseYear ?? 0)
+          || left.title.localeCompare(right.title, 'da');
         if (query.sort === 'year') return (right.releaseYear ?? 0) - (left.releaseYear ?? 0)
           || left.title.localeCompare(right.title, 'da');
         return right.updatedAt.getTime() - left.updatedAt.getTime();
@@ -336,6 +347,8 @@ export class CatalogService {
     const orderBy: Prisma.MediaItemOrderByWithRelationInput[] =
       query.sort === 'title'
         ? [{ title: 'asc' }]
+        : query.sort === 'released'
+          ? [{ releaseDate: 'desc' }, { releaseYear: 'desc' }, { title: 'asc' }]
         : query.sort === 'year'
           ? [{ releaseYear: 'desc' }, { title: 'asc' }]
           : [{ updatedAt: 'desc' }];

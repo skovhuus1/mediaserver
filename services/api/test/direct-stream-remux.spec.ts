@@ -16,6 +16,8 @@ describe('Direct Stream FFmpeg contract', () => {
     expect(option(args, '-c:a')).toBe('aac');
     expect(option(args, '-hls_segment_type')).toBe('fmp4');
     expect(option(args, '-hls_fmp4_init_filename')).toBe('init_0.mp4');
+    expect(option(args, '-hls_flags')).toBe('split_by_time+temp_file');
+    expect(option(args, '-hls_flags')).not.toContain('independent_segments');
     expect(args).not.toContain('libx264');
     expect(args).not.toContain('libx265');
   });

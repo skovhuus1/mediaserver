@@ -32,6 +32,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String? _error;
   List<MediaItem> _movies = const [];
   List<MediaItem> _series = const [];
+  _CatalogPayload _movieCatalog = _CatalogPayload.empty;
+  _CatalogPayload _seriesCatalog = _CatalogPayload.empty;
+  _CatalogPayload _releasedMovies = _CatalogPayload.empty;
+  _CatalogPayload _releasedSeries = _CatalogPayload.empty;
+  _CatalogPayload _latestEpisodes = _CatalogPayload.empty;
   List<MediaItem> _continue = const [];
   List<MediaItem> _watchlist = const [];
   RecommendationFeed _recommendations = const RecommendationFeed(sections: []);
@@ -53,8 +58,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
     try {
       final responses = await Future.wait([
-        api.getJson('/media/catalog?type=movie&pageSize=36&sort=newest'),
-        api.getJson('/media/catalog?type=series&pageSize=36&sort=newest'),
+        api.getJson('/media/catalog?type=movie&pageSize=100&sort=newest'),
+        api.getJson('/media/catalog?type=series&pageSize=100&sort=newest'),
+        api.getJson('/media/catalog?type=movie&pageSize=36&sort=released'),
+        api.getJson('/media/catalog?type=series&pageSize=36&sort=released'),
+        api.getJson('/media/catalog?type=episode&pageSize=36&sort=released'),
         api.getJson('/playback/history/continue'),
         api.getJson('/playback/watchlist'),
         api
@@ -62,18 +70,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
             .catchError((_) => <String, dynamic>{}),
       ]);
       if (!mounted) return;
+      final movieCatalog = _CatalogPayload.fromJson(responses[0]);
+      final seriesCatalog = _CatalogPayload.fromJson(responses[1]);
       setState(() {
-        _movies = _catalogItems(responses[0]);
-        _series = _catalogItems(responses[1]);
-        _continue = jsonList(responses[2])
+        _movieCatalog = movieCatalog;
+        _seriesCatalog = seriesCatalog;
+        _releasedMovies = _CatalogPayload.fromJson(responses[2]);
+        _releasedSeries = _CatalogPayload.fromJson(responses[3]);
+        _latestEpisodes = _CatalogPayload.fromJson(responses[4]);
+        _movies = movieCatalog.items;
+        _series = seriesCatalog.items;
+        _continue = jsonList(responses[5])
             .map(MediaItem.fromJson)
             .where((item) => item.id.isNotEmpty)
             .toList(growable: false);
-        _watchlist = jsonList(responses[3])
+        _watchlist = jsonList(responses[6])
             .map(MediaItem.fromJson)
             .where((item) => item.id.isNotEmpty)
             .toList(growable: false);
-        _recommendations = RecommendationFeed.fromJson(responses[4]);
+        _recommendations = RecommendationFeed.fromJson(responses[7]);
         _loading = false;
       });
     } on ApiException catch (failure) {
@@ -89,14 +104,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _error = 'Biblioteket kunne ikke indlæses.';
       });
     }
-  }
-
-  List<MediaItem> _catalogItems(dynamic raw) {
-    final json = jsonMap(raw);
-    return jsonList(json.isEmpty ? raw : json['items'])
-        .map(MediaItem.fromJson)
-        .where((item) => item.id.isNotEmpty)
-        .toList(growable: false);
   }
 
   Future<void> _openTitle(MediaItem media) async {
@@ -316,18 +323,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
 
     return switch (_tab) {
-      1 => _CatalogGrid(
+      1 => _CatalogHub(
         api: api,
-        title: 'Film',
-        items: _movies,
-        onPressed: _openTitle,
+        mediaType: 'movie',
+        label: 'Film',
+        newest: _movieCatalog,
+        released: _releasedMovies,
+        latestEpisodes: _CatalogPayload.empty,
+        onOpen: _openTitle,
+        onPlay: _play,
         tv: tv,
       ),
-      2 => _CatalogGrid(
+      2 => _CatalogHub(
         api: api,
-        title: 'Serier',
-        items: _series,
-        onPressed: _openTitle,
+        mediaType: 'series',
+        label: 'Serier',
+        newest: _seriesCatalog,
+        released: _releasedSeries,
+        latestEpisodes: _latestEpisodes,
+        onOpen: _openTitle,
+        onPlay: _play,
         tv: tv,
       ),
       3 => LiveTvView(api: api),
@@ -357,6 +372,48 @@ class _LibraryScreenState extends State<LibraryScreen> {
         tv: tv,
       ),
     };
+  }
+}
+
+class _CatalogPayload {
+  const _CatalogPayload({
+    required this.items,
+    required this.categories,
+    required this.page,
+    required this.total,
+    required this.totalPages,
+  });
+
+  static const empty = _CatalogPayload(
+    items: [],
+    categories: [],
+    page: 1,
+    total: 0,
+    totalPages: 1,
+  );
+
+  final List<MediaItem> items;
+  final List<String> categories;
+  final int page;
+  final int total;
+  final int totalPages;
+
+  factory _CatalogPayload.fromJson(dynamic raw) {
+    final json = jsonMap(raw);
+    final facets = jsonMap(json['facets']);
+    final items = jsonList(json.isEmpty ? raw : json['items'])
+        .map(MediaItem.fromJson)
+        .where((item) => item.id.isNotEmpty)
+        .toList(growable: false);
+    return _CatalogPayload(
+      items: items,
+      categories: jsonList(
+        facets['categories'],
+      ).map(stringValue).whereType<String>().toList(growable: false),
+      page: intValue(json['page']) ?? 1,
+      total: intValue(json['total']) ?? items.length,
+      totalPages: intValue(json['totalPages']) ?? 1,
+    );
   }
 }
 
@@ -496,7 +553,7 @@ class _LibraryHeader extends StatelessWidget {
   );
 }
 
-class _TvSideRail extends StatelessWidget {
+class _TvSideRail extends StatefulWidget {
   const _TvSideRail({
     required this.labels,
     required this.icons,
@@ -512,10 +569,23 @@ class _TvSideRail extends StatelessWidget {
   final VoidCallback onSettings;
 
   @override
+  State<_TvSideRail> createState() => _TvSideRailState();
+}
+
+class _TvSideRailState extends State<_TvSideRail> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) => SafeArea(
-    child: SizedBox(
-      width: 218,
-      child: Container(
+    child: Focus(
+      onFocusChange: (focused) {
+        if (_expanded != focused) setState(() => _expanded = focused);
+      },
+      child: AnimatedContainer(
+        key: const ValueKey('tv-side-rail'),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        width: _expanded ? 218 : 82,
         decoration: const BoxDecoration(
           border: Border(right: BorderSide(color: Color(0x1FFFFFFF))),
           color: Color(0xF208111D),
@@ -529,12 +599,23 @@ class _TvSideRail extends StatelessWidget {
         ),
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 22, 14, 18),
-              child: BrandLockup(
-                compact: true,
-                onTap: () => onSelect(0),
-                tooltip: 'Gå til Hjem',
+            SizedBox(
+              height: 80,
+              child: Center(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 140),
+                  child: _expanded
+                      ? BrandLockup(
+                          key: const ValueKey('rail-brand-lockup'),
+                          compact: true,
+                          onTap: () => widget.onSelect(0),
+                          tooltip: 'Gå til Hjem',
+                        )
+                      : const BrandMark(
+                          key: ValueKey('rail-brand-mark'),
+                          size: 38,
+                        ),
+                ),
               ),
             ),
             const Divider(height: 1),
@@ -542,13 +623,15 @@ class _TvSideRail extends StatelessWidget {
             Expanded(
               child: ListView.separated(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                itemCount: labels.length,
+                itemCount: widget.labels.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (_, index) => _TvRailIcon(
-                  icon: icons[index],
-                  label: labels[index],
-                  selected: selected == index,
-                  onTap: () => onSelect(index),
+                  key: ValueKey('tv-navigation-$index'),
+                  icon: widget.icons[index],
+                  label: widget.labels[index],
+                  selected: widget.selected == index,
+                  expanded: _expanded,
+                  onTap: () => widget.onSelect(index),
                 ),
               ),
             ),
@@ -558,7 +641,8 @@ class _TvSideRail extends StatelessWidget {
                 icon: Icons.settings_outlined,
                 label: 'Indstillinger',
                 selected: false,
-                onTap: onSettings,
+                expanded: _expanded,
+                onTap: widget.onSettings,
               ),
             ),
           ],
@@ -703,12 +787,15 @@ class _TvRailIcon extends StatefulWidget {
     required this.icon,
     required this.label,
     required this.selected,
+    required this.expanded,
     required this.onTap,
+    super.key,
   });
 
   final IconData icon;
   final String label;
   final bool selected;
+  final bool expanded;
   final VoidCallback onTap;
 
   @override
@@ -724,7 +811,6 @@ class _TvRailIconState extends State<_TvRailIcon> {
     return Tooltip(
       message: widget.label,
       child: FocusableActionDetector(
-        autofocus: widget.selected,
         actions: {
           ActivateIntent: CallbackAction<ActivateIntent>(
             onInvoke: (_) {
@@ -748,7 +834,7 @@ class _TvRailIconState extends State<_TvRailIcon> {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             height: 48,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: EdgeInsets.symmetric(horizontal: widget.expanded ? 12 : 8),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               color: widget.selected
@@ -771,22 +857,29 @@ class _TvRailIconState extends State<_TvRailIcon> {
                   : const [],
             ),
             child: Row(
+              mainAxisAlignment: widget.expanded
+                  ? MainAxisAlignment.start
+                  : MainAxisAlignment.center,
               children: [
                 Icon(
                   widget.icon,
                   color: active ? BoltColors.primaryBright : Colors.white54,
                   size: 22,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    widget.label,
-                    style: TextStyle(
-                      color: active ? Colors.white : Colors.white60,
-                      fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                if (widget.expanded) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: active ? Colors.white : Colors.white60,
+                        fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -835,7 +928,7 @@ class _TvIconActionState extends State<_TvIconAction> {
           borderRadius: BorderRadius.circular(999),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            width: _focused ? 112 : 46,
+            width: _focused ? 116 : 48,
             height: 46,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
@@ -1916,6 +2009,667 @@ class _MediaRail extends StatelessWidget {
   }
 }
 
+class _CatalogHub extends StatefulWidget {
+  const _CatalogHub({
+    required this.api,
+    required this.mediaType,
+    required this.label,
+    required this.newest,
+    required this.released,
+    required this.latestEpisodes,
+    required this.onOpen,
+    required this.onPlay,
+    required this.tv,
+  });
+
+  final ApiClient api;
+  final String mediaType;
+  final String label;
+  final _CatalogPayload newest;
+  final _CatalogPayload released;
+  final _CatalogPayload latestEpisodes;
+  final ValueChanged<MediaItem> onOpen;
+  final ValueChanged<MediaItem> onPlay;
+  final bool tv;
+
+  @override
+  State<_CatalogHub> createState() => _CatalogHubState();
+}
+
+class _CatalogHubState extends State<_CatalogHub> {
+  late List<MediaItem> _allItems;
+  late int _page;
+  late int _totalPages;
+  bool _loadingMore = false;
+  String? _pageError;
+
+  @override
+  void initState() {
+    super.initState();
+    _resetCatalog();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CatalogHub oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.newest != widget.newest ||
+        oldWidget.mediaType != widget.mediaType) {
+      _resetCatalog();
+    }
+  }
+
+  void _resetCatalog() {
+    _allItems = _dedupeMedia(widget.newest.items);
+    _page = widget.newest.page;
+    _totalPages = widget.newest.totalPages;
+    _loadingMore = false;
+    _pageError = null;
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || _page >= _totalPages) return;
+    setState(() {
+      _loadingMore = true;
+      _pageError = null;
+    });
+    try {
+      final nextPage = _page + 1;
+      final query = Uri(
+        queryParameters: {
+          'type': widget.mediaType,
+          'page': '$nextPage',
+          'pageSize': '100',
+          'sort': 'newest',
+        },
+      ).query;
+      final payload = _CatalogPayload.fromJson(
+        await widget.api.getJson('/media/catalog?$query'),
+      );
+      if (!mounted) return;
+      setState(() {
+        _allItems = _dedupeMedia([..._allItems, ...payload.items]);
+        _page = payload.page;
+        _totalPages = payload.totalPages;
+        _loadingMore = false;
+      });
+    } on ApiException catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMore = false;
+        _pageError = failure.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMore = false;
+        _pageError = 'Flere titler kunne ikke indlæses.';
+      });
+    }
+  }
+
+  Future<void> _openCategory(String category) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => _CatalogBrowserScreen(
+          api: widget.api,
+          mediaType: widget.mediaType,
+          label: widget.label,
+          category: category,
+          onPressed: widget.onOpen,
+          tv: widget.tv,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final newest = widget.newest.items.take(28).toList(growable: false);
+    final released = widget.released.items.take(28).toList(growable: false);
+    final episodes = widget.latestEpisodes.items
+        .take(28)
+        .toList(growable: false);
+    final hero = newest.firstOrNull ?? released.firstOrNull;
+    final itemLabel = widget.mediaType == 'movie' ? 'film' : 'serier';
+
+    return CustomScrollView(
+      key: PageStorageKey('catalog-hub-${widget.mediaType}'),
+      slivers: [
+        if (hero != null)
+          SliverToBoxAdapter(
+            child: _CatalogLandingHero(
+              api: widget.api,
+              media: hero,
+              label: widget.label,
+              total: widget.newest.total,
+              onOpen: () => widget.onOpen(hero),
+              onPlay: () => widget.onPlay(hero),
+              tv: widget.tv,
+            ),
+          ),
+        if (widget.newest.categories.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _CatalogGenreStrip(
+              categories: widget.newest.categories,
+              onSelected: _openCategory,
+              tv: widget.tv,
+            ),
+          ),
+        if (newest.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _MediaRail(
+              api: widget.api,
+              section: MediaSection(title: 'Nyeste $itemLabel', items: newest),
+              onPressed: widget.onOpen,
+              tv: widget.tv,
+            ),
+          ),
+        if (released.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _MediaRail(
+              api: widget.api,
+              section: MediaSection(
+                title: 'Senest udgivne $itemLabel',
+                items: released,
+              ),
+              onPressed: widget.onOpen,
+              tv: widget.tv,
+            ),
+          ),
+        if (episodes.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _MediaRail(
+              api: widget.api,
+              section: MediaSection(title: 'Nye episoder', items: episodes),
+              onPressed: widget.onPlay,
+              tv: widget.tv,
+            ),
+          ),
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            widget.tv ? 30 : 16,
+            widget.tv ? 32 : 24,
+            widget.tv ? 30 : 16,
+            14,
+          ),
+          sliver: SliverToBoxAdapter(
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Alle ${widget.label.toLowerCase()} (${widget.newest.total})',
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontSize: widget.tv ? 32 : 24,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${_allItems.length} indlæst',
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_allItems.isEmpty)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(48),
+              child: Center(child: Text('Ingen titler fundet.')),
+            ),
+          )
+        else
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(
+              widget.tv ? 30 : 16,
+              0,
+              widget.tv ? 30 : 16,
+              24,
+            ),
+            sliver: SliverGrid.builder(
+              gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: widget.tv ? 198 : 230,
+                mainAxisExtent: widget.tv ? 334 : 330,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 18,
+              ),
+              itemCount: _allItems.length,
+              itemBuilder: (_, index) => MediaPosterCard(
+                api: widget.api,
+                media: _allItems[index],
+                width: widget.tv ? 178 : 190,
+                isTv: widget.tv,
+                heroTag:
+                    'all-${widget.mediaType}-$index-${_allItems[index].id}',
+                onPressed: () => widget.onOpen(_allItems[index]),
+              ),
+            ),
+          ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              widget.tv ? 30 : 16,
+              0,
+              widget.tv ? 30 : 16,
+              52,
+            ),
+            child: Column(
+              children: [
+                if (_pageError != null) ...[
+                  Text(
+                    _pageError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (_page < _totalPages)
+                  OutlinedButton.icon(
+                    key: ValueKey('load-more-${widget.mediaType}'),
+                    onPressed: _loadingMore ? null : _loadMore,
+                    icon: _loadingMore
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.expand_more),
+                    label: Text(
+                      _loadingMore
+                          ? 'Indlæser...'
+                          : 'Vis flere ${widget.label.toLowerCase()}',
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CatalogLandingHero extends StatelessWidget {
+  const _CatalogLandingHero({
+    required this.api,
+    required this.media,
+    required this.label,
+    required this.total,
+    required this.onOpen,
+    required this.onPlay,
+    required this.tv,
+  });
+
+  final ApiClient api;
+  final MediaItem media;
+  final String label;
+  final int total;
+  final VoidCallback onOpen;
+  final VoidCallback onPlay;
+  final bool tv;
+
+  @override
+  Widget build(BuildContext context) {
+    final image = api.absoluteMediaUrl(
+      media.backdropPath ?? media.posterPath,
+      imageSize: 'original',
+    );
+    return SizedBox(
+      height: tv ? 410 : 330,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (image.isNotEmpty)
+            Image.network(
+              image,
+              fit: BoxFit.cover,
+              alignment: Alignment.centerRight,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  BoltColors.background,
+                  Color(0xF20A1018),
+                  Color(0x330A1018),
+                ],
+                stops: [0, 0.46, 1],
+              ),
+            ),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.transparent, BoltColors.background],
+                stops: [0.68, 1],
+              ),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(tv ? 34 : 22, 34, 24, 34),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: tv ? 650 : 520),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$label · $total titler',
+                      style: const TextStyle(
+                        color: BoltColors.primaryBright,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      media.displayTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                        fontSize: tv ? 54 : 40,
+                        height: 0.98,
+                      ),
+                    ),
+                    if (media.overview?.isNotEmpty == true) ...[
+                      const SizedBox(height: 14),
+                      Text(
+                        media.overview!,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.74),
+                          fontSize: tv ? 16 : 14,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 22),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 10,
+                      children: [
+                        _TvHeroButton(
+                          icon: Icons.play_arrow_rounded,
+                          label: media.isSeries ? 'Åbn serie' : 'Afspil',
+                          onTap: onPlay,
+                          primary: true,
+                        ),
+                        _TvHeroButton(
+                          icon: Icons.info_outline_rounded,
+                          label: 'Detaljer',
+                          onTap: onOpen,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CatalogGenreStrip extends StatelessWidget {
+  const _CatalogGenreStrip({
+    required this.categories,
+    required this.onSelected,
+    required this.tv,
+  });
+
+  final List<String> categories;
+  final ValueChanged<String> onSelected;
+  final bool tv;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.fromLTRB(tv ? 30 : 16, 10, 0, 6),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Gå på opdagelse',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontSize: tv ? 27 : 21,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: tv ? 58 : 52,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.only(right: tv ? 30 : 16, bottom: 5),
+            itemCount: categories.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 10),
+            itemBuilder: (_, index) => _CatalogGenreButton(
+              category: categories[index],
+              onTap: () => onSelected(categories[index]),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CatalogGenreButton extends StatefulWidget {
+  const _CatalogGenreButton({required this.category, required this.onTap});
+
+  final String category;
+  final VoidCallback onTap;
+
+  @override
+  State<_CatalogGenreButton> createState() => _CatalogGenreButtonState();
+}
+
+class _CatalogGenreButtonState extends State<_CatalogGenreButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) => FocusableActionDetector(
+    actions: {
+      ActivateIntent: CallbackAction<ActivateIntent>(
+        onInvoke: (_) {
+          widget.onTap();
+          return null;
+        },
+      ),
+    },
+    onFocusChange: (focused) {
+      setState(() => _focused = focused);
+      if (focused) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) Scrollable.ensureVisible(context, alignment: 0.5);
+        });
+      }
+    },
+    child: InkWell(
+      canRequestFocus: false,
+      onTap: widget.onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          color: _focused ? const Color(0xFF1A4777) : const Color(0xFF111D29),
+          border: Border.all(
+            color: _focused ? BoltColors.focus : const Color(0xFF2A3A49),
+            width: _focused ? 2 : 1,
+          ),
+        ),
+        child: Text(
+          widget.category,
+          style: TextStyle(
+            color: _focused ? Colors.white : Colors.white70,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _CatalogBrowserScreen extends StatefulWidget {
+  const _CatalogBrowserScreen({
+    required this.api,
+    required this.mediaType,
+    required this.label,
+    required this.category,
+    required this.onPressed,
+    required this.tv,
+  });
+
+  final ApiClient api;
+  final String mediaType;
+  final String label;
+  final String category;
+  final ValueChanged<MediaItem> onPressed;
+  final bool tv;
+
+  @override
+  State<_CatalogBrowserScreen> createState() => _CatalogBrowserScreenState();
+}
+
+class _CatalogBrowserScreenState extends State<_CatalogBrowserScreen> {
+  List<MediaItem> _items = const [];
+  int _page = 0;
+  int _total = 0;
+  int _totalPages = 1;
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadNext());
+  }
+
+  Future<void> _loadNext() async {
+    if (_loading || (_page > 0 && _page >= _totalPages)) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final query = Uri(
+        queryParameters: {
+          'type': widget.mediaType,
+          'category': widget.category,
+          'page': '${_page + 1}',
+          'pageSize': '100',
+          'sort': 'title',
+        },
+      ).query;
+      final payload = _CatalogPayload.fromJson(
+        await widget.api.getJson('/media/catalog?$query'),
+      );
+      if (!mounted) return;
+      setState(() {
+        _items = _dedupeMedia([..._items, ...payload.items]);
+        _page = payload.page;
+        _total = payload.total;
+        _totalPages = payload.totalPages;
+        _loading = false;
+      });
+    } on ApiException catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = failure.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Kategorien kunne ikke indlæses.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: BoltColors.background,
+    appBar: AppBar(
+      title: Text('${widget.label} · ${widget.category}'),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 20),
+          child: Center(
+            child: Text(
+              '$_total titler',
+              style: const TextStyle(
+                color: Colors.white60,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+    body: Column(
+      children: [
+        Expanded(
+          child: _loading && _items.isEmpty
+              ? const Center(child: CircularProgressIndicator())
+              : _CatalogGrid(
+                  api: widget.api,
+                  title: widget.category,
+                  items: _items,
+                  onPressed: widget.onPressed,
+                  tv: widget.tv,
+                ),
+        ),
+        if (_error != null || _page < _totalPages)
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+              child: Column(
+                children: [
+                  if (_error != null) ...[
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  OutlinedButton.icon(
+                    onPressed: _loading ? null : _loadNext,
+                    icon: _loading
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.expand_more),
+                    label: Text(_loading ? 'Indlæser...' : 'Vis flere'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 class _CatalogGrid extends StatelessWidget {
   const _CatalogGrid({
     required this.api,
@@ -1959,7 +2713,7 @@ class _CatalogGrid extends StatelessWidget {
           sliver: SliverGrid.builder(
             gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: tv ? 198 : 230,
-              mainAxisExtent: tv ? 318 : 330,
+              mainAxisExtent: tv ? 334 : 330,
               crossAxisSpacing: 16,
               mainAxisSpacing: 18,
             ),

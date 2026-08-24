@@ -13,6 +13,7 @@ import '../core/models.dart';
 import '../core/playback_platform.dart';
 import '../core/webvtt.dart';
 import '../widgets/brand.dart';
+import '../widgets/playback_option_sheet.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({
@@ -78,6 +79,13 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _subtitleChoiceMade = false;
   String? _chosenSubtitleTrackId;
   SubtitleQueueSelection? _subtitleQueueSelection;
+  final FocusNode _playerFocus = FocusNode(debugLabel: 'tv-player-root');
+  final FocusNode _playPauseFocus = FocusNode(
+    debugLabel: 'tv-player-play-pause',
+  );
+  final FocusNode _subtitleFocus = FocusNode(debugLabel: 'tv-player-subtitles');
+  final FocusNode _qualityFocus = FocusNode(debugLabel: 'tv-player-quality');
+  final FocusNode _speedFocus = FocusNode(debugLabel: 'tv-player-speed');
 
   @override
   void initState() {
@@ -185,19 +193,34 @@ class _PlayerScreenState extends State<PlayerScreen>
     PlaybackAuthorization authorization, {
     int directPlaySeekMs = 0,
   }) async {
-    if (authorization.transcodeStatusUrl != null) {
-      await _waitUntilReady(authorization.transcodeStatusUrl!);
+    var effectiveAuthorization = authorization;
+    if (effectiveAuthorization.transcodeStatusUrl != null) {
+      try {
+        await _waitUntilReady(
+          effectiveAuthorization.transcodeStatusUrl!,
+          maxAttempts: effectiveAuthorization.method == 'direct_stream'
+              ? 30
+              : 180,
+          directStream: effectiveAuthorization.method == 'direct_stream',
+        );
+      } on _DirectStreamStartupTimeout {
+        effectiveAuthorization = await _fallbackDirectStream(
+          effectiveAuthorization,
+          directPlaySeekMs,
+        );
+        await _waitUntilReady(effectiveAuthorization.transcodeStatusUrl!);
+      }
     }
     if (!mounted) return;
     setState(
-      () => _status = authorization.isDirectPlay
+      () => _status = effectiveAuthorization.isDirectPlay
           ? 'Åbner originalfilen...'
           : 'Forbereder adaptiv stream...',
     );
     final previous = _video;
     final controller = VideoPlayerController.networkUrl(
-      widget.api.endpoint(authorization.streamUrl),
-      formatHint: authorization.isHls ? VideoFormat.hls : null,
+      widget.api.endpoint(effectiveAuthorization.streamUrl),
+      formatHint: effectiveAuthorization.isHls ? VideoFormat.hls : null,
       videoPlayerOptions: VideoPlayerOptions(
         mixWithOthers: false,
         allowBackgroundPlayback: true,
@@ -206,26 +229,32 @@ class _PlayerScreenState extends State<PlayerScreen>
     _video = controller;
     await previous?.dispose();
     await controller.initialize();
-    if (authorization.isDirectPlay && directPlaySeekMs > 0) {
+    if (effectiveAuthorization.isDirectPlay && directPlaySeekMs > 0) {
       await controller.seekTo(Duration(milliseconds: directPlaySeekMs));
     }
-    await controller.setPlaybackSpeed(authorization.preferences.playbackRate);
+    await controller.setPlaybackSpeed(
+      effectiveAuthorization.preferences.playbackRate,
+    );
     await controller.play();
     await _ensureActiveTextSubtitle();
     _reconnectAttempts = 0;
     if (!mounted) return;
     setState(() {
       _buffering = false;
-      _status = authorization.isDirectPlay
+      _status = effectiveAuthorization.isDirectPlay
           ? 'Direct Play'
-          : authorization.method == 'direct_stream'
+          : effectiveAuthorization.method == 'direct_stream'
           ? 'Direct Stream'
           : 'Transcoding';
     });
   }
 
-  Future<void> _waitUntilReady(String statusUrl) async {
-    for (var attempt = 0; attempt < 180; attempt++) {
+  Future<void> _waitUntilReady(
+    String statusUrl, {
+    int maxAttempts = 180,
+    bool directStream = false,
+  }) async {
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
       final status = jsonMap(await widget.api.getJson(statusUrl));
       final state = stringValue(status['state']) ?? 'queued';
       if (state == 'ready') return;
@@ -243,7 +272,41 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
       await Future<void>.delayed(const Duration(seconds: 1));
     }
+    if (directStream) throw const _DirectStreamStartupTimeout();
     throw const ApiException('Streamen blev ikke klar inden for tre minutter.');
+  }
+
+  Future<PlaybackAuthorization> _fallbackDirectStream(
+    PlaybackAuthorization authorization,
+    int positionMs,
+  ) async {
+    if (mounted) {
+      setState(
+        () =>
+            _status = 'Direct Stream tager for lang tid. Skifter automatisk...',
+      );
+    }
+    final result = jsonMap(
+      await widget.api.patchJson(
+        '/playback/sessions/${authorization.sessionId}/configuration',
+        {
+          'streamToken': authorization.streamToken,
+          'burnIn': false,
+          'forceTranscode': true,
+          'startPositionMs': math.max(0, positionMs),
+        },
+      ),
+    );
+    final fallback = authorization.copyWith(
+      method: stringValue(result['method']) ?? 'transcode',
+      streamUrl: stringValue(result['streamUrl']) ?? authorization.streamUrl,
+      contentType:
+          stringValue(result['contentType']) ?? 'application/x-mpegURL',
+      transcodeStatusUrl: stringValue(result['transcodeStatusUrl']),
+    );
+    _authorization = fallback;
+    _timelineOffsetMs = math.max(0, positionMs);
+    return fallback;
   }
 
   void _startTimers() {
@@ -344,6 +407,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_nextEpisodeCountdown != null) return;
     _nextEpisodeCountdown = 10;
     _nextEpisodeTimer?.cancel();
+    _playerFocus.dispose();
+    _playPauseFocus.dispose();
+    _subtitleFocus.dispose();
+    _qualityFocus.dispose();
+    _speedFocus.dispose();
     _nextEpisodeTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
       final current = _nextEpisodeCountdown ?? 0;
@@ -1289,9 +1357,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Focus(
+          focusNode: _playerFocus,
           autofocus: true,
           onKeyEvent: (_, event) {
             if (event is! KeyDownEvent) return KeyEventResult.ignored;
+            _revealControls();
+            if (!_playerFocus.hasPrimaryFocus) {
+              return KeyEventResult.ignored;
+            }
             if (event.logicalKey == LogicalKeyboardKey.select ||
                 event.logicalKey == LogicalKeyboardKey.enter ||
                 event.logicalKey == LogicalKeyboardKey.space) {
@@ -1306,7 +1379,6 @@ class _PlayerScreenState extends State<PlayerScreen>
               unawaited(_seekTo(_absolutePositionMs + 10000));
               return KeyEventResult.handled;
             }
-            _revealControls();
             return KeyEventResult.ignored;
           },
           child: MouseRegion(
@@ -1522,6 +1594,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                   ),
                   const SizedBox(width: 20),
                   FilledButton.tonalIcon(
+                    focusNode: _playPauseFocus,
+                    autofocus: AppConfig.isTvBuild,
                     onPressed: _togglePlayback,
                     icon: Icon(
                       playing ? Icons.pause : Icons.play_arrow,
@@ -1586,12 +1660,14 @@ class _PlayerScreenState extends State<PlayerScreen>
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       TextButton.icon(
+                        focusNode: _subtitleFocus,
                         onPressed: _showSubtitles,
                         icon: const Icon(Icons.subtitles_outlined),
                         label: Text(_subtitle?.label ?? 'Undertekster: Fra'),
                       ),
                       const SizedBox(width: 10),
                       TextButton.icon(
+                        focusNode: _qualityFocus,
                         onPressed: _showQuality,
                         icon: const Icon(Icons.tune),
                         label: const Text('Kvalitet'),
@@ -1606,6 +1682,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ],
                       const SizedBox(width: 10),
                       TextButton.icon(
+                        focusNode: _speedFocus,
                         onPressed: () {
                           final current = video?.value.playbackSpeed ?? 1;
                           final next = current >= 2 ? 0.5 : current + 0.25;
@@ -1627,7 +1704,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  void _showSubtitles() {
+  Future<void> _showSubtitles() async {
     final tracks = _authorization?.subtitleTracks ?? const <SubtitleTrack>[];
     final visibleTracks = tracks
         .where((track) => track.id.isNotEmpty)
@@ -1635,79 +1712,51 @@ class _PlayerScreenState extends State<PlayerScreen>
     final textTracks = visibleTracks.where((track) => track.isText).toList();
     final burnedTracks = visibleTracks.where((track) => !track.isText).toList();
     _hideTimer?.cancel();
-    showModalBottomSheet<void>(
+    const offValue = '__off__';
+    final selectedValue = await showPlaybackOptionSheet<String>(
       context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: RadioGroup<String?>(
-          groupValue: _subtitle?.id,
-          onChanged: (value) {
-            Navigator.pop(context);
-            final selected = tracks
-                .where((track) => track.id == value)
-                .firstOrNull;
-            unawaited(_setSubtitle(selected));
-          },
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const ListTile(
-                title: Text(
-                  'Undertekster',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-              const RadioListTile<String?>(value: null, title: Text('Fra')),
-              if (textTracks.isNotEmpty) ...[
-                const ListTile(
-                  dense: true,
-                  title: Text(
-                    'Tekst-undertekster',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                for (final track in textTracks)
-                  RadioListTile<String?>(
-                    value: track.id,
-                    title: Text(track.label),
-                    subtitle: Text(
-                      '${track.language.toUpperCase()} · WebVTT/SRT',
-                    ),
-                    secondary: _subtitle?.id == track.id
-                        ? const Icon(Icons.check_circle)
-                        : null,
-                  ),
-              ],
-              if (burnedTracks.isNotEmpty) ...[
-                const ListTile(
-                  dense: true,
-                  title: Text(
-                    'Indbrændte undertekster',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                for (final track in burnedTracks)
-                  RadioListTile<String?>(
-                    value: track.id,
-                    title: Text(track.label),
-                    subtitle: Text(
-                      '${track.language.toUpperCase()} · Indbrænding',
-                    ),
-                    secondary: _subtitle?.id == track.id
-                        ? const Icon(Icons.check_circle)
-                        : null,
-                  ),
-              ],
-              if (visibleTracks.isEmpty)
-                const ListTile(title: Text('Ingen undertekster blev fundet.')),
-            ],
-          ),
+      tv: AppConfig.isTvBuild,
+      title: 'Undertekster',
+      description: visibleTracks.isEmpty
+          ? 'Der blev ikke fundet undertekster til denne titel.'
+          : 'Vælg spor med fjernbetjeningen. Valget bruges med det samme.',
+      options: [
+        PlaybackOption<String>(
+          value: offValue,
+          title: 'Fra',
+          subtitle: 'Afspil uden undertekster',
+          icon: Icons.subtitles_off_outlined,
+          selected: _subtitle == null,
         ),
-      ),
-    ).whenComplete(_scheduleHide);
+        for (final track in textTracks)
+          PlaybackOption<String>(
+            value: track.id,
+            title: track.label,
+            subtitle: '${track.language.toUpperCase()} · WebVTT/SRT',
+            icon: Icons.subtitles_outlined,
+            selected: _subtitle?.id == track.id,
+          ),
+        for (final track in burnedTracks)
+          PlaybackOption<String>(
+            value: track.id,
+            title: track.label,
+            subtitle: '${track.language.toUpperCase()} · Indbrænding',
+            icon: Icons.closed_caption_outlined,
+            selected: _subtitle?.id == track.id,
+          ),
+      ],
+    );
+    if (!mounted) return;
+    if (selectedValue != null) {
+      final selected = selectedValue == offValue
+          ? null
+          : tracks.where((track) => track.id == selectedValue).firstOrNull;
+      await _setSubtitle(selected);
+    }
+    _restoreControlFocus(_subtitleFocus);
   }
 
-  void _showQuality() {
+  Future<void> _showQuality() async {
     final auth = _authorization;
     if (auth == null) return;
     final uniqRenditions = <int, Rendition>{};
@@ -1720,71 +1769,52 @@ class _PlayerScreenState extends State<PlayerScreen>
     final sortedRenditions = uniqRenditions.values.toList()
       ..sort((a, b) => a.height.compareTo(b.height));
     _hideTimer?.cancel();
-    showModalBottomSheet<void>(
+    final selectedValue = await showPlaybackOptionSheet<String>(
       context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const ListTile(
-              title: Text(
-                'Kvalitet',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              subtitle: Text(
-                'Auto bruger Androids native adaptive HLS-afspiller.',
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.auto_awesome),
-              title: const Text('Automatisk'),
-              subtitle: const Text(
-                'Tilpasser kvalitet efter buffer og netværk',
-              ),
-              trailing: auth.preferences.qualityMode == 'auto'
-                  ? const Icon(Icons.check)
-                  : null,
-              onTap: () {
-                Navigator.pop(context);
-                unawaited(_changeQuality('auto'));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.high_quality),
-              title: const Text('Original'),
-              subtitle: const Text('Direct Play når filen er kompatibel'),
-              trailing: auth.preferences.qualityMode == 'original'
-                  ? const Icon(Icons.check)
-                  : null,
-              onTap: () {
-                Navigator.pop(context);
-                unawaited(_changeQuality('original'));
-              },
-            ),
-            for (final rendition in sortedRenditions.reversed)
-              ListTile(
-                leading: const Icon(Icons.hd_outlined),
-                title: Text(
-                  '${rendition.height}p${rendition.upscaled ? ' · Opskaleret' : ''}',
-                ),
-                subtitle: Text(
-                  '${(rendition.bitrate / 1000000).toStringAsFixed(1)} Mbps · ${rendition.hdr ? 'HDR' : 'SDR'}',
-                ),
-                trailing:
-                    auth.preferences.qualityMode == 'fixed' &&
-                        auth.preferences.fixedQualityHeight == rendition.height
-                    ? const Icon(Icons.check)
-                    : null,
-                onTap: () {
-                  Navigator.pop(context);
-                  unawaited(_changeQuality('${rendition.height}'));
-                },
-              ),
-          ],
+      tv: AppConfig.isTvBuild,
+      title: 'Kvalitet',
+      description:
+          'Auto tilpasser kvaliteten efter buffer og netværk uden at afbryde afspilningen.',
+      options: [
+        PlaybackOption<String>(
+          value: 'auto',
+          title: 'Automatisk',
+          subtitle: 'Anbefalet til stabil afspilning',
+          icon: Icons.auto_awesome,
+          selected: auth.preferences.qualityMode == 'auto',
         ),
-      ),
-    ).whenComplete(_scheduleHide);
+        PlaybackOption<String>(
+          value: 'original',
+          title: 'Original',
+          subtitle: 'Direct Play når filen er kompatibel',
+          icon: Icons.high_quality,
+          selected: auth.preferences.qualityMode == 'original',
+        ),
+        for (final rendition in sortedRenditions.reversed)
+          PlaybackOption<String>(
+            value: '${rendition.height}',
+            title:
+                '${rendition.height}p${rendition.upscaled ? ' · Opskaleret' : ''}',
+            subtitle:
+                '${(rendition.bitrate / 1000000).toStringAsFixed(1)} Mbps · ${rendition.hdr ? 'HDR' : 'SDR'}',
+            icon: Icons.hd_outlined,
+            selected:
+                auth.preferences.qualityMode == 'fixed' &&
+                auth.preferences.fixedQualityHeight == rendition.height,
+          ),
+      ],
+    );
+    if (!mounted) return;
+    if (selectedValue != null) await _changeQuality(selectedValue);
+    _restoreControlFocus(_qualityFocus);
+  }
+
+  void _restoreControlFocus(FocusNode node) {
+    _scheduleHide();
+    if (!AppConfig.isTvBuild) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && node.canRequestFocus) node.requestFocus();
+    });
   }
 
   String _time(int milliseconds) {
@@ -1797,6 +1827,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
+}
+
+class _DirectStreamStartupTimeout implements Exception {
+  const _DirectStreamStartupTimeout();
 }
 
 class _TimelineMarker {

@@ -2,6 +2,27 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.12 - 2026-08-24
+
+- Gør Android TV-playerens kvalitet og undertekster fuldt D-pad-styrede med
+  synligt fokus, automatisk scroll, OK-valg og fokusretur til playerkontrollen.
+- Bevarer brugerens eksplicitte sæsonvalg, selv når serverens fortsæt-position
+  peger på en anden sæson.
+- Segmenterer Direct Stream efter tid, så lange keyframe-intervaller ikke låser
+  HLS-opstarten, og skifter automatisk til transcoding efter 30 sekunder uden
+  et stabilt startsegment.
+- Erstatter Film og Seriers statiske 36-elements grids med TV-hubs, der viser
+  featured titel, nyeste indhold, senest udgivet, genrer og et pagineret
+  Alle-katalog med 100 titler pr. side.
+- Tilføjer en Nye episoder-række på serieforsiden og server-side
+  `released`-sortering efter reel udgivelsesdato for film, serier og episoder.
+- Gør hver genre til en fuldt pagineret katalogside frem for et lokalt filter
+  over de første få titler.
+- Reducerer TV-sidebaren fra 218 til 82 pixels, når den ikke har fokus, og
+  udvider den automatisk under D-pad-navigation.
+- Tilføjer API- og Flutter-regressionstests for release-sortering, hubrækker,
+  genrer, pagination og den kompakte TV-rail.
+
 ## 0.2.11 - 2026-08-24
 
 - Retter TV-klientens QR-login, så et godkendt pairing-resultat publicerer den
