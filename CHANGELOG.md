@@ -4,6 +4,10 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+- Udvidet kundesøgning med selvstændige episodehits og rettet anbefalingsscoring for TMDB-genrer, credits, similar-id'er og konkrete forklaringer.
+- Tilføjet account-scopet driftsmonitorering med 30 dages CPU-, RAM-, disk-, playback- og jobhistorik, vedvarende alarmer, kvittering og sikker diagnostikeksport.
+- Tilføjet Live TV-sporopdagelse og valg af lyd/undertekst gennem ffprobe, samme lease ved rekonfiguration, native HLS-spor i webplayeren og server-rendering af understøttede bitmap-undertekster.
+
 - Gør Live TV-kanalnummeret til en atomisk placering i hele den aktive kanalrække. Et nummer kan skrives direkte i adminpanelet, hvorefter den valgte kanal indsættes på pladsen og alle efterfølgende kanaler forskydes og renummereres uden dubletter.
 
 - Retter Live TV-EPG ved at autoopdage standard Xtream XMLTV, fjerne kapløbet mellem kanal- og EPG-import samt afvise tomme eller umatchede XMLTV-resultater med konkret diagnostik.

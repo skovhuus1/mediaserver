@@ -14,6 +14,7 @@ import {
   scoreRecommendation,
 } from './recommendation-score';
 import { sanitizeMediaTitle } from '@boltbytes/contracts';
+import { readLocalCredits, readLocalGenres, readSimilarProviderIds } from '../experience/experience-utils';
 
 interface RecommendationCard {
   id: string;
@@ -98,6 +99,10 @@ export class RecommendationsService {
     const feedback = new Map(
       feedbackRows.map((row) => [row.mediaId, row.type]),
     );
+    const completedHistory = await this.prisma.playbackHistory.findMany({
+      where: { accountId: actor.accountId, profileId: profile.id, completed: true },
+      select: { mediaId: true, media: { select: { seriesTitle: true } } },
+    });
     const history = await this.prisma.playbackHistory.findMany({
       where: {
         accountId: actor.accountId,
@@ -122,13 +127,12 @@ export class RecommendationsService {
 
     const personalized = preferences?.recommendationsEnabled ?? true;
     const watchedIds = new Set(
-      history
-        .filter((entry) => entry.completed)
+      completedHistory
         .map((entry) => entry.mediaId),
     );
     const watchedSeries = new Set(
-      history
-        .filter((entry) => entry.completed && entry.media.seriesTitle)
+      completedHistory
+        .filter((entry) => entry.media.seriesTitle)
         .map((entry) => entry.media.seriesTitle!),
     );
     const signals: RecommendationSignal[] = personalized
@@ -145,6 +149,7 @@ export class RecommendationsService {
           return {
             ...this.features(entry.media),
             weight: baseWeight * recency,
+            title: sanitizeMediaTitle(entry.media.seriesDisplayTitle ?? entry.media.seriesTitle ?? entry.media.title),
           };
         })
       : [];
@@ -367,25 +372,18 @@ export class RecommendationsService {
     metadataProvider: string | null;
     metadataProviderId: string | null;
   }): RecommendationFeatures {
-    const genres = this.stringList(media.genres);
-    const credits = Array.isArray(media.credits)
-      ? media.credits
-          .map((credit) =>
-            credit &&
-            typeof credit === 'object' &&
-            'id' in credit &&
-            typeof credit.id === 'string'
-              ? credit.id
-              : null,
-          )
-          .filter((credit): credit is string => Boolean(credit))
-      : [];
+    const genres = readLocalGenres(media.genres);
+    const localCredits = readLocalCredits(media.credits).slice(0, 15);
+    const credits = localCredits.map((credit) => credit.key);
+    const creditNames = Object.fromEntries(localCredits.map((credit) => [credit.key, credit.name]));
     return {
       category: media.category ?? 'uncategorized',
       genres,
       credits,
+      creditNames,
       providerIds: [
-        ...this.stringList(media.similarProviderIds),
+        ...readSimilarProviderIds(media.similarProviderIds),
+        ...(media.metadataProviderId ? [media.metadataProviderId] : []),
         ...(media.metadataProvider && media.metadataProviderId
           ? [`${media.metadataProvider}:${media.metadataProviderId}`]
           : []),

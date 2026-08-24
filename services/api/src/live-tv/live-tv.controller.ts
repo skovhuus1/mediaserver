@@ -4,7 +4,7 @@ import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import {
   BulkUpdateLiveTvAllChannelsDto, BulkUpdateLiveTvChannelGroupDto, BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto,
-  ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, LiveTvAuthorizeDto, LiveTvGuideNeighborDto, LiveTvSwitchDto, LiveTvTokenDto, MergeLiveTvChannelDto, ReorderLiveTvChannelDto,
+  ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, LiveTvAuthorizeDto, LiveTvGuideNeighborDto, LiveTvSwitchDto, LiveTvTokenDto, LiveTvTrackSelectionDto, MergeLiveTvChannelDto, ReorderLiveTvChannelDto,
   UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto, UpdateLiveTvSourceDto,
 } from './live-tv.dto';
 import { LiveTvPlaybackService } from './live-tv-playback.service';
@@ -41,6 +41,7 @@ export class LiveTvController {
   @Delete('favorites/:channelId') unfavorite(@CurrentUser() actor: AuthenticatedUser, @Param('channelId') id: string) { return this.liveTv.setFavorite(actor, id, false); }
   @Post('playback/authorize') authorize(@CurrentUser() actor: AuthenticatedUser, @Body() dto: LiveTvAuthorizeDto) { return this.playback.authorize(actor, dto); }
   @Post('playback/leases/:id/switch') switchChannel(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: LiveTvSwitchDto) { return this.playback.switchChannel(actor, id, dto.channelId, dto.streamToken, dto.preferredMethod); }
+  @Patch('playback/leases/:id/tracks') configureTracks(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: LiveTvTrackSelectionDto) { return this.playback.configureTracks(actor, id, dto); }
   @Post('playback/leases/:id/cast-handoff') castHandoff(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: LiveTvTokenDto) { return this.playback.castHandoff(actor, id, dto.streamToken); }
   @Delete('playback/leases/:id/cast-handoff') endCast(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: LiveTvTokenDto) { return this.playback.endCastHandoff(actor, id, dto.streamToken); }
 }
