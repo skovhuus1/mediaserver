@@ -15,7 +15,7 @@ class AppController extends ChangeNotifier {
   AppController({required this.api, required this.storage});
 
   final ApiClient api;
-  final DeviceSessionStore storage;
+  final DeviceSessionStorage storage;
 
   AppStage stage = AppStage.booting;
   SessionUser? user;

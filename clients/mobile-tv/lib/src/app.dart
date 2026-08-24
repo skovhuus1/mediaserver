@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/app_config.dart';
+import 'core/brand_theme.dart';
 import 'screens/auth_screens.dart';
 import 'screens/library_screen.dart';
 import 'screens/offline_downloads_screen.dart';
@@ -18,26 +19,26 @@ class BoltBytesApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const background = Color(0xFF05070C);
-    const surface = Color(0xFF0B1018);
-    const panel = Color(0xFF111A24);
-    const rail = Color(0xFF0D151F);
-    const amber = Color(0xFFE4AA52);
-    const jade = Color(0xFF62C9A7);
+    const background = BoltColors.background;
+    const surface = BoltColors.surface;
+    const panel = BoltColors.panel;
+    const rail = BoltColors.backgroundRaised;
+    const blue = BoltColors.primary;
+    const cyan = BoltColors.cyan;
 
     final scheme =
         ColorScheme.fromSeed(
-          seedColor: amber,
+          seedColor: blue,
           brightness: Brightness.dark,
           surface: surface,
         ).copyWith(
-          primary: amber,
-          secondary: jade,
-          error: const Color(0xFFFF717C),
+          primary: blue,
+          secondary: cyan,
+          error: BoltColors.error,
           surface: surface,
           onSurface: Colors.white,
           onPrimary: Colors.black,
-          outline: const Color(0xFF2D3842),
+          outline: BoltColors.line,
           shadow: const Color(0x66000000),
           surfaceContainerLow: panel,
           surfaceContainerHighest: rail,
@@ -145,8 +146,8 @@ class BoltBytesApp extends StatelessWidget {
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
             elevation: 0,
-            backgroundColor: amber,
-            foregroundColor: const Color(0xFF171008),
+            backgroundColor: blue,
+            foregroundColor: const Color(0xFF03101C),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
             textStyle: const TextStyle(
               fontWeight: FontWeight.w800,
@@ -170,11 +171,11 @@ class BoltBytesApp extends StatelessWidget {
         ),
         floatingActionButtonTheme: const FloatingActionButtonThemeData(
           foregroundColor: Colors.black,
-          backgroundColor: amber,
+          backgroundColor: blue,
         ),
         navigationBarTheme: const NavigationBarThemeData(
           backgroundColor: Color(0xF20A0E13),
-          indicatorColor: Color(0xFF49351E),
+          indicatorColor: Color(0xFF12365C),
           iconTheme: WidgetStatePropertyAll(
             IconThemeData(color: Color(0xFFDCE3EC)),
           ),
@@ -197,12 +198,12 @@ class BoltBytesApp extends StatelessWidget {
             color: Color(0xFF8D98A5),
             fontWeight: FontWeight.w600,
           ),
-          indicatorColor: Color(0xFF3B2C1B),
+          indicatorColor: Color(0xFF12365C),
           useIndicator: true,
         ),
-        focusColor: const Color(0x3345E7C4),
+        focusColor: const Color(0x554EA1FF),
         hoverColor: const Color(0x1AFFFFFF),
-        progressIndicatorTheme: const ProgressIndicatorThemeData(color: amber),
+        progressIndicatorTheme: const ProgressIndicatorThemeData(color: blue),
         chipTheme: ChipThemeData(
           backgroundColor: const Color(0xC40A121B),
           side: const BorderSide(color: Color(0xFF26313A)),
@@ -223,13 +224,13 @@ class BoltBytesApp extends StatelessWidget {
           ),
           trackColor: WidgetStateProperty.resolveWith(
             (states) => states.contains(WidgetState.selected)
-                ? const Color(0x3345E7C4)
+                ? const Color(0x554EA1FF)
                 : const Color(0xFF2D3640),
           ),
         ),
         sliderTheme: const SliderThemeData(
-          thumbColor: amber,
-          activeTrackColor: amber,
+          thumbColor: blue,
+          activeTrackColor: blue,
           inactiveTrackColor: Color(0xFF29323D),
           overlayShape: RoundSliderOverlayShape(overlayRadius: 18),
           valueIndicatorTextStyle: TextStyle(
@@ -306,7 +307,7 @@ class _BootScreen extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF090D14), Color(0xFF060A0F)],
+          colors: [BoltColors.panel, BoltColors.background],
         ),
       ),
       child: Center(

@@ -11,7 +11,16 @@ abstract interface class SessionStorage {
   Future<void> clearTokens();
 }
 
-class DeviceSessionStore implements SessionStorage {
+abstract interface class DeviceSessionStorage implements SessionStorage {
+  Future<String?> readServerUrl();
+  Future<void> writeServerUrl(String value);
+  Future<void> writeCachedUser(dynamic value);
+  Future<dynamic> readCachedUser();
+  Future<void> clearCachedUser();
+  Future<String> deviceFingerprint();
+}
+
+class DeviceSessionStore implements DeviceSessionStorage {
   DeviceSessionStore({
     FlutterSecureStorage? secureStorage,
     SharedPreferencesAsync? preferences,
@@ -50,21 +59,27 @@ class DeviceSessionStore implements SessionStorage {
     ]);
   }
 
+  @override
   Future<String?> readServerUrl() => _preferences.getString(_serverKey);
 
+  @override
   Future<void> writeServerUrl(String value) =>
       _preferences.setString(_serverKey, value);
 
+  @override
   Future<void> writeCachedUser(dynamic value) =>
       _secure.write(key: _cachedUserKey, value: jsonEncode(value));
 
+  @override
   Future<dynamic> readCachedUser() async {
     final value = await _secure.read(key: _cachedUserKey);
     return value == null ? null : jsonDecode(value);
   }
 
+  @override
   Future<void> clearCachedUser() => _secure.delete(key: _cachedUserKey);
 
+  @override
   Future<String> deviceFingerprint() async {
     final existing = await _preferences.getString(_deviceKey);
     if (existing != null && existing.length >= 16) return existing;

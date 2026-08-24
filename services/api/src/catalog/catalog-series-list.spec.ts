@@ -38,7 +38,17 @@ describe('series catalog aggregation', () => {
       episodeCount: 24,
     })]);
     expect(prisma.mediaItem.groupBy).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ file: { is: { status: 'ready' } } }),
+      where: expect.objectContaining({
+        type: 'episode',
+        file: { is: { status: 'ready' } },
+        AND: [expect.objectContaining({
+          OR: expect.arrayContaining([
+            { seriesTitle: { not: null } },
+            { seriesDisplayTitle: { not: null } },
+            { seriesMetadataProviderId: { not: null } },
+          ]),
+        })],
+      }),
       _count: { _all: true },
     }));
   });

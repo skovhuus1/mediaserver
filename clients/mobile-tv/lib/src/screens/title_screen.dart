@@ -198,7 +198,7 @@ class _TitleScreenState extends State<TitleScreen> {
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: tv ? 560 : 470,
+            expandedHeight: tv ? 420 : 470,
             pinned: true,
             backgroundColor: const Color(0xFF090D12),
             actions: [
@@ -313,7 +313,7 @@ class _TitleScreenState extends State<TitleScreen> {
                               media.displayTitle,
                               style: Theme.of(context).textTheme.displayLarge
                                   ?.copyWith(
-                                    fontSize: tv ? 64 : 42,
+                                    fontSize: tv ? 48 : 42,
                                     height: 0.98,
                                   ),
                             ),
@@ -331,7 +331,7 @@ class _TitleScreenState extends State<TitleScreen> {
                             Text(
                               media.overview ??
                                   'Ingen beskrivelse er tilgængelig endnu.',
-                              maxLines: tv ? 5 : 4,
+                              maxLines: tv ? 3 : 4,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: Colors.white70,
@@ -504,44 +504,38 @@ class _TitleScreenState extends State<TitleScreen> {
   }
 
   Widget _seasonSelector(TitleExperience data, bool tv) => Padding(
-    padding: EdgeInsets.fromLTRB(tv ? 28 : 24, 20, tv ? 28 : 24, 14),
-    child: SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: data.seasons
-            .map(
-              (season) => Padding(
-                padding: EdgeInsets.only(right: tv ? 12 : 10),
-                child: FilledButton.tonal(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: selectedSeason == season.number
-                        ? Theme.of(context).colorScheme.secondary
-                        : const Color(0xFF141C24),
-                    foregroundColor: selectedSeason == season.number
-                        ? Colors.black
-                        : Colors.white,
-                    padding: EdgeInsets.symmetric(
-                      horizontal: tv ? 14 : 10,
-                      vertical: 10,
+    padding: EdgeInsets.fromLTRB(tv ? 54 : 24, 20, tv ? 54 : 24, 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Sæsoner og afsnit',
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontSize: tv ? 28 : 22),
+        ),
+        const SizedBox(height: 14),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: data.seasons
+                .map(
+                  (season) => Padding(
+                    padding: EdgeInsets.only(right: tv ? 12 : 10),
+                    child: _SeasonButton(
+                      label: '${season.label} · ${season.episodeCount}',
+                      selected: selectedSeason == season.number,
+                      onPressed: () {
+                        selectedSeason = season.number;
+                        _load(season.number);
+                      },
                     ),
                   ),
-                  onPressed: () {
-                    selectedSeason = season.number;
-                    _load(season.number);
-                  },
-                  child: Text(
-                    '${season.label} · ${season.episodeCount}',
-                    style: TextStyle(
-                      fontWeight: selectedSeason == season.number
-                          ? FontWeight.w800
-                          : FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            )
-            .toList(growable: false),
-      ),
+                )
+                .toList(growable: false),
+          ),
+        ),
+      ],
     ),
   );
 
@@ -588,6 +582,7 @@ class _TitleActionRow extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         FilledButton.icon(
+          autofocus: useTvLayout(context),
           onPressed: loading ? null : () => onPlay(false),
           icon: const Icon(Icons.play_arrow),
           label: Text(hasResume ? 'Fortsæt' : 'Afspil'),
@@ -675,7 +670,20 @@ class _EpisodeTileState extends State<_EpisodeTile> {
     );
     return InkWell(
       onTap: widget.onPressed,
-      onFocusChange: (value) => setState(() => focused = value),
+      onFocusChange: (value) {
+        setState(() => focused = value);
+        if (value) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            Scrollable.ensureVisible(
+              context,
+              alignment: 0.42,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+            );
+          });
+        }
+      },
       borderRadius: BorderRadius.circular(widget.tv ? 18 : 16),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
@@ -719,7 +727,7 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                     children: [
                       Expanded(
                         child: Text(
-                          episode.media.episodeLabel,
+                          '${episode.media.episodeLabel} · ${episode.media.displayTitle}',
                           style: TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: widget.tv ? 18 : 16,
@@ -788,6 +796,69 @@ class _TvActionButton extends StatelessWidget {
       foregroundColor: Colors.white,
       visualDensity: VisualDensity.compact,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    ),
+  );
+}
+
+class _SeasonButton extends StatefulWidget {
+  const _SeasonButton({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  State<_SeasonButton> createState() => _SeasonButtonState();
+}
+
+class _SeasonButtonState extends State<_SeasonButton> {
+  bool focused = false;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: widget.onPressed,
+    onFocusChange: (value) {
+      setState(() => focused = value);
+      if (value) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 180),
+          );
+        });
+      }
+    },
+    borderRadius: BorderRadius.circular(12),
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 140),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: widget.selected
+            ? const Color(0xFF173E68)
+            : const Color(0xFF122235),
+        border: Border.all(
+          color: focused
+              ? Theme.of(context).colorScheme.primary
+              : widget.selected
+              ? const Color(0xFF4EA1FF)
+              : const Color(0xFF29435D),
+          width: focused ? 3 : 1,
+        ),
+      ),
+      child: Text(
+        widget.label,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: widget.selected ? FontWeight.w800 : FontWeight.w600,
+        ),
+      ),
     ),
   );
 }
