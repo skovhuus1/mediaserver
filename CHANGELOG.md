@@ -2,6 +2,13 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.11 - 2026-08-24
+
+- Retter TV-klientens QR-login, så et godkendt pairing-resultat publicerer den
+  indlæste session og skiftet til biblioteket til appens overordnede router.
+- Tilføjer en regressionstest af hele overgangen fra pairing-poll og krypteret
+  tokenlagring til aktiv profil, `AppStage.library` og router-notifikation.
+
 ## 0.2.10 - 2026-08-24
 
 - Erstatter Flutter-standardikonet med BoltBytes-logoet i alle Android-densiteter.
