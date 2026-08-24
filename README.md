@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.11**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.2.12**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -208,5 +208,18 @@ Alle releases bruger ét SemVer-nummer. Sæt næste version med `npm run version
 Android-releases bygges som separate `mobile`- og `tv`-flavors. Produktionsworkflowet udgiver APK/AAB sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk mobil-, TV- og Cast-certificering forbliver en særskilt releasegate.
 
 TV-klienten bruger en blå BoltBytes-shell med synligt logo, kompakte mediekort og én samlet D-pad-model. TV-login har QR som primær handling, serievisningen viser sæsoner og alle afsnit, og Live TV-klienten bruger serverens guide-, favorit-, forbindelsespulje-, heartbeat- og kanalskiftkontrakter. E-mail-login er en eksplicit fallback og kræver ikke, at brugeren kan pege eller swipe på skærmen.
+
+Playerens kvalitets- og undertekstmenuer er fjernbetjeningsklare med op/ned-navigation, OK-valg, automatisk scroll og fokusretur. TV viser valgene i et kompakt højrepanel, mens touch-klienter fortsat bruger et bottom sheet. Direct Stream lukker tidsbaserede HLS-segmenter uden at vente på perfekte keyframe-intervaller; hvis den stabile startbuffer stadig mangler efter 30 sekunder, genbruger klienten samme session og skifter automatisk til transcoding.
+
+Film og Serier har separate TV-forsider med featured titel, Nyeste, Senest
+udgivet, genreindgange og et lazy Alle-katalog. Serier viser desuden Nye
+episoder. Første side henter op til 100 titler, og Load mere samt hver genreside
+bruger serverens pagination, så store biblioteker ikke afkortes eller bygges i
+TV’ets hukommelse på én gang. `sort=released` bruger reel udgivelsesdato, mens
+`sort=newest` fortsat viser det senest tilføjede eller ændrede indhold.
+
+TV-navigationen bruger en 82-pixels ikonrail, når fokus er i indholdet. Railen
+udvider sig til fulde etiketter under D-pad-navigation og kollapser igen, når
+fokus forlader menuen.
 
 Licens er ikke fastlagt i repositoryet. Tilføj en licensfil, før projektet distribueres uden for den nuværende private anvendelse.

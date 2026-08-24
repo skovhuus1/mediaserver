@@ -126,8 +126,8 @@ export class CatalogQueryDto {
   pageSize = 24;
 
   @IsOptional()
-  @IsIn(['newest', 'title', 'year'])
-  sort: 'newest' | 'title' | 'year' = 'newest';
+  @IsIn(['newest', 'released', 'title', 'year'])
+  sort: 'newest' | 'released' | 'title' | 'year' = 'newest';
 }
 
 export class MediaDetailsQueryDto {

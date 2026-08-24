@@ -52,8 +52,8 @@ class _TitleScreenState extends State<TitleScreen> {
       setState(() {
         experience = next;
         selectedSeason =
-            next.selectedSeasonNumber ??
             season ??
+            next.selectedSeasonNumber ??
             next.seasons.firstOrNull?.number;
         loading = false;
         inWatchlist = status['inWatchlist'] == true;
@@ -526,7 +526,7 @@ class _TitleScreenState extends State<TitleScreen> {
                       label: '${season.label} · ${season.episodeCount}',
                       selected: selectedSeason == season.number,
                       onPressed: () {
-                        selectedSeason = season.number;
+                        setState(() => selectedSeason = season.number);
                         _load(season.number);
                       },
                     ),
