@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.9**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.2.10**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -18,6 +18,12 @@ node scripts/smoke-android-tv-launch.mjs clients/mobile-tv/build/app/outputs/flu
 
 Gaten installerer APK'en, rydder crash-bufferen, starter Leanback-activity og fejler,
 hvis processen ikke overlever eller Android registrerer et app-crash.
+
+Fra `0.2.10` bruger Android-flavorerne BoltBytes-launcherikonet i alle densiteter,
+og TV-flavoren har et separat 320x180-rasterbanner til Leanback/Google TV. Banner
+og ikoner gendannes reproducerbart med
+`powershell -File scripts/generate-android-tv-branding.ps1`; TV-manifestet binder
+banneret til både application og launcher-activity.
 
 Native Android lint køres desuden mod `tvRelease`. Klienten understøtter minSdk 24,
 Ethernet-TV uden Wi-Fi-krav, eksplicit no-backup af tokens/offline-nøgler og de nyere

@@ -2,6 +2,15 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.10 - 2026-08-24
+
+- Erstatter Flutter-standardikonet med BoltBytes-logoet i alle Android-densiteter.
+- Tilføjer et rigtigt 320x180 BoltBytes-rasterbanner til Android TV-launcheren.
+- Binder TV-banneret til både application og Leanback-activity, så Google TV og
+  andre launchere viser branding på appflisen.
+- Tilføjer en reproducerbar PowerShell-generator, så banner og launcherikoner
+  kan gendannes fra samme visuelle BrandMark-kontrakt.
+
 ## 0.2.9 - 2026-08-24
 
 - Serieoversigten accepterer scannerens titel-, displaytitel- og provider-identiteter, så korrekt matchede serier ikke forsvinder fra TV-kataloget.
