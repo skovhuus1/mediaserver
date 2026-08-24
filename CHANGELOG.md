@@ -4,6 +4,10 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.2.13 - 2026-08-24
+
+- Gør Live TV-kanalnummeret til en atomisk placering i hele den aktive kanalrække. Et nummer kan skrives direkte i adminpanelet, hvorefter den valgte kanal indsættes på pladsen og alle efterfølgende kanaler forskydes og renummereres uden dubletter.
+
 - Retter Live TV-EPG ved at autoopdage standard Xtream XMLTV, fjerne kapløbet mellem kanal- og EPG-import samt afvise tomme eller umatchede XMLTV-resultater med konkret diagnostik.
 
 - Redesignet webplayerens Live TV-klargøring med kanalbranding, responsiv statusvisning, tilgængelig reduced-motion-adfærd og mulighed for at afbryde under reservationen.
