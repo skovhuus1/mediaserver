@@ -85,8 +85,9 @@ export class BulkUpdateLiveTvAllChannelsDto {
 }
 
 export class ReorderLiveTvChannelDto {
-  @IsUUID('4') targetChannelId!: string;
-  @IsIn(['before', 'after']) placement: 'before' | 'after' = 'before';
+  @IsOptional() @IsUUID('4') targetChannelId?: string;
+  @IsOptional() @IsIn(['before', 'after']) placement: 'before' | 'after' = 'before';
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5_000) position?: number;
 }
 
 export class ListAdminLiveTvChannelsDto {
