@@ -18,7 +18,7 @@ Live TV-domænet importerer M3U-kanaler, samler dubletter, prioriterer redundant
 1. Åbn `Live TV` i administratorpanelet.
 2. Opret en udbyder med navn, M3U-URL og eventuel XMLTV-URL.
 3. Tilføj ekstra forbindelser, hvis abonnementet hos udbyderen tillader parallelle streams.
-4. Kør kanalimport og derefter EPG-import. Hvis M3U-headeren indeholder `url-tvg`, `x-tvg-url` eller `tvg-url`, opretter importjobbet automatisk XMLTV-kilden og sætter et EPG-job i kø. Begge kører som durable jobs med status og fejl i opgaveoversigten.
+4. Kør kanalimport og derefter EPG-import. Hvis M3U-headeren indeholder `url-tvg`, `x-tvg-url` eller `tvg-url`, opretter importjobbet automatisk XMLTV-kilden. For en standard Xtream-playliste på `get.php` med `username` og `password` udledes den tilsvarende `xmltv.php`-kilde sikkert, når headeren ikke annoncerer EPG. EPG-jobbet sættes først i kø, efter alle M3U-kanaler er committed, så første import ikke kan ende med nul matches på grund af et jobkapløb. Begge kører som durable jobs med status og fejl i opgaveoversigten.
 5. Ret kanalnavn, nummer, gruppe, voksenmarkering og aktivering efter behov.
 6. Filtrér på synlige eller skjulte kanaler, søg efter kanal eller gruppe, og navigér server-side i kataloger på op til 50.000 kanaler. Klik første checkbox og Shift-klik den sidste for at markere et interval på siden; brug `Vis`/`Skjul`, eller vælg en eksakt gruppe og brug `Vis hele gruppen`/`Skjul hele gruppen`.
 7. Flere forbindelseslinjer og kvalitetsvarianter bruger samme `channel:v2`-identitet efter kontrolleret fjernelse af tekniske slutmarkører som 4K, UHD, FHD, FH, HD, SD og DK. `DR 1 FHD DK`, `DR 1 FH DK`, `DR 1 HD DK` og `DR 1 DK` bliver derfor én kanal; `DR 2` forbliver separat. Forskellige vilkårlige `tvg-id`-værdier holdes adskilt, medmindre id'erne selv normaliseres til den samme dokumenterede kvalitetsvariant.
@@ -107,7 +107,7 @@ TV-driftssiden på `/live-tv/operations` viser schedulerstatus, linjehealth, de 
 Hver aktiv udbyder kan automatisk opdatere M3U og XMLTV med separate intervaller. Schedulerens PostgreSQL advisory lock og aktive-job-deduplikering gør den sikker ved flere API-replikaer. Udløbne leases markeres og deres streamjob annulleres, mens EPG-poster ældre end 48 timer ryddes automatisk.
 
 - Manglende kanaler: kontrollér importjobbet og udbyderens seneste fejl i Live TV-panelet.
-- Manglende guide: kontrollér om M3U-headeren annoncerer en XMLTV-URL, eller angiv XMLTV manuelt; kontrollér derefter tidszone og kanalernes XMLTV-id-match.
+- Manglende guide: kontrollér providerens XMLTV-health og seneste `live-tv.epg`-job. Standard Xtream `get.php` autoopdages; andre playlister skal annoncere en XMLTV-URL i M3U-headeren eller have den angivet manuelt. Et XMLTV-job med nul aktuelle programmer eller nul matches fejler nu med konkrete eksempel-id'er i stedet for at markere kilden som sund.
 - Ingen ledig forbindelse: kontrollér aktive leases, `perUserStreamLimit`, `maxStreams` og planens samlede streamloft.
 - Stream bliver stående på klargøring: kontrollér `live-tv.stream`-jobbet og transcoderlogs.
 - Chromecast: `BB_MEDIA_PUBLIC_URL` skal være offentlig HTTPS, og receiveren skal kunne hente stream-URL'en uden lokale headers.
