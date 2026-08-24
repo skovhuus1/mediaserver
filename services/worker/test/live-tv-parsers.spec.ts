@@ -4,7 +4,7 @@ import { parseM3u, parseXmlTv } from '../src/live-tv-parsers.js';
 describe('Live TV parsers', () => {
   it('parses extended M3U metadata and ignores invalid entries', () => {
     const entries = parseM3u('#EXTM3U\n#EXTINF:-1 tvg-id="dr1.dk" tvg-name="DR1" tvg-logo="https://img/dr1.png" group-title="Danske",DR 1 HD\nhttps://tv.test/dr1.m3u8\n#BAD\nfile:///local');
-    expect(entries).toEqual([{ name: 'DR 1 HD', url: 'https://tv.test/dr1.m3u8', tvgId: 'dr1.dk', tvgName: 'DR1', logoUrl: 'https://img/dr1.png', groupName: 'Danske', channelNumber: null }]);
+    expect(entries).toEqual([{ name: 'DR 1 HD', url: 'https://tv.test/dr1.m3u8', tvgId: 'dr1.dk', tvgName: 'DR1', logoUrl: 'https://img/dr1.png', groupName: 'Danske', countryCode: null, channelNumber: null }]);
   });
 
   it('parses XMLTV timezone, metadata and program boundaries', () => {

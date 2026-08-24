@@ -30,7 +30,7 @@ describe('Live TV parsers', () => {
 
   it('extracts XMLTV URLs advertised by the M3U header', () => {
     const result = parseM3uDocument(`#EXTM3U url-tvg="https://epg.example.test/guide.xml, guide-2.xml" x-tvg-url='https://backup.example.test/xmltv.gz'
-#EXTINF:-1 tvg-id="dr1" group-title="Dansk",DR 1 HD DK
+#EXTINF:-1 tvg-id="dr1" tvg-country="DK" group-title="Dansk",DR 1 HD DK
 https://stream.example.test/dr1.m3u8`);
 
     expect(result.epgUrls).toEqual([
@@ -38,7 +38,7 @@ https://stream.example.test/dr1.m3u8`);
       'guide-2.xml',
       'https://backup.example.test/xmltv.gz',
     ]);
-    expect(result.entries[0]).toMatchObject({ name: 'DR 1 HD DK', groupName: 'Dansk', tvgId: 'dr1' });
+    expect(result.entries[0]).toMatchObject({ name: 'DR 1 HD DK', groupName: 'Dansk', countryCode: 'DK', tvgId: 'dr1' });
   });
 
   it('merges quality and locale suffixes without merging distinct channel names', () => {

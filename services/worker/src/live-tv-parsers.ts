@@ -5,6 +5,7 @@ export type ParsedM3uEntry = {
   tvgName: string | null;
   logoUrl: string | null;
   groupName: string | null;
+  countryCode: string | null;
   channelNumber: number | null;
 };
 
@@ -53,6 +54,7 @@ export function parseM3uDocument(content: string): ParsedM3uDocument {
     const number = numberRaw ? Number.parseInt(numberRaw, 10) : Number.NaN;
     entries.push({ name, url: line, tvgId: clean(metadata?.['tvg-id']), tvgName: clean(metadata?.['tvg-name']),
       logoUrl: clean(metadata?.['tvg-logo']), groupName: clean(metadata?.['group-title']) ?? extGroup,
+      countryCode: clean(metadata?.['tvg-country']) ?? clean(metadata?.['country']) ?? clean(metadata?.['tvg-country-code']),
       channelNumber: Number.isInteger(number) && number > 0 ? number : null });
     metadata = null; displayName = ''; extGroup = null;
   }

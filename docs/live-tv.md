@@ -25,6 +25,8 @@ Live TV-domænet importerer M3U-kanaler, samler dubletter, prioriterer redundant
 8. Et manuelt navn, nummer eller gruppe sætter metadata-låsen. Identiteten ligger separat og ændres ikke, så senere import og failover fortsat virker.
 9. Kilder vælges efter connection-health og kvalitet (`4K`, `FHD`, `HD`, standard, `SD`) før provider-, forbindelses- og kildeprioritet. Ved fejl gemmes den prøvede kilde i jobledgeren, så samme defekte URL ikke vælges igen i næste forsøg.
 10. Saml resterende bekræftede dubletter manuelt. Samlingen flytter favoritter, historiske leases, optagelser og kilder, mens overlappende EPG-data genopbygges ved næste XMLTV-import.
+11. Som udgangspunkt er kun Danmark aktivt. Landet bestemmes fra `tvg-country`, kanalgruppen, tydelige DK-markører og kendte danske kanaler. Svenske og norske kanaler i referencepakken forbliver skjulte, medmindre M3U-metadata eksplicit placerer dem i Danmark.
+12. Aktive kanaler starter i rækkefølgen fra Canal Digital Danmarks kanalliste gældende 20. august 2020. Træk i håndtaget på en aktiv kanal for at flytte den før eller efter en anden kanal; serveren opdaterer hele den account-scopede guide atomisk og auditlogger ændringen. Manuel rækkefølge bevares ved senere importer.
 
 Bulkændringer er account-scoped og kræver administratorrolle. Skjul udføres i samme databasetransaktion som auditloggen, frigiver aktive leases, annullerer deres streamjobs og annullerer planlagte, køsatte eller aktive optagelser. Operators kan filtrere og inspicere, men ikke ændre kanalstatus.
 
@@ -79,6 +81,7 @@ M3U er som standard begrænset til 256 MiB og XMLTV til 200 MiB. Begge kilder l�
 - `GET/PATCH /api/v1/live-tv/admin/channels`
 - `PATCH /api/v1/live-tv/admin/channels/bulk`
 - `PATCH /api/v1/live-tv/admin/channels/all/visibility`
+- `PATCH /api/v1/live-tv/admin/channels/:id/reorder`
 - `POST /api/v1/live-tv/admin/channels/:id/merge`
 - `GET /api/v1/live-tv/guide?search=&group=&favorites=true&page=1&pageSize=75` returnerer højst 200 kanaler pr. side samt gruppetællere og samlet antal.
 - `PUT/DELETE /api/v1/live-tv/channels/:id/favorite`
