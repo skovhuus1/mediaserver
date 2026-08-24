@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { disableMissingLiveTvSources, forEachLiveTvEntryByIdentity, stableChannelNumber } from './live-tv-import-batching.js';
+import {
+  disableMissingLiveTvSources,
+  forEachLiveTvEntryByIdentity,
+  hasLiveTvChannelMetadataChanges,
+  hasLiveTvSourceChanges,
+  stableChannelNumber,
+} from './live-tv-import-batching.js';
 
 describe('Live TV import batching', () => {
   it('keeps the canonical number stable when redundant provider lines disagree', () => {
@@ -52,5 +58,24 @@ describe('Live TV import batching', () => {
       where: { id: { in: ['stale-1', 'stale-2'] } },
       data: { enabled: false },
     });
+  });
+
+  it('detects unchanged source rows without writing a new last-seen timestamp', () => {
+    const source = {
+      channelId: 'channel-1', externalId: 'dr1', sourceName: 'DR 1 FHD',
+      streamFormat: 'hls', qualityLabel: 'fhd', qualityRank: 40,
+      priority: 100, enabled: true,
+    };
+    expect(hasLiveTvSourceChanges(source, { ...source })).toBe(false);
+    expect(hasLiveTvSourceChanges(source, { ...source, priority: 200 })).toBe(true);
+    expect(hasLiveTvSourceChanges(source, { ...source, channelId: 'channel-2' })).toBe(true);
+  });
+
+  it('only updates unlocked channel metadata when an effective field changes', () => {
+    const channel = {
+      tvgId: 'dr1', name: 'DR 1', number: 1, logoUrl: 'https://logo/dr1.png', groupName: 'Danmark',
+    };
+    expect(hasLiveTvChannelMetadataChanges(channel, { ...channel })).toBe(false);
+    expect(hasLiveTvChannelMetadataChanges(channel, { ...channel, groupName: 'Danske kanaler' })).toBe(true);
   });
 });

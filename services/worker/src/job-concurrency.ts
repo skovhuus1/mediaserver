@@ -10,6 +10,7 @@ export type WorkerJobType =
   | 'notification.push'
   | 'live-tv.import'
   | 'live-tv.epg'
+  | 'live-tv.channel-visibility'
   | 'live-tv.stream'
   | 'live-tv.record';
 
@@ -72,5 +73,6 @@ export function claimableWorkerJobTypes(input: {
   }
   if (activeCount('live-tv.import') < 1) claimable.push('live-tv.import');
   if (activeCount('live-tv.epg') < 1) claimable.push('live-tv.epg');
+  if (activeCount('live-tv.channel-visibility') < 1) claimable.push('live-tv.channel-visibility');
   return claimable;
 }

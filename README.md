@@ -229,3 +229,9 @@ Licens er ikke fastlagt i repositoryet. Tilføj en licensfil, før projektet dis
 - Vis alle og Skjul alle arbejder på hele kontoens katalog direkte i PostgreSQL og er ikke begrænset af den valgte side eller 50.000-kanalsgrænsen for manuel UUID-bulkmarkering.
 - Gruppevisning kan ændres uden at indlæse alle kanal-id'er i API-processens hukommelse. Skjulning frigiver berørte aktive streams, annullerer berørte optagelser og skriver resultatet til auditloggen atomisk.
 - Adminpanelet holder globale handlinger, gruppehandlinger og manuel markering i separate responsive rækker og viser både igangværende status og afsluttet antal.
+
+### Durable Live TV-vedligeholdelsesjobs
+
+- Globale og gruppebaserede synlighedsændringer oprettes som `live-tv.channel-visibility`-jobs. Jobbet leases af workeren, deduplikeres pr. scope og handling, kan annulleres og udfører kanalændring, streamfrigivelse, optagelsesannullering og audit atomisk.
+- `GET /api/v1/live-tv/admin/jobs` returnerer progress, seneste fejl, varighed og et vedvarende resultat. Adminpanelets Opgaver-række opdateres hvert andet sekund og viser antal ændrede kanaler eller M3U-importens nye, ændrede, uændrede og deaktiverede sources.
+- M3U-importen springer identiske kanalmetadata og sourcerækker over. Manglende sources deaktiveres fortsat i afgrænsede batches, og afsluttende importstatistik gemmes både i job-payloaden og auditloggen.
