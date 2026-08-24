@@ -4,6 +4,8 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+- Redesignet webplayerens Live TV-klargøring med kanalbranding, responsiv statusvisning, tilgængelig reduced-motion-adfærd og mulighed for at afbryde under reservationen.
+
 - Aktiverer kun danske Live TV-kanaler som standard, anvender Canal Digital Danmarks kanalliste fra 20. august 2020 som stabil basisrækkefølge og tilføjer atomisk drag-and-drop-rækkefølge i administratorpanelet.
 
 - Flytter store Live TV-synlighedsændringer til annullerbare worker-jobs med progress/resultat og gør M3U-import inkrementel, så identiske kanal- og sourcerækker ikke genskrives.
