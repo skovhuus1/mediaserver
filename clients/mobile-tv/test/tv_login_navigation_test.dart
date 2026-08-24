@@ -1,10 +1,15 @@
+import 'dart:convert';
+
 import 'package:boltbytes_media/src/core/api_client.dart';
+import 'package:boltbytes_media/src/core/models.dart';
 import 'package:boltbytes_media/src/core/session_store.dart';
 import 'package:boltbytes_media/src/screens/auth_screens.dart';
 import 'package:boltbytes_media/src/state/app_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 class _MemorySessionStorage implements DeviceSessionStorage {
   String? accessToken;
@@ -128,4 +133,79 @@ void main() {
     expect(find.text('Vis QR-kode'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  test(
+    'approved TV pairing publishes the library stage to the app router',
+    () async {
+      final storage = _MemorySessionStorage();
+      final client = MockClient((request) async {
+        if (request.url.path.endsWith('/auth/tv/poll')) {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['pairingId'], '00000000-0000-0000-0000-000000000001');
+          expect(body['pollToken'], 'poll-token-with-enough-length');
+          return http.Response(
+            jsonEncode({
+              'status': 'approved',
+              'accessToken': 'tv-access-token',
+              'refreshToken': 'tv-refresh-token',
+              'expiresIn': 900,
+            }),
+            200,
+          );
+        }
+        if (request.url.path.endsWith('/auth/me')) {
+          expect(request.headers['authorization'], 'Bearer tv-access-token');
+          return http.Response(
+            jsonEncode({
+              'id': 'user-1',
+              'email': 'viewer@example.test',
+              'displayName': 'TV Viewer',
+              'roles': ['customer'],
+              'activeProfileId': 'profile-1',
+              'profiles': [
+                {
+                  'id': 'profile-1',
+                  'name': 'Stuen',
+                  'hasPin': false,
+                  'isChildProfile': false,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response('not found', 404);
+      });
+      addTearDown(client.close);
+      final controller = AppController(
+        api: ApiClient(
+          baseUrl: 'https://media.example.test/api/v1',
+          storage: storage,
+          httpClient: client,
+        ),
+        storage: storage,
+      );
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+      final pairing = TvLoginPairing(
+        pairingId: '00000000-0000-0000-0000-000000000001',
+        status: 'pending',
+        userCode: 'ABCD-2345',
+        approveUrl: 'https://media.example.test/login/tv?token=approve-token',
+        approvePath: '/login/tv?token=approve-token',
+        pollToken: 'poll-token-with-enough-length',
+        pollIntervalSeconds: 2,
+        expiresAt: DateTime.now().add(const Duration(minutes: 10)),
+      );
+
+      final result = await controller.pollTvLogin(pairing);
+
+      expect(result.isApproved, isTrue);
+      expect(storage.accessToken, 'tv-access-token');
+      expect(storage.refreshToken, 'tv-refresh-token');
+      expect(controller.stage, AppStage.library);
+      expect(controller.activeProfile?.id, 'profile-1');
+      expect(notifications, greaterThan(0));
+    },
+  );
 }

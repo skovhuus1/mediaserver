@@ -149,6 +149,11 @@ class AppController extends ChangeNotifier {
       if (result.isApproved) {
         error = null;
         await _loadUser(forceLibrary: true);
+        // QR polling does not run through _guard(), so it must publish the
+        // completed session transition itself. Without this notification the
+        // root AnimatedBuilder remains on LoginScreen even though tokens,
+        // user and AppStage.library have all been committed.
+        notifyListeners();
       }
       return result;
     } on ApiException catch (failure) {

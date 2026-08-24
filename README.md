@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.10**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.2.11**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -113,6 +113,11 @@ Hostmappen monteres read-only som **/media** i API og worker. Biblioteker vælge
 | Klienter | Flutter mobile/TV-flavors, manifest- og signaturcertificeret Android-releaseflow, TV-optimeret forside med hero/rails/fokusnavigation, serverkoblet QR-login, episode-autoplay med undertekstkontinuitet, offline-downloads og cast-handoff |
 
 QR-login til TV bruger `/api/v1/auth/tv/start`, `/api/v1/auth/tv/poll` og `/api/v1/auth/tv/approve`. TV-klienten viser QR-kode og brugerkode, poller med separat poll-token, gemmer access/refresh-token krypteret efter godkendelse og falder tilbage til manuel e-mail/adgangskode-login. QR-linket får en separat approve-token, og `/login/tv` kræver en eksisterende websession før TV’et kan godkendes.
+
+Når poll-svaret er godkendt, indlæser TV-klienten `/auth/me`, binder den aktive
+profil og publicerer først derefter `library`-stadiet til app-routeren. En
+regressionstest fastholder, at login-skærmen ikke kan blive stående på
+"Godkendt. Logger ind..." efter en gennemført pairing.
 
 ## Arkitektur
 
