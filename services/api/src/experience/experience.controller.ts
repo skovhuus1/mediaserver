@@ -3,11 +3,25 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser } from '../common/auth';
 import { ExperienceService } from './experience.service';
+import { HomeExperienceService } from './home-experience.service';
 
 @ApiTags('experience')
 @Controller('experience')
 export class ExperienceController {
-  constructor(private readonly experience: ExperienceService) {}
+  constructor(
+    private readonly experience: ExperienceService,
+    private readonly homeExperience: HomeExperienceService,
+  ) {}
+
+  @Get('home')
+  home(@CurrentUser() actor: AuthenticatedUser) {
+    return this.homeExperience.home(actor);
+  }
+
+  @Get('home/rows/:id')
+  homeRow(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Query('cursor') cursor?: string) {
+    return this.homeExperience.row(actor, id, cursor);
+  }
 
   @Get('search')
   search(@CurrentUser() actor: AuthenticatedUser, @Query('q') query = '') {

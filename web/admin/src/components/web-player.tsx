@@ -37,6 +37,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { accessToken, api, apiBlob, type ApiFailure } from '@/lib/api';
 import { Brand } from './brand';
 import { castSdkLastError, ensureCastSdk } from './cast-sdk-loader';
+import { PlayerLibraryActions } from './player-library-actions';
 import styles from './playback.module.css';
 
 export type PlayableMedia = {
@@ -1672,6 +1673,8 @@ export function WebPlayer() {
           {authorization && <small className={styles.playbackReason}>{playbackReason(authorization)}</small>}
         </aside>
       )}
+
+      {sourceReady && <PlayerLibraryActions mediaId={media.id} targetType={media.type === 'episode' ? 'series' : media.type ?? 'media'} />}
 
       {sourceReady && activeTimelineMarker && (
         <div className={styles.markerActions}>

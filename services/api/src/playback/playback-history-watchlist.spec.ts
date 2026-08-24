@@ -12,15 +12,17 @@ describe('watchlist and watched state', () => {
   it('adds media idempotently inside the active account and profile', async () => {
     const createdAt = new Date('2026-08-19T10:00:00.000Z');
     const prisma = {
-      mediaItem: { findFirst: vi.fn().mockResolvedValue({ id: 'media-id', file: null }) },
+      mediaItem: { findFirst: vi.fn().mockResolvedValue({ id: 'media-id', type: 'movie', title: 'Film', file: null }) },
       watchlistEntry: {
-        upsert: vi.fn().mockResolvedValue({ mediaId: 'media-id', createdAt }),
+        upsert: vi.fn().mockResolvedValue({ mediaId: 'media-id', targetType: 'movie', targetKey: 'movie:media-id', createdAt }),
       },
     };
     const service = new PlaybackHistoryService(prisma as never, {} as never);
 
     await expect(service.addToWatchlist(actor as never, 'media-id')).resolves.toEqual({
       mediaId: 'media-id',
+      targetType: 'movie',
+      targetKey: 'movie:media-id',
       inWatchlist: true,
       createdAt,
     });
@@ -28,13 +30,15 @@ describe('watchlist and watched state', () => {
       where: { id: 'media-id', accountId: 'account-id' },
     }));
     expect(prisma.watchlistEntry.upsert).toHaveBeenCalledWith({
-      where: { profileId_mediaId: { profileId: 'profile-id', mediaId: 'media-id' } },
+      where: { profileId_targetKey: { profileId: 'profile-id', targetKey: 'movie:media-id' } },
       create: {
         accountId: 'account-id',
         profileId: 'profile-id',
         mediaId: 'media-id',
+        targetType: 'movie',
+        targetKey: 'movie:media-id',
       },
-      update: {},
+      update: { mediaId: 'media-id', targetType: 'movie' },
     });
   });
 
