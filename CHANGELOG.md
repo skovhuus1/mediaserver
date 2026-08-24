@@ -4,6 +4,8 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+- Flytter store Live TV-synlighedsændringer til annullerbare worker-jobs med progress/resultat og gør M3U-import inkrementel, så identiske kanal- og sourcerækker ikke genskrives.
+
 - Rettet global og gruppebaseret Live TV-kanalsynlighed for kataloger over 50.000 kanaler; scope-opdateringer kører direkte i PostgreSQL med kontrolleret transaktionstid, og adminpanelet viser stabilt layout samt afsluttet status.
 
 ## 0.2.12 - 2026-08-24

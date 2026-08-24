@@ -13,7 +13,8 @@ type Source = { id: string; sourceName: string; enabled: boolean; priority: numb
 type Channel = { id: string; name: string; number: number | null; logoUrl: string | null; groupName: string | null; enabled: boolean; isAdult: boolean; metadataLocked: boolean; sortOrder: number; sources: Source[]; suspectedDuplicates: Array<{ id: string; name: string }> };
 type ChannelGroup = { name: string; total: number; visible: number; hidden: number };
 type ChannelCatalog = { items: Channel[]; total: number; visibleCount: number; hiddenCount: number; filteredTotal: number; page: number; pageSize: number; totalPages: number; groups: ChannelGroup[] };
-type Job = { id: string; type: string; status: string; payload: { progress?: { stage?: string; percent?: number | null; current?: number | null; total?: number | null; message?: string | null } }; attemptCount: number; updatedAt: string };
+type JobResult = { changedCount?: number; matchedCount?: number; releasedStreams?: number; cancelledRecordings?: number; processed?: number; createdSources?: number; updatedSources?: number; unchangedSources?: number; disabledSources?: number; updatedChannels?: number; sourceErrors?: number; durationMs?: number; auditAction?: string };
+type Job = { id: string; type: string; status: string; payload: { progress?: { stage?: string; percent?: number | null; current?: number | null; total?: number | null; message?: string | null }; result?: JobResult }; attemptCount: number; error: string | null; durationMs: number | null; createdAt: string; updatedAt: string };
 
 export function LiveTvAdmin() {
   const router = useRouter();
@@ -51,6 +52,12 @@ export function LiveTvAdmin() {
   useEffect(() => { const timer = window.setTimeout(() => { setGroupQuery(groupSearch.trim()); setPage(1); }, 300); return () => window.clearTimeout(timer); }, [groupSearch]);
   useEffect(() => { void load().catch((failure) => setError(message(failure))); }, [load]);
   useEffect(() => { const timer = window.setInterval(() => void load().catch(() => undefined), 10_000); return () => window.clearInterval(timer); }, [load]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void api<Job[]>('/live-tv/admin/jobs').then(setJobs).catch(() => undefined);
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const action = async (key: string, operation: () => Promise<unknown>, successMessage?: string) => {
     setBusy(key); setError(null); setNotice(null);
@@ -83,15 +90,18 @@ export function LiveTvAdmin() {
       setLastSelectedChannelId(null);
       setPage(1);
     }, nextVisibility === 'hide'
-      ? `${affectedCount.toLocaleString('da-DK')} kanaler er nu skjult.`
-      : `${affectedCount.toLocaleString('da-DK')} kanaler er nu synlige.`);
+      ? `Skjulning af ${affectedCount.toLocaleString('da-DK')} kanaler er sat i kø.`
+      : `Visning af ${affectedCount.toLocaleString('da-DK')} kanaler er sat i kø.`);
   };
   const bulkGroupVisibility = (nextVisibility: 'show' | 'hide') => {
     if (!exactGroup) return Promise.resolve();
     return action(`group-${nextVisibility}`, () => api('/live-tv/admin/channels/groups/visibility', {
       method: 'PATCH', body: JSON.stringify({ groupName: exactGroup.name, action: nextVisibility }),
-    }));
+    }), `${nextVisibility === 'hide' ? 'Skjulning' : 'Visning'} af ${exactGroup.total.toLocaleString('da-DK')} kanaler er sat i kø.`);
   };
+  const cancelJob = (jobId: string) => action(`cancel-job-${jobId}`, () => api(`/live-tv/admin/jobs/${jobId}`, {
+    method: 'DELETE',
+  }), 'Kanalopgaven er annulleret.');
   const selectChannel = (channelId: string, selected: boolean, extendRange: boolean) => {
     setSelectedChannelIds((current) => {
       const anchorIndex = lastSelectedChannelId ? filteredChannelIds.indexOf(lastSelectedChannelId) : -1;
@@ -112,7 +122,7 @@ export function LiveTvAdmin() {
         {error && <div className={styles.error} role="alert"><CircleAlert />{error}</div>}
         {notice && <div className={styles.notice} role="status" aria-live="polite"><Check />{notice}</div>}
         {canWrite && <ProviderCreate onCreate={(payload) => action('create-provider', () => api('/live-tv/admin/providers', { method: 'POST', body: JSON.stringify(payload) }))} busy={busy === 'create-provider'} />}
-        <section className={styles.jobs}><header><div><span>OPGAVER</span><h2>Import og EPG-progress</h2></div><Activity /></header><div>{jobs.slice(0, 8).map((job) => <JobRow job={job} key={job.id} />)}{!jobs.length && <p>Ingen Live TV-opgaver endnu.</p>}</div></section>
+        <section className={styles.jobs}><header><div><span>OPGAVER</span><h2>Import, kanalændringer og EPG</h2></div><Activity /></header><div>{jobs.slice(0, 8).map((job) => <JobRow job={job} canWrite={canWrite} busy={busy} key={job.id} onCancel={cancelJob} />)}{!jobs.length && <p>Ingen Live TV-opgaver endnu.</p>}</div></section>
         <section className={styles.providers}><header><div><span>KILDEPULJE</span><h2>Providers og M3U-linjer</h2></div><b>{activeLeases} aktive</b></header>
           <div className={styles.providerGrid}>{providers.map((provider) => <ProviderCard provider={provider} canWrite={canWrite} busy={busy} key={provider.id} onAction={action} />)}{!providers.length && <p className={styles.empty}>Opret den første provider ovenfor.</p>}</div>
         </section>
@@ -159,7 +169,36 @@ function ChannelRow({ channel, canWrite, busy, selected, onSelect, onAction }: {
   return <article className={styles.channelRow} data-disabled={!channel.enabled}><input className={styles.channelSelect} type="checkbox" checked={selected} disabled={!canWrite || busy !== null} aria-label={`Vælg ${channel.name}`} title="Hold Shift nede for at markere et interval" onChange={(event) => onSelect(channel.id, event.target.checked, (event.nativeEvent as MouseEvent).shiftKey)} /><span className={styles.channelLogo}>{channel.logoUrl ? <img alt="" src={channel.logoUrl} /> : <Antenna />}</span><label>Nr.<input defaultValue={channel.number ?? ''} disabled={!canWrite} min="1" onBlur={(event) => { const value = Number(event.target.value); if (value && value !== channel.number) void patch({ number: value, metadataLocked: true }); }} type="number" /></label><label>Navn<input defaultValue={channel.name} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== channel.name) void patch({ name: event.target.value.trim(), metadataLocked: true }); }} /></label><label>Gruppe<input defaultValue={channel.groupName ?? ''} disabled={!canWrite} onBlur={(event) => { if (event.target.value.trim() !== (channel.groupName ?? '')) void patch({ groupName: event.target.value.trim(), metadataLocked: true }); }} /></label><div className={styles.flags}><button aria-pressed={channel.enabled} disabled={!canWrite || busy !== null} onClick={() => void patch({ enabled: !channel.enabled })}>{channel.enabled ? <Check /> : <CircleAlert />}Aktiv</button><button aria-pressed={channel.isAdult} disabled={!canWrite || busy !== null} onClick={() => void patch({ isAdult: !channel.isAdult })}>18+</button></div><details className={styles.sources}><summary>{channel.sources.length} kilde(r)</summary>{channel.sources.map((source) => <div key={source.id}><span><b>{source.providerName}</b><small>{source.connectionName} · {source.qualityLabel === 'standard' ? 'Standard' : source.qualityLabel.toUpperCase()}</small></span><select disabled={!canWrite} onChange={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ streamFormat: event.target.value }) }))} value={source.streamFormat}><option value="auto">Auto</option><option value="hls">HLS</option><option value="mpegts">MPEG-TS</option></select><input aria-label="Kildeprioritet" defaultValue={source.priority} disabled={!canWrite} min="0" onBlur={(event) => void onAction(`source-${source.id}`, () => api(`/live-tv/admin/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ priority: Number(event.target.value) }) }))} type="number" /></div>)}</details>{canWrite && channel.suspectedDuplicates.length > 0 && <select className={styles.merge} defaultValue="" onChange={(event) => { if (event.target.value) void onAction(`merge-${channel.id}`, () => api(`/live-tv/admin/channels/${channel.id}/merge`, { method: 'POST', body: JSON.stringify({ sourceChannelId: event.target.value }) })); }}><option value="">Flet mulig dublet...</option>{channel.suspectedDuplicates.map((duplicate) => <option key={duplicate.id} value={duplicate.id}>{duplicate.name}</option>)}</select>}</article>;
 }
 
-function JobRow({ job }: { job: Job }) { const progress = job.payload.progress; return <article className={styles.job} data-status={job.status}><span><b>{job.type === 'live-tv.import' ? 'M3U-import' : job.type === 'live-tv.epg' ? 'XMLTV' : 'Live stream'}</b><small>{progress?.stage ?? job.status} · {progress?.message ?? `forsøg ${job.attemptCount}`}</small></span><div><i style={{ width: `${progress?.percent ?? (job.status === 'completed' ? 100 : 8)}%` }} /></div><time>{date(job.updatedAt)}</time></article>; }
+function JobRow({ job, canWrite, busy, onCancel }: { job: Job; canWrite: boolean; busy: string | null; onCancel: (jobId: string) => Promise<void> }) {
+  const progress = job.payload.progress;
+  const active = ['queued', 'running'].includes(job.status);
+  const label = ({
+    'live-tv.import': 'M3U-import',
+    'live-tv.epg': 'XMLTV',
+    'live-tv.channel-visibility': 'Kanalsynlighed',
+    'live-tv.stream': 'Live stream',
+    'live-tv.record': 'Live optagelse',
+  } as Record<string, string>)[job.type] ?? job.type;
+  return <article className={styles.job} data-status={job.status}>
+    <span><b>{label}</b><small>{progress?.stage ?? job.status} · {progress?.message ?? `forsøg ${job.attemptCount}`}</small>{job.payload.result && <small className={styles.jobResult}>{jobResult(job.payload.result)}</small>}{job.error && <em className={styles.jobError}>{job.error}</em>}</span>
+    <div><i style={{ width: `${progress?.percent ?? (job.status === 'completed' ? 100 : active ? 8 : 0)}%` }} /></div>
+    <time>{duration(job.durationMs)} · {date(job.updatedAt)}</time>
+    {canWrite && active && job.type === 'live-tv.channel-visibility' && <button className={styles.jobCancel} disabled={busy !== null} onClick={() => void onCancel(job.id)} type="button">Annuller</button>}
+  </article>;
+}
+
+function jobResult(result: JobResult) {
+  if (result.changedCount !== undefined) return `${result.changedCount.toLocaleString('da-DK')} ændret · ${result.releasedStreams ?? 0} streams frigivet · ${result.cancelledRecordings ?? 0} optagelser annulleret`;
+  if (result.processed !== undefined) return `${result.createdSources ?? 0} nye · ${result.updatedSources ?? 0} ændret · ${result.unchangedSources ?? 0} uændret · ${result.disabledSources ?? 0} deaktiveret`;
+  return 'Resultat gemt i auditloggen';
+}
+
+function duration(milliseconds: number | null) {
+  if (milliseconds === null) return 'venter';
+  if (milliseconds < 1_000) return `${milliseconds} ms`;
+  if (milliseconds < 60_000) return `${(milliseconds / 1_000).toFixed(1)} sek.`;
+  return `${Math.floor(milliseconds / 60_000)} min. ${Math.round((milliseconds % 60_000) / 1_000)} sek.`;
+}
 function LiveTvRail({ providers, channelTotal, jobs, activeLeases }: { providers: Provider[]; channelTotal: number; jobs: Job[]; activeLeases: number }) { const running = jobs.filter((job) => ['queued', 'running'].includes(job.status)).length; return <><section className="rail-card"><div className="rail-title"><h3>Live TV-status</h3><Antenna /></div><dl className="status-list"><div><dt>Providers</dt><dd>{providers.length}</dd></div><div><dt>M3U-linjer</dt><dd>{providers.flatMap((provider) => provider.connections).length}</dd></div><div><dt>Kanaler</dt><dd>{channelTotal.toLocaleString('da-DK')}</dd></div><div><dt>Aktive streams</dt><dd>{activeLeases}</dd></div><div><dt>Opgaver</dt><dd>{running}</dd></div></dl></section></>; }
 function message(error: unknown) { return (error as ApiFailure)?.message ?? (error instanceof Error ? error.message : 'Live TV-handlingen fejlede.'); }
 function date(value: string) { return new Date(value).toLocaleString('da-DK', { dateStyle: 'short', timeStyle: 'short' }); }

@@ -20,6 +20,7 @@ import { updateJobProgress, withJobProgress } from './job-progress.js';
 import { buildSdrColorMetadataArguments, resolveVideoColorPipeline } from './video-color.js';
 import { LibraryChangeDetector, resolveLibraryWatchConfig, type LibraryFileChange } from './library-change-detector.js';
 import { importLiveTvEpg, importLiveTvPlaylist } from './live-tv.js';
+import { processLiveTvChannelVisibilityJob } from './live-tv-channel-visibility-job.js';
 import { processLiveTvRecordingJob } from './live-tv-recordings.js';
 import { processLiveTvStreamJobWithFailover } from './live-tv-stream-failover.js';
 
@@ -221,6 +222,9 @@ async function processJob(job: ClaimedJob): Promise<void> {
       return;
     case 'live-tv.epg':
       await importLiveTvEpg(prisma, job, () => renewJobLease(job.id));
+      return;
+    case 'live-tv.channel-visibility':
+      await processLiveTvChannelVisibilityJob(prisma, job, () => renewJobLease(job.id));
       return;
     case 'live-tv.stream':
       await processLiveTvStreamJobWithFailover(prisma, job, transcodeRoot, () => renewJobLease(job.id));
@@ -1243,28 +1247,48 @@ async function expirePlaybackLeases(): Promise<number> {
   return expired;
 }
 
-async function finishJob(job: ClaimedJob): Promise<void> {
-  await prisma.$transaction([
-    prisma.jobAttempt.update({
+async function finishJob(job: ClaimedJob): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const completed = await tx.systemJob.updateMany({
+      where: { id: job.id, status: 'running', workerId },
+      data: { status: 'completed', workerId: null, lockedAt: null, leaseExpiresAt: null, payload: withJobProgress(job.payload, { stage: 'Afsluttet', percent: 100 }) },
+    });
+    if (completed.count !== 1) {
+      await tx.jobAttempt.updateMany({
+        where: { jobId: job.id, number: job.attemptNumber, status: 'running' },
+        data: { status: 'cancelled', error: 'Opgaven blev annulleret', endedAt: new Date() },
+      });
+      return false;
+    }
+    await tx.jobAttempt.update({
       where: { jobId_number: { jobId: job.id, number: job.attemptNumber } },
       data: { status: 'completed', endedAt: new Date() },
-    }),
-    prisma.systemJob.update({
-      where: { id: job.id },
-      data: { status: 'completed', workerId: null, lockedAt: null, leaseExpiresAt: null, payload: withJobProgress(job.payload, { stage: 'Afsluttet', percent: 100 }) },
-    }),
-  ]);
+    });
+    return true;
+  });
 }
 
 async function failJob(job: ClaimedJob, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : 'Unknown worker failure';
   const terminal = job.attemptNumber >= job.maxAttempts;
-  await prisma.$transaction([
-    prisma.jobAttempt.update({
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.systemJob.findUnique({ where: { id: job.id }, select: { status: true } });
+    if (current?.status === 'cancelled') {
+      await tx.jobAttempt.updateMany({
+        where: { jobId: job.id, number: job.attemptNumber, status: 'running' },
+        data: { status: 'cancelled', error: 'Opgaven blev annulleret', endedAt: new Date() },
+      });
+      await tx.systemJob.update({
+        where: { id: job.id },
+        data: { workerId: null, lockedAt: null, leaseExpiresAt: null },
+      });
+      return;
+    }
+    await tx.jobAttempt.update({
       where: { jobId_number: { jobId: job.id, number: job.attemptNumber } },
       data: { status: 'failed', error: message.slice(0, 2_000), endedAt: new Date() },
-    }),
-    prisma.systemJob.update({
+    });
+    await tx.systemJob.update({
       where: { id: job.id },
       data: {
         status: terminal ? 'failed' : 'queued',
@@ -1273,8 +1297,8 @@ async function failJob(job: ClaimedJob, error: unknown): Promise<void> {
         lockedAt: null,
         leaseExpiresAt: null,
       },
-    }),
-  ]);
+    });
+  });
 }
 
 async function ensureRecurringLeaseJob(): Promise<void> {
@@ -1487,8 +1511,8 @@ async function rescheduleRecurringJob(job: ClaimedJob): Promise<void> {
 async function executeClaimedJob(job: ClaimedJob): Promise<void> {
   try {
     await processJob(job);
-    await finishJob(job);
-    await rescheduleRecurringJob(job);
+    const completed = await finishJob(job);
+    if (completed) await rescheduleRecurringJob(job);
   } catch (error) {
     if (workerMode === 'transcode') {
       const payload = asJsonObject(job.payload);

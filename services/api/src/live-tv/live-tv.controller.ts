@@ -25,6 +25,7 @@ export class LiveTvController {
   @Post('admin/providers/:id/import') @Roles('admin') queueImport(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) { return this.liveTv.queueImport(actor, id); }
   @Post('admin/providers/:id/epg') @Roles('admin') queueEpg(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) { return this.liveTv.queueEpg(actor, id); }
   @Get('admin/jobs') @Roles('admin', 'operator') jobs(@CurrentUser() actor: AuthenticatedUser) { return this.liveTv.jobs(actor); }
+  @Delete('admin/jobs/:id') @Roles('admin') cancelJob(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) { return this.liveTv.cancelJob(actor, id); }
   @Get('admin/channels') @Roles('admin', 'operator') channels(@CurrentUser() actor: AuthenticatedUser, @Query() query: ListAdminLiveTvChannelsDto) { return this.liveTv.adminChannels(actor, query); }
   @Patch('admin/channels/bulk') @Roles('admin') bulkUpdateChannels(@CurrentUser() actor: AuthenticatedUser, @Body() dto: BulkUpdateLiveTvChannelsDto) { return this.liveTv.bulkUpdateChannels(actor, dto); }
   @Patch('admin/channels/all/visibility') @Roles('admin') bulkUpdateAllChannels(@CurrentUser() actor: AuthenticatedUser, @Body() dto: BulkUpdateLiveTvAllChannelsDto) { return this.liveTv.bulkUpdateAllChannels(actor, dto); }
