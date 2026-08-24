@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../core/brand_theme.dart';
+
 class BrandMark extends StatelessWidget {
   const BrandMark({this.size = 40, super.key});
 
@@ -85,7 +87,7 @@ class _BrandPainter extends CustomPainter {
     final gradient = const LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [Color(0xFFF0C06F), Color(0xFFB57429), Color(0xFF62C9A7)],
+      colors: [BoltColors.primaryBright, BoltColors.primary, BoltColors.cyan],
     ).createShader(Offset.zero & size);
     canvas.drawPath(shell, Paint()..shader = gradient);
     canvas.drawPath(
@@ -98,7 +100,7 @@ class _BrandPainter extends CustomPainter {
     canvas.drawCircle(
       center,
       radius * 0.42,
-      Paint()..color = const Color(0xFF0B0F15).withValues(alpha: 0.62),
+      Paint()..color = BoltColors.background.withValues(alpha: 0.72),
     );
     canvas.drawCircle(
       center,

@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.8**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.2.9**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -195,5 +195,7 @@ Arbejdet laves på **agent/...** branches. Hver færdig leverance skal have opda
 Alle releases bruger ét SemVer-nummer. Sæt næste version med `npm run version:set -- 0.2.1`, opdater `CHANGELOG.md`, og kør `npm run version:check`; CI afviser versionsdrift mellem pakker, lockfil og health-API.
 
 Android-releases bygges som separate `mobile`- og `tv`-flavors. Produktionsworkflowet udgiver APK/AAB sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk mobil-, TV- og Cast-certificering forbliver en særskilt releasegate.
+
+TV-klienten bruger en blå BoltBytes-shell med synligt logo, kompakte mediekort og én samlet D-pad-model. TV-login har QR som primær handling, serievisningen viser sæsoner og alle afsnit, og Live TV-klienten bruger serverens guide-, favorit-, forbindelsespulje-, heartbeat- og kanalskiftkontrakter. E-mail-login er en eksplicit fallback og kræver ikke, at brugeren kan pege eller swipe på skærmen.
 
 Licens er ikke fastlagt i repositoryet. Tilføj en licensfil, før projektet distribueres uden for den nuværende private anvendelse.

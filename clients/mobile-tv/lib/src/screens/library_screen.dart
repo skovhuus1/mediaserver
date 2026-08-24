@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app.dart';
 import '../core/api_client.dart';
+import '../core/brand_theme.dart';
 import '../core/models.dart';
 import '../state/app_controller.dart';
 import '../widgets/brand.dart';
@@ -14,6 +15,7 @@ import 'client_settings_screen.dart';
 import 'title_screen.dart';
 import 'offline_downloads_screen.dart';
 import 'notification_inbox_screen.dart';
+import 'live_tv_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({required this.controller, super.key});
@@ -171,11 +173,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   Widget build(BuildContext context) {
     final tv = useTvLayout(context);
-    final labels = const ['Hjem', 'Film', 'Serier', 'Fortsæt', 'Min liste'];
+    final labels = const [
+      'Hjem',
+      'Film',
+      'Serier',
+      'Live TV',
+      'Fortsæt',
+      'Min liste',
+    ];
     final icons = const [
       Icons.home_outlined,
       Icons.movie_outlined,
       Icons.tv_outlined,
+      Icons.live_tv_rounded,
       Icons.play_circle_outline,
       Icons.bookmark_outline,
     ];
@@ -186,45 +196,46 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return Scaffold(
         body: DecoratedBox(
           decoration: const BoxDecoration(
-            color: Color(0xFF050505),
+            color: BoltColors.background,
             gradient: RadialGradient(
               center: Alignment.topRight,
               radius: 1.1,
-              colors: [Color(0x333A2412), Color(0xFF050505)],
+              colors: [Color(0x44204E78), BoltColors.background],
             ),
           ),
-          child: Row(
-            children: [
-              _TvSideRail(
-                labels: labels,
-                icons: icons,
-                selected: _tab,
-                onSelect: (index) => setState(() => _tab = index),
-                onSettings: _openSettings,
-              ),
-              Expanded(
-                child: Column(
-                  children: [
-                    _TvTopBar(
-                      controller: widget.controller,
-                      labels: labels,
-                      selected: _tab,
-                      onSelect: (index) => setState(() => _tab = index),
-                      onSearch: _showSearch,
-                      onSettings: _openSettings,
-                      onDownloads: _openDownloads,
-                      onNotifications: _openNotifications,
-                    ),
-                    Expanded(
-                      child: RefreshIndicator(
-                        onRefresh: _load,
-                        child: _TvScrollContainer(child: body),
-                      ),
-                    ),
-                  ],
+          child: FocusTraversalGroup(
+            policy: ReadingOrderTraversalPolicy(),
+            child: Row(
+              children: [
+                _TvSideRail(
+                  labels: labels,
+                  icons: icons,
+                  selected: _tab,
+                  onSelect: (index) => setState(() => _tab = index),
+                  onSettings: _openSettings,
                 ),
-              ),
-            ],
+                Expanded(
+                  child: Column(
+                    children: [
+                      _TvTopBar(
+                        controller: widget.controller,
+                        title: labels[_tab],
+                        onSearch: _showSearch,
+                        onSettings: _openSettings,
+                        onDownloads: _openDownloads,
+                        onNotifications: _openNotifications,
+                      ),
+                      Expanded(
+                        child: RefreshIndicator(
+                          onRefresh: _load,
+                          child: _TvScrollContainer(child: body),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -319,14 +330,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
         onPressed: _openTitle,
         tv: tv,
       ),
-      3 => _CatalogGrid(
+      3 => LiveTvView(api: api),
+      4 => _CatalogGrid(
         api: api,
         title: 'Fortsæt med at se',
         items: _continue,
         onPressed: _play,
         tv: tv,
       ),
-      4 => _CatalogGrid(
+      5 => _CatalogGrid(
         api: api,
         title: 'Min liste',
         items: _watchlist,
@@ -502,11 +514,11 @@ class _TvSideRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SafeArea(
     child: SizedBox(
-      width: 88,
+      width: 218,
       child: Container(
         decoration: const BoxDecoration(
           border: Border(right: BorderSide(color: Color(0x1FFFFFFF))),
-          color: Color(0xB8000000),
+          color: Color(0xF208111D),
           boxShadow: [
             BoxShadow(
               color: Color(0x66000000),
@@ -517,19 +529,16 @@ class _TvSideRail extends StatelessWidget {
         ),
         child: Column(
           children: [
-            const SizedBox(height: 18),
-            Tooltip(
-              message: 'Hjem',
-              child: InkWell(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 22, 14, 18),
+              child: BrandLockup(
+                compact: true,
                 onTap: () => onSelect(0),
-                borderRadius: BorderRadius.circular(14),
-                child: const Padding(
-                  padding: EdgeInsets.all(10),
-                  child: BrandMark(size: 42),
-                ),
+                tooltip: 'Gå til Hjem',
               ),
             ),
-            const SizedBox(height: 18),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
             Expanded(
               child: ListView.separated(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -562,9 +571,7 @@ class _TvSideRail extends StatelessWidget {
 class _TvTopBar extends StatelessWidget {
   const _TvTopBar({
     required this.controller,
-    required this.labels,
-    required this.selected,
-    required this.onSelect,
+    required this.title,
     required this.onSearch,
     required this.onSettings,
     required this.onDownloads,
@@ -572,9 +579,7 @@ class _TvTopBar extends StatelessWidget {
   });
 
   final AppController controller;
-  final List<String> labels;
-  final int selected;
-  final ValueChanged<int> onSelect;
+  final String title;
   final VoidCallback onSearch;
   final VoidCallback onSettings;
   final VoidCallback onDownloads;
@@ -584,32 +589,24 @@ class _TvTopBar extends StatelessWidget {
   Widget build(BuildContext context) => SafeArea(
     bottom: false,
     child: Container(
-      height: 84,
-      padding: const EdgeInsets.fromLTRB(24, 10, 28, 10),
+      height: 72,
+      padding: const EdgeInsets.fromLTRB(30, 9, 24, 9),
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xD9000000), Color(0x33000000)],
+          colors: [Color(0xF20A1624), Color(0x99101F30)],
         ),
       ),
       child: Row(
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (final entry in labels.indexed)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 18),
-                      child: _TvTopTab(
-                        label: entry.$2,
-                        selected: selected == entry.$1,
-                        onTap: () => onSelect(entry.$1),
-                      ),
-                    ),
-                ],
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.5,
               ),
             ),
           ),
@@ -670,7 +667,7 @@ class _TvTopBar extends StatelessWidget {
                   children: [
                     CircleAvatar(
                       radius: 18,
-                      backgroundColor: const Color(0xFFE4AA52),
+                      backgroundColor: BoltColors.primary,
                       child: Text(
                         (controller.activeProfile?.name ?? 'B').characters.first
                             .toUpperCase(),
@@ -693,50 +690,6 @@ class _TvTopBar extends StatelessWidget {
                   ],
                 ),
               ),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-class _TvTopTab extends StatelessWidget {
-  const _TvTopTab({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(8),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: selected ? Colors.white : Colors.white54,
-              fontSize: 18,
-              fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            height: 3,
-            width: selected ? 34 : 0,
-            decoration: BoxDecoration(
-              color: const Color(0xFFE4AA52),
-              borderRadius: BorderRadius.circular(999),
             ),
           ),
         ],
@@ -771,38 +724,70 @@ class _TvRailIconState extends State<_TvRailIcon> {
     return Tooltip(
       message: widget.label,
       child: FocusableActionDetector(
-        onFocusChange: (value) => setState(() => _focused = value),
+        autofocus: widget.selected,
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              widget.onTap();
+              return null;
+            },
+          ),
+        },
+        onFocusChange: (value) {
+          setState(() => _focused = value);
+          if (value) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) Scrollable.ensureVisible(context, alignment: 0.5);
+            });
+          }
+        },
         child: InkWell(
+          canRequestFocus: false,
           onTap: widget.onTap,
           borderRadius: BorderRadius.circular(14),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            height: 54,
+            height: 48,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
               color: widget.selected
-                  ? const Color(0xFFE4AA52)
+                  ? const Color(0xFF173E68)
                   : _focused
-                  ? Colors.white.withValues(alpha: 0.13)
+                  ? const Color(0xFF1A3148)
                   : Colors.white.withValues(alpha: 0.04),
+              border: Border.all(
+                color: _focused ? BoltColors.focus : Colors.transparent,
+                width: 2,
+              ),
               boxShadow: _focused
                   ? const [
                       BoxShadow(
-                        color: Color(0x55E4AA52),
+                        color: Color(0x554EA1FF),
                         blurRadius: 18,
                         spreadRadius: 1,
                       ),
                     ]
                   : const [],
             ),
-            child: Icon(
-              widget.icon,
-              color: widget.selected
-                  ? Colors.black
-                  : active
-                  ? Colors.white
-                  : Colors.white54,
-              size: 24,
+            child: Row(
+              children: [
+                Icon(
+                  widget.icon,
+                  color: active ? BoltColors.primaryBright : Colors.white54,
+                  size: 22,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    widget.label,
+                    style: TextStyle(
+                      color: active ? Colors.white : Colors.white60,
+                      fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -833,10 +818,19 @@ class _TvIconActionState extends State<_TvIconAction> {
   Widget build(BuildContext context) => Tooltip(
     message: widget.label,
     child: FocusableActionDetector(
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (_) {
+            widget.onTap();
+            return null;
+          },
+        ),
+      },
       onFocusChange: (value) => setState(() => _focused = value),
       child: Padding(
         padding: const EdgeInsets.only(left: 8),
         child: InkWell(
+          canRequestFocus: false,
           onTap: widget.onTap,
           borderRadius: BorderRadius.circular(999),
           child: AnimatedContainer(
@@ -847,7 +841,7 @@ class _TvIconActionState extends State<_TvIconAction> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
               color: _focused
-                  ? const Color(0xFFE4AA52)
+                  ? BoltColors.primary
                   : Colors.white.withValues(alpha: 0.08),
               border: Border.all(color: Colors.white12),
             ),
@@ -1168,8 +1162,8 @@ class _PremiumTvHero extends StatelessWidget {
     final reason = media.reason?.trim();
 
     return Container(
-      height: 620,
-      margin: const EdgeInsets.fromLTRB(24, 6, 32, 22),
+      height: 430,
+      margin: const EdgeInsets.fromLTRB(18, 6, 22, 14),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         borderRadius: const BorderRadius.only(
@@ -1225,19 +1219,19 @@ class _PremiumTvHero extends StatelessWidget {
             ),
           ),
           Positioned(
-            left: 54,
-            top: 48,
+            left: 38,
+            top: 28,
             child: Row(
               children: [
-                const BrandMark(size: 42),
-                const SizedBox(width: 14),
+                const Icon(Icons.auto_awesome, color: BoltColors.primaryBright),
+                const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
                       'DIT BIBLIOTEK',
                       style: TextStyle(
-                        color: Color(0xFFE4AA52),
+                        color: BoltColors.primaryBright,
                         fontSize: 12,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 2.2,
@@ -1257,15 +1251,15 @@ class _PremiumTvHero extends StatelessWidget {
             ),
           ),
           Positioned(
-            left: 58,
-            right: 52,
-            bottom: 54,
+            left: 38,
+            right: 38,
+            bottom: 28,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 850),
+                    constraints: const BoxConstraints(maxWidth: 720),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -1297,7 +1291,7 @@ class _PremiumTvHero extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.displayLarge
                               ?.copyWith(
-                                fontSize: 64,
+                                fontSize: 44,
                                 height: 0.94,
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: -2.2,
@@ -1313,16 +1307,16 @@ class _PremiumTvHero extends StatelessWidget {
                         if ((media.overview ?? '').isNotEmpty)
                           Text(
                             media.overview!,
-                            maxLines: 3,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Color(0xB8FFFFFF),
-                              fontSize: 17,
+                              fontSize: 15,
                               height: 1.45,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
-                        const SizedBox(height: 28),
+                        const SizedBox(height: 18),
                         Row(
                           children: [
                             _TvHeroButton(
@@ -1346,7 +1340,7 @@ class _PremiumTvHero extends StatelessWidget {
                   ),
                 ),
                 if (poster.isNotEmpty) ...[
-                  const SizedBox(width: 36),
+                  const SizedBox(width: 24),
                   _HeroPosterPreview(image: poster, media: media),
                 ],
               ],
@@ -1366,8 +1360,8 @@ class _HeroPosterPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    width: 178,
-    height: 270,
+    width: 132,
+    height: 198,
     clipBehavior: Clip.antiAlias,
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(18),
@@ -1416,7 +1410,7 @@ class _HeroReason extends StatelessWidget {
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(999),
       color: Colors.black.withValues(alpha: 0.38),
-      border: Border.all(color: const Color(0x55E4AA52)),
+      border: Border.all(color: const Color(0x554EA1FF)),
     ),
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
@@ -1425,7 +1419,7 @@ class _HeroReason extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(
-          color: Color(0xFFFFD596),
+          color: BoltColors.primaryBright,
           fontSize: 13,
           fontWeight: FontWeight.w800,
         ),
@@ -1456,12 +1450,22 @@ class _TvHeroButtonState extends State<_TvHeroButton> {
 
   @override
   Widget build(BuildContext context) => FocusableActionDetector(
+    autofocus: widget.primary,
+    actions: {
+      ActivateIntent: CallbackAction<ActivateIntent>(
+        onInvoke: (_) {
+          widget.onTap();
+          return null;
+        },
+      ),
+    },
     onFocusChange: (value) => setState(() => _focused = value),
     child: AnimatedScale(
       scale: _focused ? 1.06 : 1,
       duration: const Duration(milliseconds: 150),
       curve: Curves.easeOutCubic,
       child: InkWell(
+        canRequestFocus: false,
         onTap: widget.onTap,
         borderRadius: BorderRadius.circular(999),
         child: AnimatedContainer(
@@ -1470,17 +1474,17 @@ class _TvHeroButtonState extends State<_TvHeroButton> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
             color: widget.primary
-                ? const Color(0xFFE4AA52)
+                ? BoltColors.primary
                 : Colors.white.withValues(alpha: _focused ? 0.18 : 0.1),
             border: Border.all(
               color: widget.primary
-                  ? const Color(0xFFFFD596)
+                  ? BoltColors.primaryBright
                   : Colors.white.withValues(alpha: _focused ? 0.38 : 0.18),
             ),
             boxShadow: _focused
                 ? const [
                     BoxShadow(
-                      color: Color(0x55E4AA52),
+                      color: Color(0x554EA1FF),
                       blurRadius: 22,
                       offset: Offset(0, 10),
                     ),
@@ -1593,9 +1597,9 @@ class _TvMetricCard extends StatelessWidget {
             height: 38,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
-              color: const Color(0x22E4AA52),
+              color: const Color(0x224EA1FF),
             ),
-            child: Icon(icon, color: const Color(0xFFE4AA52), size: 21),
+            child: Icon(icon, color: BoltColors.primaryBright, size: 21),
           ),
           const SizedBox(width: 13),
           Column(
@@ -1644,12 +1648,12 @@ class _PremiumMediaRail extends StatelessWidget {
     if (items.isEmpty) return const SizedBox.shrink();
 
     return Padding(
-      padding: const EdgeInsets.only(top: 24),
+      padding: const EdgeInsets.only(top: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 42),
+            padding: const EdgeInsets.symmetric(horizontal: 28),
             child: Row(
               children: [
                 Expanded(
@@ -1658,7 +1662,7 @@ class _PremiumMediaRail extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 28,
+                      fontSize: 22,
                       fontWeight: FontWeight.w900,
                       letterSpacing: -0.7,
                     ),
@@ -1677,12 +1681,12 @@ class _PremiumMediaRail extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           SizedBox(
-            height: 398,
+            height: 310,
             child: ScrollConfiguration(
               behavior: const ScrollBehavior().copyWith(scrollbars: false),
               child: ListView.separated(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 42,
+                  horizontal: 28,
                   vertical: 5,
                 ),
                 scrollDirection: Axis.horizontal,
@@ -1691,7 +1695,7 @@ class _PremiumMediaRail extends StatelessWidget {
                 itemBuilder: (_, index) => MediaPosterCard(
                   api: api,
                   media: items[index],
-                  width: 202,
+                  width: 158,
                   isTv: true,
                   showMeta: true,
                   heroTag: 'premium-${section.title}-$index-${items[index].id}',
@@ -1954,8 +1958,8 @@ class _CatalogGrid extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(tv ? 34 : 20, 8, tv ? 34 : 20, 48),
           sliver: SliverGrid.builder(
             gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: tv ? 250 : 230,
-              mainAxisExtent: tv ? 390 : 330,
+              maxCrossAxisExtent: tv ? 198 : 230,
+              mainAxisExtent: tv ? 318 : 330,
               crossAxisSpacing: 16,
               mainAxisSpacing: 18,
             ),
@@ -1963,7 +1967,7 @@ class _CatalogGrid extends StatelessWidget {
             itemBuilder: (_, index) => MediaPosterCard(
               api: api,
               media: items[index],
-              width: tv ? 238 : 190,
+              width: tv ? 178 : 190,
               isTv: tv,
               onPressed: () => onPressed(items[index]),
             ),

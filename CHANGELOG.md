@@ -2,6 +2,23 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
+## 0.2.9 - 2026-08-24
+
+- Serieoversigten accepterer scannerens titel-, displaytitel- og provider-identiteter, så korrekt matchede serier ikke forsvinder fra TV-kataloget.
+
+- Ombygger TV-login til et responsivt todelt layout, så servervalg, QR-login og
+  manuel login ikke længere skubbes utilgængeligt under skærmkanten.
+- Tilføjer deterministisk D-pad-rækkefølge, initialt fokus, tydelig fokusramme og
+  automatisk scroll til den fokuserede handling på lavere TV-opløsninger.
+- Redesigner hele TV-skallen i en blå BoltBytes-retning med synligt logo, én
+  sidebar, kompakt hero og mindre mediekort uden den dobbelte topnavigation.
+- Retter fokusaktivering og automatisk scroll på navigation, hero, katalogkort,
+  sæsoner og afsnit samt viser både afsnitsnummer og afsnitstitel.
+- Tilføjer Live TV til klienten med M3U/XMLTV-guide, grupper, favoritter,
+  atomisk authorize/switch, statuspolling, heartbeat, release og native player.
+- Tilføjer regressionstests for 1920x1080/1280x720 login, serieafsnit, Live
+  TV-kontrakter og D-pad-kanalnavigation.
+
 ## 0.2.8 - 2026-08-24
 
 - Rettet TV-releasecrash før første Flutter-frame ved at bevare WorkManagers

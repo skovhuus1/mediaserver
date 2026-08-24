@@ -1282,9 +1282,15 @@ export class CatalogService {
     };
     if (query.type === 'series') {
       where.type = 'episode';
-      where.seriesTitle = query.seriesTitle
-        ? { equals: query.seriesTitle, mode: 'insensitive' }
-        : { not: null };
+      if (!query.seriesTitle && !query.seriesDisplayTitle && !query.seriesMetadataProviderId) {
+        where.AND = [{
+          OR: [
+            { seriesTitle: { not: null } },
+            { seriesDisplayTitle: { not: null } },
+            { seriesMetadataProviderId: { not: null } },
+          ],
+        }];
+      }
     } else if (query.type) {
       where.type = query.type;
     }
