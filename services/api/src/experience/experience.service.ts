@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { detectVideoSignalProfile, type AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
+import { canonicalMediaTarget } from '../playback/media-target';
 import {
   buildSeriesSeasons,
   cleanLocalTitle,
@@ -121,11 +122,12 @@ export class ExperienceService {
     const isSeries = Boolean(seriesName) && (anchor.type === 'episode' || anchor.type === 'series' || anchor.category === 'series');
     const base = this.titleSummary(anchor, seriesName);
     if (!isSeries || !seriesName) {
-      const [history, related] = await Promise.all([
+      const [history, related, viewerState] = await Promise.all([
         actor.profileId ? this.prisma.playbackHistory.findUnique({ where: { profileId_mediaId: { profileId: actor.profileId, mediaId: anchor.id } }, select: { positionMs: true, completed: true, updatedAt: true } }) : null,
         this.relatedTitles(actor.accountId, anchor, null),
+        this.viewerState(actor, anchor),
       ]);
-      return { mode: 'title', title: base, playback: this.playbackSummary(anchor, history), discovery: this.discovery(anchor, null), related };
+      return { mode: 'title', title: base, playback: this.playbackSummary(anchor, history), viewerState, discovery: this.discovery(anchor, null), related };
     }
 
     const candidates: Prisma.MediaItemWhereInput[] = [];
@@ -160,7 +162,10 @@ export class ExperienceService {
       playback: this.playbackMedia(episode),
     })), histories, anchor.id);
     const representative = playableEpisodes[0] ?? anchor;
-    const related = await this.relatedTitles(actor.accountId, representative, seriesName);
+    const [related, viewerState] = await Promise.all([
+      this.relatedTitles(actor.accountId, representative, seriesName),
+      this.viewerState(actor, representative),
+    ]);
     return {
       mode: 'series',
       title: {
@@ -171,6 +176,7 @@ export class ExperienceService {
         backdropPath: anchor.backdropPath ?? representative.backdropPath,
       },
       series,
+      viewerState,
       discovery: this.discovery(representative, seriesName),
       related,
     };
@@ -229,6 +235,24 @@ export class ExperienceService {
     if (!matching.length) throw notFound('Samlingen indeholder ingen lokale afspillelige titler.');
     const representative = matching[0]!;
     return { kind: 'collection', key, title, subtitle, imagePath: representative.backdropPath ?? representative.posterPath, items: collapseTitles(matching) };
+  }
+
+  private async viewerState(actor: AuthenticatedUser, media: MediaRecord) {
+    if (!actor.profileId) return { inWatchlist: false, watched: false, positionMs: 0, playlistIds: [] as string[] };
+    const target = canonicalMediaTarget(media);
+    const [watchlist, history, playlists] = await Promise.all([
+      this.prisma.watchlistEntry.findUnique({ where: { profileId_targetKey: { profileId: actor.profileId, targetKey: target.targetKey } }, select: { id: true } }),
+      this.prisma.playbackHistory.findUnique({ where: { profileId_mediaId: { profileId: actor.profileId, mediaId: media.id } }, select: { completed: true, positionMs: true } }),
+      this.prisma.playlistItem.findMany({ where: { targetKey: target.targetKey, playlist: { accountId: actor.accountId, profileId: actor.profileId } }, select: { playlistId: true } }),
+    ]);
+    return {
+      targetType: target.targetType,
+      targetKey: target.targetKey,
+      inWatchlist: Boolean(watchlist),
+      watched: Boolean(history?.completed),
+      positionMs: history?.positionMs ?? 0,
+      playlistIds: playlists.map((item) => item.playlistId),
+    };
   }
 
   private localCatalog(accountId: string) {

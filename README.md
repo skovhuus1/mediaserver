@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.12**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.2.13**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -30,6 +30,46 @@ Ethernet-TV uden Wi-Fi-krav, eksplicit no-backup af tokens/offline-nøgler og de
 Android-regler for dynamiske updater-receivere og eksporterede Leanback activities.
 Gradles Linux- og Windows-wrappers samt wrapper-JAR er versionsstyrede, så den samme
 native lint- og release-kæde kan køres reproducerbart lokalt og på GitHub Actions.
+
+## Kundeoplevelse 2.0
+
+Kundewebben bruger et samlet, profilscopet home-feed på `GET /api/v1/experience/home`.
+Feedet leverer hero, effektiv rækkeopsætning og første cursor-side af hver synlig
+række i ét kald. Første side caches i Redis i 60 sekunder pr. account/profil og
+invalideres ved Min liste, playlister, historik og profilindstillinger.
+
+- Standardrækkefølgen er Anbefalinger, Fortsæt med at se, Min liste, Seneste
+  episoder, Nye film, Nye serier, Genrer og Populært lokalt.
+- `/watch/my-list` viser profilens kanoniske Min liste. Serieafsnit gemmes som én
+  stabil serieidentitet, så samme serie ikke gentages for hvert afsnit.
+- `/watch/playlists` administrerer op til 50 private playlister pr. profil og 500
+  poster pr. playliste. Film, hele serier og enkelte episoder understøttes.
+- Playlister kan fastgøres som dynamiske `playlist:<uuid>`-rækker, omarrangeres
+  med drag-and-drop eller keyboard og bruger `expectedUpdatedAt`, så samtidige
+  ændringer afvises eksplicit frem for at overskrive hinanden.
+- Alle mutationer er account- og profile-scopede, auditloggede og rydder den
+  relevante home-cache. Sletning fjerner playlistens home-reference i samme
+  databasetransaktion.
+- Fælles mediekort og vandrette rails understøtter mus, touch, scroll-snap,
+  piletaster, Home/End, artwork-fallbacks, skeletons og tom-/fejltilstande.
+- Titel-/seriesider og webplayeroverlayet kan administrere Min liste og
+  playlister. Playback-, ABR-, transcoding-, buffer- og subtitle-engine er ikke
+  ændret af denne UI-leverance.
+
+Offentlige kontrakter:
+
+```text
+GET    /api/v1/experience/home
+GET    /api/v1/experience/home/rows/:id?cursor=...
+GET    /api/v1/playback/playlists
+POST   /api/v1/playback/playlists
+GET    /api/v1/playback/playlists/:id
+PATCH  /api/v1/playback/playlists/:id
+DELETE /api/v1/playback/playlists/:id
+PUT    /api/v1/playback/playlists/:id/items/:mediaId
+DELETE /api/v1/playback/playlists/:id/items/:itemId
+PATCH  /api/v1/playback/playlists/:id/items/order
+```
 
 ## Live TV fra M3U
 
@@ -119,7 +159,7 @@ Hostmappen monteres read-only som **/media** i API og worker. Biblioteker vælge
 | Adgang | Planversioner, snapshots, overrides, release windows, suspend/revoke og atomiske streamreservationer |
 | Bibliotek | Flere biblioteker, parallel scans, filesystem-watcher, metadata, manuel match, låsning og playback-analyse |
 | Playback | Direct Play, Direct Stream/remux, HLS-transcoding, ABR, 4K/HDR-policy, subtitles, historik og fortsæt-position |
-| Kundeportal | Kompakt personlig forside, anbefalinger, søgning, film-/seriesider, sæsoner, overordnede normaliserede genrefiltre, kompakt Fortsæt med at se-række med profilscopet fjernelse, præferencer og downloads |
+| Kundeportal | Personlig hero og redigerbart home-feed, Min liste, private playlister, fælles hurtighandlinger, anbefalinger, søgning, film-/seriesider, sæsoner, genrer, Fortsæt med at se, præferencer og downloads |
 | Chromecast | Web Sender, signed cast-media-kontrakt og branded receiver-side; produktion kræver registreret Cast App ID |
 | Admin | Operationscenter, diagnostics, CPU/RAM/playback-telemetri, logs, opdatering, backup og integrationer |
 | Backup | Krypteret PostgreSQL-backup, import, download, retention, pre-restore safety backup og gated restore |
@@ -217,7 +257,7 @@ Se [domæne og Nginx Proxy Manager](docs/domain-nginx-proxy-manager.md).
 
 Arbejdet laves på **agent/...** branches. Hver færdig leverance skal have opdateret dokumentation, lokale gates og grønne push- og PR-checks. Først derefter squash-merges den til **main**.
 
-Alle releases bruger ét SemVer-nummer. Sæt næste version med `npm run version:set -- 0.2.1`, opdater `CHANGELOG.md`, og kør `npm run version:check`; CI afviser versionsdrift mellem pakker, lockfil og health-API.
+Server, worker, admin og delte kontrakter bruger ét SemVer-nummer. Sæt næste serverversion med `npm run version:set -- 0.2.13`, opdater `CHANGELOG.md`, og kør `npm run version:check`; CI afviser versionsdrift mellem serverpakker, lockfil, health-API og README. Flutter mobile/TV versionsstyres og udgives separat, så rene serverleverancer aldrig skriver i appmapperne.
 
 Android-releases bygges som separate `mobile`- og `tv`-flavors. Produktionsworkflowet udgiver APK/AAB sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk mobil-, TV- og Cast-certificering forbliver en særskilt releasegate.
 

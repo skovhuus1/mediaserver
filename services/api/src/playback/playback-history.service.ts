@@ -1,7 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { detectVideoSignalProfile, selectSeriesContinuation, type AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
+import { homeExperienceCacheKey } from '../experience/home-cache';
+import { RedisService } from '../infra/redis.service';
+import { canonicalMediaTarget, type MediaTargetType } from './media-target';
 import { PlaybackProgressDto } from './playback-history.dto';
 import { normalizePlaybackProgress } from './playback-progress';
 import { StreamReservationService } from './stream-reservation.service';
@@ -20,6 +23,7 @@ export class PlaybackHistoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly reservations: StreamReservationService,
+    @Optional() private readonly redis?: RedisService,
   ) {}
 
   context(actor: AuthenticatedUser) {
@@ -159,7 +163,12 @@ export class PlaybackHistoryService {
       },
     });
     const progress = new Map(histories.map((entry) => [entry.mediaId, entry]));
-    return entries.map((entry) => this.publicMedia(entry.media, progress.get(entry.mediaId)));
+    return entries.map((entry) => ({
+      ...this.publicMedia(entry.media, progress.get(entry.mediaId)),
+      targetType: entry.targetType,
+      targetKey: entry.targetKey,
+      inWatchlist: true,
+    }));
   }
 
   async removeFromContinueWatching(actor: AuthenticatedUser, mediaId: string) {
@@ -173,37 +182,48 @@ export class PlaybackHistoryService {
       },
     });
 
+    await this.invalidateHome(actor, profileId);
     return { mediaId, removed: result.count > 0 };
   }
 
-  async addToWatchlist(actor: AuthenticatedUser, mediaId: string) {
+  async addToWatchlist(actor: AuthenticatedUser, mediaId: string, requested: MediaTargetType | 'auto' = 'auto') {
     const profileId = this.profileId(actor);
-    await this.media(actor, mediaId);
+    const media = await this.media(actor, mediaId);
+    const target = canonicalMediaTarget(media, requested);
     const entry = await this.prisma.watchlistEntry.upsert({
-      where: { profileId_mediaId: { profileId, mediaId } },
-      create: { accountId: actor.accountId, profileId, mediaId },
-      update: {},
+      where: { profileId_targetKey: { profileId, targetKey: target.targetKey } },
+      create: { accountId: actor.accountId, profileId, mediaId, targetType: target.targetType, targetKey: target.targetKey },
+      update: { mediaId, targetType: target.targetType },
     });
-    return { mediaId: entry.mediaId, inWatchlist: true, createdAt: entry.createdAt };
+    await this.invalidateHome(actor, profileId);
+    return { mediaId: entry.mediaId, targetType: entry.targetType, targetKey: entry.targetKey, inWatchlist: true, createdAt: entry.createdAt };
   }
 
   async removeFromWatchlist(actor: AuthenticatedUser, mediaId: string) {
     const profileId = this.profileId(actor);
+    const media = await this.media(actor, mediaId);
+    const target = canonicalMediaTarget(media);
     await this.prisma.watchlistEntry.deleteMany({
-      where: { accountId: actor.accountId, profileId, mediaId },
+      where: { accountId: actor.accountId, profileId, targetKey: target.targetKey },
     });
+    await this.invalidateHome(actor, profileId);
     return { mediaId, inWatchlist: false };
   }
 
   async mediaStatus(actor: AuthenticatedUser, mediaId: string) {
     const profileId = this.profileId(actor);
-    await this.media(actor, mediaId);
-    const [watchlist, history] = await Promise.all([
+    const media = await this.media(actor, mediaId);
+    const target = canonicalMediaTarget(media);
+    const [watchlist, history, playlists] = await Promise.all([
       this.prisma.watchlistEntry.findUnique({
-        where: { profileId_mediaId: { profileId, mediaId } },
+        where: { profileId_targetKey: { profileId, targetKey: target.targetKey } },
       }),
       this.prisma.playbackHistory.findUnique({
         where: { profileId_mediaId: { profileId, mediaId } },
+      }),
+      this.prisma.playlistItem.findMany({
+        where: { targetKey: target.targetKey, playlist: { accountId: actor.accountId, profileId } },
+        select: { playlistId: true },
       }),
     ]);
     return {
@@ -211,6 +231,9 @@ export class PlaybackHistoryService {
       inWatchlist: Boolean(watchlist),
       watched: history?.completed ?? false,
       positionMs: history?.positionMs ?? 0,
+      targetType: target.targetType,
+      targetKey: target.targetKey,
+      playlistIds: playlists.map((entry) => entry.playlistId),
     };
   }
 
@@ -230,6 +253,7 @@ export class PlaybackHistoryService {
       },
       update: { positionMs, completed: watched },
     });
+    await this.invalidateHome(actor, profileId);
     return {
       mediaId,
       watched: history.completed,
@@ -321,6 +345,11 @@ export class PlaybackHistoryService {
       });
     }
     return actor.profileId;
+  }
+
+  private async invalidateHome(actor: AuthenticatedUser, profileId: string) {
+    if (!this.redis) return;
+    await this.redis.delete(homeExperienceCacheKey(actor.accountId, profileId)).catch(() => undefined);
   }
 
   private async media(actor: AuthenticatedUser, mediaId: string) {

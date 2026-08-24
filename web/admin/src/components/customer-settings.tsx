@@ -25,12 +25,16 @@ type ProfileState = {
   };
 };
 
-type HomeRowId = 'recommendations' | 'continue' | 'new_movies' | 'new_series';
-const HOME_ROW_LABELS: Record<HomeRowId, { title: string; description: string }> = {
+type HomeRowId = string;
+const HOME_ROW_LABELS: Record<string, { title: string; description: string }> = {
   recommendations: { title: 'Anbefalinger', description: 'Personlig hero og forslag fra din historik.' },
   continue: { title: 'Fortsæt med at se', description: 'Film og episoder med gemt position.' },
+  watchlist: { title: 'Min liste', description: 'Titler, som profilen selv har gemt.' },
+  latest_episodes: { title: 'Seneste episoder', description: 'Nye lokalt tilgængelige serieafsnit.' },
   new_movies: { title: 'Nye film', description: 'Senest tilføjede film på serveren.' },
   new_series: { title: 'Nye serier', description: 'Senest tilføjede samleserier.' },
+  genres: { title: 'Genrer', description: 'Hurtige indgange til bibliotekets genrer.' },
+  popular: { title: 'Populært lokalt', description: 'Titler, der bliver brugt på din BoltBytes-server.' },
 };
 
 type DeviceState = {
@@ -219,7 +223,7 @@ export function CustomerSettings() {
         <button className={styles.secondary} disabled={Boolean(busy)} onClick={resetRecommendations}>{busy === 'reset' ? 'Nulstiller...' : 'Nulstil anbefalinger'}</button>
         <div className={styles.rowManager}>
           <header><strong>Forsidens rækkefølge</strong><span>Flyt og skjul rækker. Valget følger profilen på alle enheder.</span></header>
-          {profile.preferences.homeRowOrder.map((row, index) => { const hidden = profile.preferences.hiddenHomeRows.includes(row); const label = HOME_ROW_LABELS[row]; return <article className={hidden ? styles.hiddenRow : ''} key={row}><span><strong>{index + 1}. {label.title}</strong><small>{label.description}</small></span><div><button aria-label={`Flyt ${label.title} op`} disabled={index === 0} onClick={() => moveHomeRow(row, -1)}><ArrowUp /></button><button aria-label={`Flyt ${label.title} ned`} disabled={index === profile.preferences.homeRowOrder.length - 1} onClick={() => moveHomeRow(row, 1)}><ArrowDown /></button><button aria-label={hidden ? `Vis ${label.title}` : `Skjul ${label.title}`} onClick={() => toggleHomeRow(row)}>{hidden ? <Eye /> : <EyeOff />}</button></div></article>; })}
+          {profile.preferences.homeRowOrder.map((row, index) => { const hidden = profile.preferences.hiddenHomeRows.includes(row); const label = HOME_ROW_LABELS[row] ?? { title: 'Fastgjort playliste', description: 'En profilbaseret playliste på forsiden.' }; return <article className={hidden ? styles.hiddenRow : ''} key={row}><span><strong>{index + 1}. {label.title}</strong><small>{label.description}</small></span><div><button aria-label={`Flyt ${label.title} op`} disabled={index === 0} onClick={() => moveHomeRow(row, -1)}><ArrowUp /></button><button aria-label={`Flyt ${label.title} ned`} disabled={index === profile.preferences.homeRowOrder.length - 1} onClick={() => moveHomeRow(row, 1)}><ArrowDown /></button><button aria-label={hidden ? `Vis ${label.title}` : `Skjul ${label.title}`} onClick={() => toggleHomeRow(row)}>{hidden ? <Eye /> : <EyeOff />}</button></div></article>; })}
         </div>
       </SettingsCard>
 

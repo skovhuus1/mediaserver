@@ -13,7 +13,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { HOME_ROW_IDS, type HomeRowId } from './home-layout';
+import { HOME_ROW_ID_PATTERN, type HomeRowId } from './home-layout';
 
 const LANGUAGE_PATTERN = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
 const PIN_PATTERN = /^\d{4,8}$/;
@@ -63,14 +63,14 @@ export class UpdateProfilePreferencesDto {
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(4)
-  @IsIn(HOME_ROW_IDS, { each: true })
+  @ArrayMaxSize(58)
+  @Matches(HOME_ROW_ID_PATTERN, { each: true })
   homeRowOrder?: HomeRowId[];
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(4)
-  @IsIn(HOME_ROW_IDS, { each: true })
+  @ArrayMaxSize(58)
+  @Matches(HOME_ROW_ID_PATTERN, { each: true })
   hiddenHomeRows?: HomeRowId[];
 
   @IsOptional()

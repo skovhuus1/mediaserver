@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronLeft, Film, Home, LogOut, MonitorPlay, Radio, Tv, UserRound } from 'lucide-react';
+import { Bookmark, ChevronLeft, Film, Home, ListMusic, LogOut, MonitorPlay, Radio, Tv, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -24,10 +24,12 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
     { href: '/watch/live', label: 'Live TV', icon: Radio },
     { href: '/watch/recordings', label: 'Optagelser', icon: MonitorPlay },
     { href: '/watch?view=continue', label: 'Fortsæt', icon: MonitorPlay },
+    { href: '/watch/my-list', label: 'Min liste', icon: Bookmark },
+    { href: '/watch/playlists', label: 'Playlister', icon: ListMusic },
   ];
   const active = (href: string) => {
     const [path, query = ''] = href.split('?');
-    if (pathname !== path) return false;
+    if (pathname !== path && !(path !== '/watch' && pathname.startsWith(`${path}/`))) return false;
     if (!query) return !searchParams.toString();
     const target = new URLSearchParams(query);
     return Array.from(target.entries()).every(([key, value]) => searchParams.get(key) === value);
@@ -40,7 +42,7 @@ export function CustomerShell({ user, children }: { user: SessionUser; children:
     <div className={`watch-shell ${styles.shell}`}>
       <header className={`watch-header ${styles.header}`}>
         <Link aria-label="BoltBytes hjem" href="/watch"><Brand /></Link>
-        <nav aria-label="Kundenavigation" className={styles.nav} style={{ gridTemplateColumns: 'repeat(6,minmax(0,1fr))' }}>{links.map(({ href, label, icon: Icon }) => {
+        <nav aria-label="Kundenavigation" className={styles.nav}>{links.map(({ href, label, icon: Icon }) => {
           const isActive = active(href);
           return <Link aria-current={isActive ? 'page' : undefined} className={isActive ? 'active' : ''} href={href} key={href}><Icon size={16} />{label}</Link>;
         })}</nav>

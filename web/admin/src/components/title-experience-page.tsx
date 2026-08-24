@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, type ApiFailure } from '@/lib/api';
 import { AuthenticatedCustomerShell } from './authenticated-customer-shell';
 import { requestPlayback, type PlayableMedia } from './web-player';
+import { MediaQuickActions, type MediaExperienceItem, type ViewerState } from './media-experience';
 import styles from './title-experience-page.module.css';
 
 type Person = { key: string; name: string; role: string | null; profilePath: string | null };
@@ -16,7 +17,7 @@ type Episode = { id: string; title: string; overview: string | null; seasonNumbe
 type Season = { number: number; label: string; episodeCount: number; watchedCount: number; durationMs: number; episodes: Episode[] };
 type Related = { mediaId: string; title: string; type: string; releaseYear: number | null; overview: string | null; rating: number | null; posterPath: string | null; backdropPath: string | null; genres: string[]; episodeCount: number | null; reason: string };
 type Title = { id: string; displayTitle: string; episodeTitle: string | null; type: string; releaseYear: number | null; overview: string | null; rating: number | null; posterPath: string | null; backdropPath: string | null; genres: string[]; durationMs: number | null; width: number | null; height: number | null; bitrate: number | null; container: string | null; videoCodec: string | null; audioCodec: string | null; hdr: string | null };
-type Experience = { mode: 'title' | 'series'; title: Title; playback?: Playback; discovery: { people: Person[]; collections: Collection[] }; related: Related[]; series?: { seasons: Season[]; resumeEpisode: Episode | null; nextEpisode: Episode | null; selectedSeasonNumber: number } };
+type Experience = { mode: 'title' | 'series'; title: Title; playback?: Playback; viewerState: ViewerState & { targetType?: string; targetKey?: string; positionMs?: number }; discovery: { people: Person[]; collections: Collection[] }; related: Related[]; series?: { seasons: Season[]; resumeEpisode: Episode | null; nextEpisode: Episode | null; selectedSeasonNumber: number } };
 
 export function TitleExperiencePage() {
   const params = useParams<{ id: string }>();
@@ -41,6 +42,7 @@ export function TitleExperiencePage() {
   if (experience.mode !== 'series' || !experience.series) {
     return <AuthenticatedCustomerShell><article className={styles.titlePage}>
       <section className={`${styles.hero} ${styles.filmHero}`} style={backdrop(experience.title.backdropPath)}><div className={styles.heroShade} /><Link className={styles.back} href="/watch"><ArrowLeft />Tilbage</Link><div className={styles.filmPoster} style={poster(experience.title.posterPath)} /><div className={styles.heroContent}><span className={styles.eyebrow}>FILM · {qualityLabel(experience.title)}</span><h1>{experience.title.displayTitle}</h1><TitleMeta title={experience.title} /><p>{experience.title.overview ?? 'Der er endnu ingen beskrivelse af denne film.'}</p>{experience.playback && <div className={styles.heroActions}><button className={styles.playButton} onClick={() => requestPlayback(experience.playback!.media, experience.playback!.positionMs)}><Play fill="currentColor" />{experience.playback.positionMs > 0 ? `Fortsæt · ${duration(experience.playback.positionMs)}` : 'Afspil film'}</button>{experience.playback.progressPercent > 0 && <span>{experience.playback.progressPercent}% set</span>}</div>}</div></section>
+      <TitleLibraryActions experience={experience} />
       <DiscoveryStrip discovery={experience.discovery} />
       <RelatedTitles items={experience.related} heading={`Mere som ${experience.title.displayTitle}`} />
     </article></AuthenticatedCustomerShell>;
@@ -49,10 +51,33 @@ export function TitleExperiencePage() {
   const resume = experience.series.resumeEpisode;
   return <AuthenticatedCustomerShell><article className={styles.seriesPage}>
     <section className={styles.hero} style={backdrop(experience.title.backdropPath)}><div className={styles.heroShade} /><Link className={styles.back} href="/watch"><ArrowLeft />Tilbage</Link><div className={styles.heroContent}><span className={styles.eyebrow}>SERIE · {experience.series.seasons.length} SÆSONER</span><h1>{experience.title.displayTitle}</h1><TitleMeta title={experience.title} /><p>{experience.title.overview ?? 'Serien er samlet fra serverens lokale episoder.'}</p>{resume && <div className={styles.heroActions}><button className={styles.playButton} onClick={() => requestPlayback(resume.playback, resume.positionMs)}><Play size={18} fill="currentColor" />{resume.positionMs > 0 ? 'Fortsæt' : 'Afspil'} S{pad(resume.seasonNumber)}E{pad(resume.episodeNumber)}</button>{experience.series.nextEpisode && <span>Næste: {experience.series.nextEpisode.title}</span>}</div>}</div></section>
+    <TitleLibraryActions experience={experience} />
     <DiscoveryStrip discovery={experience.discovery} />
     <div className={styles.seriesGrid}><main><header className={styles.seasonHeader}><div><span>EPISODEGUIDE</span><h2>{selectedSeason?.label ?? 'Episoder'}</h2><small>{selectedSeason ? `${selectedSeason.watchedCount} af ${selectedSeason.episodeCount} set · ${duration(selectedSeason.durationMs)}` : ''}</small></div><div className={styles.seasonTabs}>{experience.series.seasons.map((entry) => <button className={entry.number === selectedSeason?.number ? styles.activeSeason : ''} key={entry.number} onClick={() => setSeason(entry.number)}>{entry.label}<small>{entry.watchedCount}/{entry.episodeCount} set</small></button>)}</div></header><div className={styles.episodes}>{selectedSeason?.episodes.map((episode) => <EpisodeRow episode={episode} key={episode.id} />)}</div></main><aside className={styles.queue}><span className={styles.eyebrow}>AFSPILNINGSKØ</span><h3>Kommer bagefter</h3>{(selectedSeason?.episodes.filter((episode) => !episode.watched).slice(0, 6) ?? []).map((episode, index) => <button onClick={() => requestPlayback(episode.playback, episode.positionMs)} key={episode.id}><b>{index + 1}</b><span><strong>S{pad(episode.seasonNumber)}E{pad(episode.episodeNumber)} · {episode.title}</strong><small>{duration(episode.durationMs)}{episode.positionMs > 0 ? ` · fortsæt ved ${duration(episode.positionMs)}` : ''}</small></span><ChevronRight /></button>)}{!selectedSeason?.episodes.some((episode) => !episode.watched) && <p>Hele sæsonen er set.</p>}</aside></div>
     <RelatedTitles items={experience.related} heading="Flere serier til dig" />
   </article></AuthenticatedCustomerShell>;
+}
+
+function TitleLibraryActions({ experience }: { experience: Experience }) {
+  const playable = experience.mode === 'series' ? experience.series?.resumeEpisode?.playback ?? null : experience.playback?.media ?? null;
+  const anchor = playable?.id ?? experience.title.id;
+  const item: MediaExperienceItem = {
+    mediaId: anchor,
+    targetType: experience.viewerState.targetType ?? (experience.mode === 'series' ? 'series' : 'movie'),
+    targetKey: experience.viewerState.targetKey ?? `media:${anchor}`,
+    title: experience.title.displayTitle,
+    type: experience.mode === 'series' ? 'series' : experience.title.type,
+    releaseYear: experience.title.releaseYear,
+    overview: experience.title.overview,
+    posterPath: experience.title.posterPath,
+    backdropPath: experience.title.backdropPath,
+    width: experience.title.width,
+    height: experience.title.height,
+    positionMs: experience.viewerState.positionMs ?? experience.playback?.positionMs ?? experience.series?.resumeEpisode?.positionMs ?? 0,
+    viewerState: experience.viewerState,
+    playback: playable,
+  };
+  return <section className={styles.libraryActions}><span>DIN PROFIL</span><strong>Gem, organiser eller opdater din seerstatus</strong><MediaQuickActions item={item} /></section>;
 }
 
 function EpisodeRow({ episode }: { episode: Episode }) { const markerKinds = new Set(episode.markers.map((marker) => marker.kind)); return <article className={styles.episode}><button className={styles.still} onClick={() => requestPlayback(episode.playback, episode.positionMs)} style={backdrop(episode.stillPath ?? episode.posterPath)} aria-label={`Afspil ${episode.title}`}><Play fill="currentColor" />{episode.watched && <span><CheckCircle2 />Set</span>}{episode.progressPercent > 0 && <i style={{ width: `${episode.progressPercent}%` }} />}</button><div className={styles.episodeCopy}><header><span>S{pad(episode.seasonNumber)}E{pad(episode.episodeNumber)}</span><strong>{episode.title}</strong><em>{duration(episode.durationMs)}</em></header><p>{episode.overview ?? 'Der er endnu ingen episodebeskrivelse.'}</p><footer>{markerKinds.has('intro') && <span>Spring intro over</span>}{markerKinds.has('recap') && <span>Recap</span>}{markerKinds.has('credits') && <span>Automatisk næste episode</span>}</footer></div><button className={styles.episodeAction} onClick={() => requestPlayback(episode.playback, episode.positionMs)}>{episode.positionMs > 0 ? 'Fortsæt' : 'Afspil'}<ChevronRight /></button></article>; }

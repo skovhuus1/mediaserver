@@ -4,6 +4,15 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.2.13 - 2026-08-24
+
+- Tilføjer Kundeoplevelse 2.0 med ét samlet profilscopet home-feed, personlig hero, otte standardrækker, dynamiske playlisterækker og cursor-baseret inkrementel indlæsning.
+- Tilføjer Min liste med kanonisk serieidentitet, så flere afsnit fra samme serie ikke optræder som separate serier.
+- Tilføjer private profilplaylister med film, hele serier og enkelte episoder, 50/500-grænser, drag-and-drop, keyboard-flytning, atomisk versionskontrolleret reorder og valgfri fastgørelse på forsiden.
+- Samler kundekort, rails og hurtighandlinger i én responsiv blå BoltBytes-komponent med playback, info, Min liste, playliste og set-status, som synkroniseres mellem synlige forekomster.
+- Udvider titel-/seriesider og webplayerens visuelle overlay med profilhandlinger uden at ændre Direct Play, remux, transcoding, ABR, buffer eller subtitle-engine.
+- Adskiller serverens SemVer-gate fra Flutter-klienternes releaseversion, så rene API/web-releases ikke skriver i mobil- eller TV-appfiler.
+
 - Udvidet kundesøgning med selvstændige episodehits og rettet anbefalingsscoring for TMDB-genrer, credits, similar-id'er og konkrete forklaringer.
 - Tilføjet account-scopet driftsmonitorering med 30 dages CPU-, RAM-, disk-, playback- og jobhistorik, vedvarende alarmer, kvittering og sikker diagnostikeksport.
 - Tilføjet Live TV-sporopdagelse og valg af lyd/undertekst gennem ffprobe, samme lease ved rekonfiguration, native HLS-spor i webplayeren og server-rendering af understøttede bitmap-undertekster.

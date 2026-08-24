@@ -9,6 +9,7 @@ import * as bcrypt from 'bcryptjs';
 import { correlationId } from '../common/request-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../infra/redis.service';
+import { homeExperienceCacheKey } from '../experience/home-cache';
 import {
   UpdateDevicePreferencesDto,
   UpdateProfilePreferencesDto,
@@ -188,6 +189,7 @@ export class PreferencesService {
     });
 
     await this.redis.delete(this.recommendationKey(actor));
+    await this.redis.delete(homeExperienceCacheKey(actor.accountId, profile.id)).catch(() => undefined);
     return this.getProfilePreferences(actor);
   }
 

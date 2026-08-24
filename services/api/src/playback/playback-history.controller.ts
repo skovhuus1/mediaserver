@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser } from '../common/auth';
 import { PlaybackProgressDto, SetWatchedDto } from './playback-history.dto';
 import { PlaybackHistoryService } from './playback-history.service';
+import { WatchlistTargetDto } from './watchlist.dto';
 
 @ApiTags('playback')
 @Controller('playback')
@@ -37,8 +38,9 @@ export class PlaybackHistoryController {
   addToWatchlist(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('mediaId') mediaId: string,
+    @Body() input?: WatchlistTargetDto,
   ) {
-    return this.history.addToWatchlist(actor, mediaId);
+    return this.history.addToWatchlist(actor, mediaId, input?.targetType);
   }
 
   @Delete('watchlist/:mediaId')
