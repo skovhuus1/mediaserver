@@ -17,6 +17,7 @@ import {
 } from './live-tv-import-batching.js';
 import { loadLiveTvChannelImportIndex, rememberLiveTvImportChannel, resolveLiveTvImportChannel } from './live-tv-channel-import.js';
 import { decryptSecret, encryptSecret } from './secret-value.js';
+import { defaultAudioTrack, findLiveTvTrack, isBitmapSubtitle, parseLiveTvProbe, type LiveTvTrackCatalog } from './live-tv-tracks.js';
 
 type LiveJob = SystemJob & { attemptNumber?: number };
 const execFileAsync = promisify(execFile);
@@ -272,21 +273,30 @@ export async function runLiveTvStream(prisma: PrismaClient, job: LiveJob, root: 
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   const sourceUrl = decryptSecret(lease.source.encryptedStreamUrl);
+  const tracks = await probeLiveTvTracks(sourceUrl).catch((): LiveTvTrackCatalog => ({ audio: [], subtitles: [] }));
+  const selectedAudio = findLiveTvTrack(tracks, 'audio', lease.selectedAudioTrackId) ?? defaultAudioTrack(tracks);
+  const selectedSubtitle = findLiveTvTrack(tracks, 'subtitle', lease.selectedSubtitleTrackId);
   let method = lease.method;
+  if (selectedSubtitle) method = 'transcode';
   if (method === 'direct_stream' && payload.allowTranscodeFallback === true) {
     const codec = await probeVideoCodec(sourceUrl).catch(() => null);
     if (codec && codec !== 'h264') method = 'transcode';
   }
-  if (method !== lease.method) await prisma.liveTvLease.update({ where: { id: lease.id }, data: { method } });
+  await prisma.liveTvLease.update({ where: { id: lease.id }, data: {
+    method,
+    availableTracks: tracks as unknown as Prisma.InputJsonValue,
+    selectedAudioTrackId: selectedAudio?.id ?? null,
+    selectedSubtitleTrackId: selectedSubtitle?.id ?? null,
+  } });
   await updateJobProgress(prisma, job, { stage: method === 'transcode' ? 'Transcoder Live TV' : 'Remuxer Live TV', current: 0, total: null, message: 'Forbinder til kanalkilden' });
   try {
-    await runFfmpegLive(prisma, job, lease.id, sourceUrl, output, method, renew);
+    await runFfmpegLive(prisma, job, lease.id, sourceUrl, output, method, tracks, selectedAudio?.id ?? null, selectedSubtitle?.id ?? null, renew);
   } catch (error) {
     if (method === 'direct_stream' && payload.allowTranscodeFallback === true) {
       await rm(output, { recursive: true, force: true }); await mkdir(output, { recursive: true });
       await prisma.liveTvLease.update({ where: { id: lease.id }, data: { method: 'transcode', status: 'preparing', lastError: null } });
       await updateJobProgress(prisma, job, { stage: 'Skifter til transcoding', message: 'Remux var ikke kompatibel; prøver softwaretranscoding' });
-      await runFfmpegLive(prisma, job, lease.id, sourceUrl, output, 'transcode', renew);
+      await runFfmpegLive(prisma, job, lease.id, sourceUrl, output, 'transcode', tracks, selectedAudio?.id ?? null, selectedSubtitle?.id ?? null, renew);
       return;
     }
     await prisma.liveTvLease.updateMany({ where: { id: lease.id, jobId: job.id }, data: { status: 'failed', lastError: safeError(error) } });
@@ -294,9 +304,15 @@ export async function runLiveTvStream(prisma: PrismaClient, job: LiveJob, root: 
   }
 }
 
-async function runFfmpegLive(prisma: PrismaClient, job: LiveJob, leaseId: string, sourceUrl: string, output: string, method: string, renew: () => Promise<void>) {
+async function runFfmpegLive(prisma: PrismaClient, job: LiveJob, leaseId: string, sourceUrl: string, output: string, method: string, tracks: LiveTvTrackCatalog, audioTrackId: string | null, subtitleTrackId: string | null, renew: () => Promise<void>) {
+  const audio = findLiveTvTrack(tracks, 'audio', audioTrackId) ?? defaultAudioTrack(tracks);
+  const subtitle = findLiveTvTrack(tracks, 'subtitle', subtitleTrackId);
+  if (subtitle && !isBitmapSubtitle(subtitle.codec)) throw new Error(`Live TV subtitle codec ${subtitle.codec} cannot be rendered safely`);
+  const videoMapping = subtitle
+    ? ['-filter_complex', `[0:v:0][0:${subtitle.streamIndex}]overlay[vout]`, '-map', '[vout]']
+    : ['-map', '0:v:0?'];
   const args = ['-nostdin', '-hide_banner', '-loglevel', 'warning', '-fflags', '+genpts+discardcorrupt', '-rw_timeout', '15000000', '-i', sourceUrl,
-    '-map', '0:v:0?', '-map', '0:a:0?', ...(method === 'transcode'
+    ...videoMapping, '-map', audio ? `0:${audio.streamIndex}` : '0:a:0?', ...(method === 'transcode'
       ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '2']
       : ['-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-ac', '2']),
     '-f', 'hls', '-hls_time', '4', '-hls_list_size', String(liveTvPauseSegmentCount()), '-hls_flags', 'delete_segments+append_list+omit_endlist+independent_segments',
@@ -333,6 +349,13 @@ export function liveTvPauseSegmentCount(raw = process.env.BB_MEDIA_LIVE_TV_PAUSE
 async function probeVideoCodec(url: string) {
   const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1', url], { timeout: 15_000, maxBuffer: 1024 * 1024 });
   return stdout.trim().toLowerCase();
+}
+
+async function probeLiveTvTracks(url: string): Promise<LiveTvTrackCatalog> {
+  const { stdout } = await execFileAsync('ffprobe', [
+    '-v', 'error', '-show_entries', 'stream=index,codec_type,codec_name:stream_tags=language,title:stream_disposition=default,forced', '-of', 'json', url,
+  ], { timeout: 15_000, maxBuffer: 4 * 1024 * 1024 });
+  return parseLiveTvProbe(JSON.parse(stdout) as unknown);
 }
 
 export async function fetchLiveTvSourceText(url: string, limit: number, options: LiveTvSourceFetchOptions = {}) {

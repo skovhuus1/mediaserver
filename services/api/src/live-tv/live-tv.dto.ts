@@ -68,6 +68,12 @@ export class UpdateLiveTvChannelDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100_000) sortOrder?: number;
 }
 
+export class LiveTvTrackSelectionDto {
+  @IsString() @MaxLength(512) streamToken!: string;
+  @IsOptional() @IsString() @MaxLength(64) audioTrackId?: string | null;
+  @IsOptional() @IsString() @MaxLength(64) subtitleTrackId?: string | null;
+}
+
 export class BulkUpdateLiveTvChannelsDto {
   @IsArray()
   @ArrayMinSize(1)

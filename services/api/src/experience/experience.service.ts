@@ -56,12 +56,30 @@ export class ExperienceService {
 
   async search(actor: AuthenticatedUser, rawQuery: string) {
     const query = String(rawQuery ?? '').trim().slice(0, 80);
-    if (query.length < 2) return { query, total: 0, groups: { titles: [], people: [], genres: [] } };
+    if (query.length < 2) return { query, total: 0, groups: { titles: [], episodes: [], people: [], genres: [] } };
     const media = (await this.localCatalog(actor.accountId)).filter(playable);
     const titles = collapseTitles(media).flatMap((item) => {
       const score = scoreSearchMatch(query, [item.title, item.overview, ...item.genres]);
       return score > 0 ? [{ ...item, score, matchReason: titleMatchReason(query, item) }] : [];
     }).sort((left, right) => right.score - left.score || (right.rating ?? 0) - (left.rating ?? 0)).slice(0, 12);
+
+    const episodes = media.filter((item) => item.type === 'episode').flatMap((item) => {
+      const title = cleanLocalTitle(item.title);
+      const seriesTitle = item.seriesDisplayTitle ?? item.seriesTitle ?? 'Serie';
+      const genres = readLocalGenres(item.genres);
+      const score = scoreSearchMatch(query, [title, seriesTitle, item.overview, ...genres]);
+      return score > 0 ? [{
+        mediaId: item.id,
+        title,
+        seriesTitle,
+        seasonNumber: item.seasonNumber,
+        episodeNumber: item.episodeNumber,
+        releaseYear: item.releaseYear,
+        imagePath: item.episodeStillPath ?? item.backdropPath ?? item.posterPath,
+        matchReason: `${seriesTitle}${item.seasonNumber !== null && item.episodeNumber !== null ? ` · S${String(item.seasonNumber).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}` : ''}`,
+        score,
+      }] : [];
+    }).sort((left, right) => right.score - left.score || left.matchReason.localeCompare(right.matchReason, 'da')).slice(0, 12);
 
     const peopleByKey = new Map<string, { person: ReturnType<typeof readLocalCredits>[number]; titleKeys: Set<string> }>();
     const genresByKey = new Map<string, { name: string; titleKeys: Set<string>; imagePath: string | null }>();
@@ -89,7 +107,7 @@ export class ExperienceService {
       const score = scoreSearchMatch(query, [genre.name]);
       return score > 0 ? [{ key: `genre-${key}`, name: genre.name, titleCount: genre.titleKeys.size, imagePath: genre.imagePath, score }] : [];
     }).sort((left, right) => right.score - left.score || right.titleCount - left.titleCount || left.name.localeCompare(right.name, 'da')).slice(0, 8);
-    return { query, total: titles.length + people.length + genres.length, groups: { titles, people, genres } };
+    return { query, total: titles.length + episodes.length + people.length + genres.length, groups: { titles, episodes, people, genres } };
   }
 
   async title(actor: AuthenticatedUser, mediaId: string) {

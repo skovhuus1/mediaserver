@@ -33,6 +33,17 @@ native lint- og release-kæde kan køres reproducerbart lokalt og på GitHub Act
 
 ## Live TV fra M3U
 
+- Live TV-workerens `ffprobe`-katalog eksponerer stabile lyd- og undertekstspor. Webplayeren kan skifte native HLS-spor direkte eller rekonfigurere remux/transcoding på samme lease via `PATCH /api/v1/live-tv/playback/leases/:id/tracks`; undertekster er eksplicit slået fra som standard.
+- Server-renderede Live TV-undertekster understøtter bitmapspor som DVB, DVD og PGS. Ukendte eller tekstbaserede codecs afvises med en konkret fejl frem for at starte en lydløs eller forkert stream.
+
+### Søgning, anbefalinger og driftsovervågning
+
+- `/api/v1/experience/search` søger på titler, konkrete episoder, personer og genrer. Alle resultater er lokale, account-scopede og kræver en læsbar scannet mediefil.
+- Anbefalinger bruger historik, feedback, TMDB-similar-id'er, genrer og topcredits. Afsluttede titler forbliver udelukket efter et anbefalings-reset; reset fjerner kun ældre signalers indflydelse.
+- API'et sampler driftsdata hvert minut og bevarer `system_metric_samples` i 30 dage. `GET /api/v1/system/telemetry?range=24h` understøtter `1h`, `6h`, `24h`, `7d` og `30d`.
+- `GET /api/v1/system/alerts` viser deduplikerede alarmer for ressourcepres, buffering og jobfejl. Administratorer kan kvittere via `PATCH /api/v1/system/alerts/:id/acknowledge`.
+- `GET /api/v1/system/diagnostics/export` genererer en account-scopet JSON-pakke med aktuelle checks, 24 timers metrics og alarmer. Hemmeligheder, M3U-credentials og updater-tokens medtages ikke.
+
 BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde med krypterede M3U/XMLTV-kilder, kanalimport, dubletmatching, kildeprioritet, EPG, favoritter, atomisk forbindelsespulje, Direct Play, remux/transcoding, Chromecast-handoff og hurtigt kanalskift.
 
 - Webplayerens klargøringsscene viser kanalidentitet, reel streammetode og en indetermineret status uden opdigtede procenter. Den responsive blå statusflade understøtter reduceret bevægelse og kan altid lukkes, mens forbindelsen reserveres.
