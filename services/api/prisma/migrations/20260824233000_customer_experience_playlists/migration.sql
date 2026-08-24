@@ -26,7 +26,7 @@ WHERE duplicate."profile_id" = keeper."profile_id"
   AND (duplicate."created_at", duplicate."id") < (keeper."created_at", keeper."id");
 
 ALTER TABLE "watchlist_entries" ALTER COLUMN "target_key" SET NOT NULL;
-ALTER TABLE "watchlist_entries" DROP CONSTRAINT "watchlist_entries_profile_id_media_id_key";
+DROP INDEX IF EXISTS "watchlist_entries_profile_id_media_id_key";
 CREATE UNIQUE INDEX "watchlist_entries_profile_id_target_key_key"
   ON "watchlist_entries"("profile_id", "target_key");
 
