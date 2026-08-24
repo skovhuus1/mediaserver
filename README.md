@@ -35,6 +35,8 @@ native lint- og release-kæde kan køres reproducerbart lokalt og på GitHub Act
 
 BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde med krypterede M3U/XMLTV-kilder, kanalimport, dubletmatching, kildeprioritet, EPG, favoritter, atomisk forbindelsespulje, Direct Play, remux/transcoding, Chromecast-handoff og hurtigt kanalskift.
 
+- Webplayerens klargøringsscene viser kanalidentitet, reel streammetode og en indetermineret status uden opdigtede procenter. Den responsive blå statusflade understøtter reduceret bevægelse og kan altid lukkes, mens forbindelsen reserveres.
+
 - Opret og administrer udbydere, forbindelser, kanalrækkefølge og EPG under `Live TV` i administratorpanelet.
 - Hvis M3U-headeren annoncerer `url-tvg`, `x-tvg-url` eller `tvg-url`, opretter serveren automatisk XMLTV-kilden og sætter et EPG-job i kø. Kanaler vises stadig med M3U-navn, logo og gruppe som ikke-optagelig guidefallback, indtil rigtige XMLTV-programtider er importeret.
 - Kanalstyringen understøtter op til 50.000 kanaler, server-side pagination, debounced kanal- og gruppesøgning, Shift-markering af intervaller samt atomisk visning/skjul af markeringer, en hel gruppe eller hele kataloget. Kvalitets- og landesuffikser som `DR 1 FHD DK`, `DR 1 FH DK`, `DR 1 HD DK` og `DR 1 DK` samles automatisk under én stabil kanalidentitet. Et manuelt låst navn eller kanalnummer bevares ved senere importer. Skjulte kanaler fjernes server-side fra kundernes guide; aktive streams stoppes, og planlagte eller aktive optagelser annulleres atomisk.
