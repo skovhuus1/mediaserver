@@ -273,5 +273,10 @@ export class UpdateTimelineMarkersDto {
   @IsOptional()
   @ValidateNested()
   @Type(() => TimelineMarkerRangeDto)
+  recap?: TimelineMarkerRangeDto | null;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TimelineMarkerRangeDto)
   credits?: TimelineMarkerRangeDto | null;
 }

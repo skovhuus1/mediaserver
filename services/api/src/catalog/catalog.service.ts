@@ -628,7 +628,7 @@ export class CatalogService {
       select: { id: true, file: { select: { durationMs: true } } },
     });
     if (!media) throw new NotFoundException({ code: 'media_missing', message: 'Media does not exist in this account' });
-    const changes = [['intro', dto.intro], ['credits', dto.credits]] as const;
+    const changes = [['intro', dto.intro], ['recap', dto.recap], ['credits', dto.credits]] as const;
     for (const [kind, range] of changes) {
       if (range === undefined || range === null) continue;
       if (range.endMs <= range.startMs) {

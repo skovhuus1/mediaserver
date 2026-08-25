@@ -1,6 +1,7 @@
 import {
   buildTrickplayCues,
   analyzeRepeatedIntro,
+  analyzeRepeatedRecap,
   chapterTimelineMarkers,
   creditsMarkerFromBlackSegments,
   type FrameFingerprint,
@@ -21,7 +22,8 @@ const tileHeight = 180;
 const columns = 5;
 const rows = 5;
 const fingerprintIntervalSeconds = 5;
-const fingerprintOffsetSeconds = 15;
+const fingerprintOffsetSeconds = 0;
+const fingerprintVersion = 3;
 
 export async function generatePlaybackAssets(prisma: PrismaClient, job: PlaybackAssetJob): Promise<void> {
   const payload = jsonObject(job.payload);
@@ -93,8 +95,9 @@ export async function generatePlaybackAssets(prisma: PrismaClient, job: Playback
         manifest: {
           cues,
           analysis: {
-            fingerprintVersion: 2,
+            fingerprintVersion,
             preview: 'preview.jpg',
+            recap: markerResult.recapAnalysis,
             intro: markerResult.introAnalysis,
           },
         } as unknown as Prisma.InputJsonValue,
@@ -131,13 +134,13 @@ async function discoverMarkers(
   fingerprint: FrameFingerprint | null,
 ): Promise<{
   markers: TimelineMarker[];
-  introAnalysis: Omit<ReturnType<typeof analyzeRepeatedIntro>, 'marker'>;
+  recapAnalysis: MarkerAnalysis;
+  introAnalysis: MarkerAnalysis;
 }> {
   const markers = chapterTimelineMarkers(chapters, durationMs);
-  let introAnalysis: Omit<ReturnType<typeof analyzeRepeatedIntro>, 'marker'> = markers.some((marker) => marker.kind === 'intro')
-    ? { state: 'detected', reason: 'chapter_marker', referenceCount: 0, supportCount: 0, usableFrameRatio: 1, confidence: 1 }
-    : { state: 'not-detected', reason: 'no_repeated_sequence', referenceCount: 0, supportCount: 0, usableFrameRatio: 0, confidence: null };
-  if (!markers.some((marker) => marker.kind === 'intro') && media.type === 'episode' && fingerprint) {
+  let recapAnalysis = chapterOrEmptyAnalysis('recap', markers);
+  let introAnalysis = chapterOrEmptyAnalysis('intro', markers);
+  if (media.type === 'episode' && fingerprint && (!markers.some((marker) => marker.kind === 'recap') || !markers.some((marker) => marker.kind === 'intro'))) {
     const siblings = await prisma.mediaItem.findMany({
       where: {
         accountId: media.accountId,
@@ -160,37 +163,81 @@ async function discoverMarkers(
       const parsed = playbackFingerprint(asset.fingerprint);
       return parsed ? [{ mediaId: asset.mediaId, fingerprint: parsed }] : [];
     });
-    const detection = analyzeRepeatedIntro(fingerprint, siblingFingerprints.map((asset) => asset.fingerprint));
-    const { marker: ignoredMarker, ...diagnostics } = detection;
-    void ignoredMarker;
-    introAnalysis = diagnostics;
-    if (detection.marker) markers.push(detection.marker);
-    else {
-      await prisma.mediaTimelineMarker.deleteMany({
-        where: { accountId: media.accountId, mediaId: media.id, kind: 'intro', source: 'automatic' },
-      });
+
+    if (!markers.some((marker) => marker.kind === 'recap')) {
+      const detection = analyzeRepeatedRecap(fingerprint, siblingFingerprints.map((asset) => asset.fingerprint));
+      recapAnalysis = withoutMarker(detection);
+      if (detection.marker) markers.push(detection.marker);
+      await syncAutomaticMarker(prisma, media.accountId, media.id, 'recap', detection);
     }
+    if (!markers.some((marker) => marker.kind === 'intro')) {
+      const recapEndSeconds = Math.ceil((markers.find((marker) => marker.kind === 'recap')?.endMs ?? 0) / 1_000);
+      const detection = analyzeRepeatedIntro(fingerprint, siblingFingerprints.map((asset) => asset.fingerprint), {
+        minimumStartSeconds: Math.max(45, recapEndSeconds),
+        maximumStartSeconds: 10 * 60,
+        maximumEndSeconds: 15 * 60,
+      });
+      introAnalysis = withoutMarker(detection);
+      if (detection.marker) markers.push(detection.marker);
+      await syncAutomaticMarker(prisma, media.accountId, media.id, 'intro', detection);
+    }
+
     for (const sibling of siblingFingerprints) {
-      const siblingDetection = analyzeRepeatedIntro(sibling.fingerprint, [
+      const references = [
         fingerprint,
         ...siblingFingerprints.filter((entry) => entry.mediaId !== sibling.mediaId).map((entry) => entry.fingerprint),
-      ]);
-      if (siblingDetection.marker) {
-        await storeAutomaticMarker(prisma, media.accountId, sibling.mediaId, siblingDetection.marker);
-      } else {
-        await prisma.mediaTimelineMarker.deleteMany({
-          where: { accountId: media.accountId, mediaId: sibling.mediaId, kind: 'intro', source: 'automatic' },
-        });
-      }
-      await mergeIntroAnalysis(prisma, sibling.mediaId, siblingDetection);
+      ];
+      const siblingRecapDetection = analyzeRepeatedRecap(sibling.fingerprint, references);
+      await syncAutomaticMarker(prisma, media.accountId, sibling.mediaId, 'recap', siblingRecapDetection);
+      const siblingIntroDetection = analyzeRepeatedIntro(sibling.fingerprint, references, {
+        minimumStartSeconds: Math.max(45, Math.ceil((siblingRecapDetection.marker?.endMs ?? 0) / 1_000)),
+        maximumStartSeconds: 10 * 60,
+        maximumEndSeconds: 15 * 60,
+      });
+      await syncAutomaticMarker(prisma, media.accountId, sibling.mediaId, 'intro', siblingIntroDetection);
+      await mergeMarkerAnalysis(prisma, sibling.mediaId, { recap: siblingRecapDetection, intro: siblingIntroDetection });
     }
   }
   if (!markers.some((marker) => marker.kind === 'credits')) {
     const blackSegments = await detectLateBlackSegments(sourcePath, durationMs).catch(() => []);
     const credits = creditsMarkerFromBlackSegments(blackSegments, durationMs);
     if (credits) markers.push(credits);
+    else {
+      await prisma.mediaTimelineMarker.deleteMany({
+        where: { accountId: media.accountId, mediaId: media.id, kind: 'credits', source: 'automatic' },
+      });
+    }
   }
-  return { markers, introAnalysis };
+  return { markers, recapAnalysis, introAnalysis };
+}
+
+type MarkerDetection = ReturnType<typeof analyzeRepeatedIntro>;
+type MarkerAnalysis = Omit<MarkerDetection, 'marker'>;
+
+function chapterOrEmptyAnalysis(kind: 'intro' | 'recap', markers: readonly TimelineMarker[]): MarkerAnalysis {
+  return markers.some((marker) => marker.kind === kind)
+    ? { state: 'detected', reason: 'chapter_marker', referenceCount: 0, supportCount: 0, usableFrameRatio: 1, confidence: 1 }
+    : { state: 'not-detected', reason: 'no_repeated_sequence', referenceCount: 0, supportCount: 0, usableFrameRatio: 0, confidence: null };
+}
+
+function withoutMarker(detection: MarkerDetection): MarkerAnalysis {
+  const { marker: _marker, ...analysis } = detection;
+  return analysis;
+}
+
+async function syncAutomaticMarker(
+  prisma: PrismaClient,
+  accountId: string,
+  mediaId: string,
+  kind: 'intro' | 'recap',
+  detection: MarkerDetection,
+): Promise<void> {
+  if (detection.marker) await storeAutomaticMarker(prisma, accountId, mediaId, detection.marker);
+  else {
+    await prisma.mediaTimelineMarker.deleteMany({
+      where: { accountId, mediaId, kind, source: 'automatic' },
+    });
+  }
 }
 
 async function storeAutomaticMarker(
@@ -242,7 +289,7 @@ async function createFingerprint(sourcePath: string, durationMs: number): Promis
     hashes.push(hashFrame(frame));
     quality.push(fingerprintFrameQuality(frame));
   }
-  return { version: 2, intervalSeconds: fingerprintIntervalSeconds, offsetSeconds: fingerprintOffsetSeconds, hashes, quality };
+  return { version: fingerprintVersion, intervalSeconds: fingerprintIntervalSeconds, offsetSeconds: fingerprintOffsetSeconds, hashes, quality };
 }
 
 export function fingerprintFrameQuality(frame: Buffer): number {
@@ -296,7 +343,7 @@ function playbackFingerprint(value: Prisma.JsonValue): FrameFingerprint | null {
     : undefined;
   return Number.isFinite(intervalSeconds) && Number.isFinite(offsetSeconds)
     ? {
-        version: parsed.version === 2 ? 2 : 1,
+        version: parsed.version === 3 ? 3 : parsed.version === 2 ? 2 : 1,
         intervalSeconds,
         offsetSeconds,
         hashes: parsed.hashes as string[],
@@ -305,22 +352,25 @@ function playbackFingerprint(value: Prisma.JsonValue): FrameFingerprint | null {
     : null;
 }
 
-async function mergeIntroAnalysis(
+async function mergeMarkerAnalysis(
   prisma: PrismaClient,
   mediaId: string,
-  detection: ReturnType<typeof analyzeRepeatedIntro>,
+  detections: Partial<Record<'intro' | 'recap', MarkerDetection>>,
 ) {
   const asset = await prisma.mediaPlaybackAsset.findUnique({ where: { mediaId }, select: { manifest: true } });
   if (!asset) return;
   const manifest = jsonObject(asset.manifest);
   const existingAnalysis = jsonObject(manifest.analysis);
-  const { marker: _, ...intro } = detection;
+  const nextAnalysis: Record<string, unknown> = { ...existingAnalysis, fingerprintVersion };
+  for (const [kind, detection] of Object.entries(detections) as Array<['intro' | 'recap', MarkerDetection | undefined]>) {
+    if (detection) nextAnalysis[kind] = withoutMarker(detection);
+  }
   await prisma.mediaPlaybackAsset.update({
     where: { mediaId },
     data: {
       manifest: {
         ...manifest,
-        analysis: { ...existingAnalysis, fingerprintVersion: 2, intro },
+        analysis: nextAnalysis,
       } as Prisma.InputJsonValue,
     },
   });

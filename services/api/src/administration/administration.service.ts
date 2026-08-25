@@ -20,7 +20,7 @@ import {
   PlaybackAnalysisQueryDto,
   UpdatePlaybackMarkersDto,
 } from './administration.dto';
-import { playbackIntroAnalysis, playbackJobMediaId, validateManualPlaybackMarkers } from './playback-analysis';
+import { playbackIntroAnalysis, playbackJobMediaId, playbackMarkerAnalysis, validateManualPlaybackMarkers } from './playback-analysis';
 
 @Injectable()
 export class AdministrationService {
@@ -694,6 +694,7 @@ export class AdministrationService {
         error: item.playbackAsset.error,
       } : null,
       introAnalysis: playbackIntroAnalysis(item.playbackAsset?.manifest),
+      markerAnalysis: playbackMarkerAnalysis(item.playbackAsset?.manifest),
       markers: item.timelineMarkers,
       updatedAt: item.playbackAsset?.updatedAt ?? item.updatedAt,
     }));
@@ -752,6 +753,7 @@ export class AdministrationService {
       } : null,
       markers: media.timelineMarkers,
       introAnalysis: playbackIntroAnalysis(media.playbackAsset?.manifest),
+      markerAnalysis: playbackMarkerAnalysis(media.playbackAsset?.manifest),
       latestJob,
       previewDataUrl: await this.playbackPreview(media.playbackAsset?.spriteDirectory ?? null),
     };

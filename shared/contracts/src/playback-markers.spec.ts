@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildTrickplayCues,
   analyzeRepeatedIntro,
+  analyzeRepeatedRecap,
+  buildTrickplayCues,
   chapterTimelineMarkers,
   creditsMarkerFromBlackSegments,
   detectRepeatedIntro,
+  detectRepeatedRecap,
   type FrameFingerprint,
 } from './playback-markers.js';
 
@@ -18,9 +20,11 @@ describe('playback markers and trickplay', () => {
 
   it('uses explicit chapter names as high-confidence markers', () => {
     expect(chapterTimelineMarkers([
+      { title: 'Previously On', startMs: 0, endMs: 28_000 },
       { title: 'Opening Credits', startMs: 30_000, endMs: 92_000 },
       { title: 'End Credits', startMs: 3_200_000, endMs: 3_400_000 },
     ], 3_400_000)).toEqual([
+      expect.objectContaining({ kind: 'recap', source: 'chapter', confidence: 1 }),
       expect.objectContaining({ kind: 'intro', source: 'chapter', confidence: 1 }),
       expect.objectContaining({ kind: 'credits', startMs: 3_200_000, endMs: 3_400_000 }),
     ]);
@@ -34,6 +38,18 @@ describe('playback markers and trickplay', () => {
       kind: 'intro',
       startMs: 25_000,
       endMs: 175_000,
+      source: 'automatic',
+    });
+  });
+
+  it('detects a repeated recap in the early episode window separately from intro', () => {
+    const hashes = Array.from({ length: 12 }, (_, index) => (0x5000n + BigInt(index * 23)).toString(16).padStart(16, '0'));
+    const primary: FrameFingerprint = { version: 3, intervalSeconds: 5, offsetSeconds: 0, hashes: [...hashes, 'ffffffffffffffff'], quality: Array(13).fill(0.8) };
+    const candidate: FrameFingerprint = { version: 3, intervalSeconds: 5, offsetSeconds: 0, hashes: [...hashes, '0000000000000000'], quality: Array(13).fill(0.8) };
+    expect(detectRepeatedRecap(primary, [candidate])).toMatchObject({
+      kind: 'recap',
+      startMs: 0,
+      endMs: 60_000,
       source: 'automatic',
     });
   });
@@ -55,6 +71,10 @@ describe('playback markers and trickplay', () => {
       referenceCount: 2,
       supportCount: 2,
       marker: { kind: 'intro', source: 'automatic' },
+    });
+    expect(analyzeRepeatedRecap(primary, [first, second], { minimumSeconds: 30 })).toMatchObject({
+      state: 'detected',
+      marker: { kind: 'recap', source: 'automatic' },
     });
   });
 

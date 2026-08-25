@@ -353,9 +353,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                   icon: const Icon(Icons.skip_next),
                   label: Text(
-                    state.activeMarker!.kind == 'intro'
-                        ? 'Spring intro over'
-                        : 'Spring videre',
+                    switch (state.activeMarker!.kind) {
+                      'intro' => 'Spring intro over',
+                      'recap' => 'Spring resumé over',
+                      'credits' => 'Spring rulletekster over',
+                      _ => 'Spring videre',
+                    },
                   ),
                 ),
               ),

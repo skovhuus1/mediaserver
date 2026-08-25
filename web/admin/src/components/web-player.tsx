@@ -1682,7 +1682,7 @@ export function WebPlayer() {
             {activeTimelineMarker.kind === 'intro'
               ? 'Spring intro over'
               : activeTimelineMarker.kind === 'recap'
-                ? 'Spring recap over'
+                ? 'Spring resumé over'
                 : 'Spring rulletekster over'}
           </button>
           {activeTimelineMarker.kind === 'credits' && media.type === 'episode' && nextEpisodeCountdown !== null && (

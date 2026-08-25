@@ -1,4 +1,4 @@
-export type TimelineMarkerKind = 'intro' | 'credits';
+export type TimelineMarkerKind = 'intro' | 'recap' | 'credits';
 
 export type TimelineMarker = {
   kind: TimelineMarkerKind;
@@ -17,29 +17,34 @@ export type TrickplayCue = {
 };
 
 export type FrameFingerprint = {
-  version?: 1 | 2;
+  version?: 1 | 2 | 3;
   intervalSeconds: number;
   offsetSeconds: number;
   hashes: string[];
   quality?: number[];
 };
 
-export type IntroDetectionReason =
+export type MarkerDetectionKind = Extract<TimelineMarkerKind, 'intro' | 'recap'>;
+
+export type MarkerDetectionReason =
   | 'detected'
   | 'chapter_marker'
   | 'insufficient_references'
   | 'low_information'
   | 'no_repeated_sequence';
 
-export type IntroDetectionDiagnostics = {
+export type MarkerDetectionDiagnostics = {
   state: 'detected' | 'pending' | 'not-detected';
-  reason: IntroDetectionReason;
+  reason: MarkerDetectionReason;
   referenceCount: number;
   supportCount: number;
   usableFrameRatio: number;
   confidence: number | null;
   marker: TimelineMarker | null;
 };
+
+export type IntroDetectionReason = MarkerDetectionReason;
+export type IntroDetectionDiagnostics = MarkerDetectionDiagnostics;
 
 export type MediaChapter = {
   title: string;
@@ -72,12 +77,7 @@ export function chapterTimelineMarkers(chapters: readonly MediaChapter[], durati
   const result: TimelineMarker[] = [];
   const normalizedDuration = Math.max(0, durationMs);
   for (const chapter of chapters) {
-    const title = chapter.title.trim().toLocaleLowerCase('en-US');
-    const kind: TimelineMarkerKind | null = /\b(intro|opening|title sequence|recap)\b/.test(title)
-      ? 'intro'
-      : /\b(credit|credits|end titles|closing)\b/.test(title)
-        ? 'credits'
-        : null;
+    const kind = chapterMarkerKind(chapter.title);
     if (!kind || result.some((marker) => marker.kind === kind)) continue;
     const startMs = Math.max(0, Math.round(chapter.startMs));
     const endMs = Math.min(normalizedDuration || chapter.endMs, Math.max(startMs + 1_000, Math.round(chapter.endMs)));
@@ -90,7 +90,7 @@ export function chapterTimelineMarkers(chapters: readonly MediaChapter[], durati
 export function detectRepeatedIntro(
   primary: FrameFingerprint,
   candidates: readonly FrameFingerprint[],
-  options: { minimumSeconds?: number; maximumStartSeconds?: number; maximumHashDistance?: number } = {},
+  options: RepeatedSegmentOptions = {},
 ): TimelineMarker | null {
   return analyzeRepeatedIntro(primary, candidates, { ...options, minimumReferences: 1 }).marker;
 }
@@ -98,22 +98,60 @@ export function detectRepeatedIntro(
 export function analyzeRepeatedIntro(
   primary: FrameFingerprint,
   candidates: readonly FrameFingerprint[],
-  options: {
-    minimumSeconds?: number;
-    maximumStartSeconds?: number;
-    maximumHashDistance?: number;
-    minimumReferences?: number;
-    minimumFrameQuality?: number;
-  } = {},
-): IntroDetectionDiagnostics {
+  options: RepeatedSegmentOptions = {},
+): MarkerDetectionDiagnostics {
+  return analyzeRepeatedSegment('intro', primary, candidates, options);
+}
+
+export function detectRepeatedRecap(
+  primary: FrameFingerprint,
+  candidates: readonly FrameFingerprint[],
+  options: RepeatedSegmentOptions = {},
+): TimelineMarker | null {
+  return analyzeRepeatedRecap(primary, candidates, { ...options, minimumReferences: 1 }).marker;
+}
+
+export function analyzeRepeatedRecap(
+  primary: FrameFingerprint,
+  candidates: readonly FrameFingerprint[],
+  options: RepeatedSegmentOptions = {},
+): MarkerDetectionDiagnostics {
+  return analyzeRepeatedSegment('recap', primary, candidates, {
+    minimumSeconds: 20,
+    maximumStartSeconds: 4 * 60,
+    maximumEndSeconds: 4 * 60,
+    ...options,
+  });
+}
+
+export type RepeatedSegmentOptions = {
+  minimumSeconds?: number;
+  minimumStartSeconds?: number;
+  maximumStartSeconds?: number;
+  maximumEndSeconds?: number;
+  maximumHashDistance?: number;
+  minimumReferences?: number;
+  minimumFrameQuality?: number;
+};
+
+function analyzeRepeatedSegment(
+  kind: MarkerDetectionKind,
+  primary: FrameFingerprint,
+  candidates: readonly FrameFingerprint[],
+  options: RepeatedSegmentOptions,
+): MarkerDetectionDiagnostics {
   const minimumSeconds = options.minimumSeconds ?? 30;
+  const minimumStartSeconds = options.minimumStartSeconds ?? 0;
   const maximumStartSeconds = options.maximumStartSeconds ?? 12 * 60;
+  const maximumEndSeconds = options.maximumEndSeconds ?? Number.POSITIVE_INFINITY;
   const maximumHashDistance = options.maximumHashDistance ?? 12;
   const minimumReferences = Math.max(1, options.minimumReferences ?? 2);
   const minimumFrameQuality = options.minimumFrameQuality ?? 0.16;
   const minimumFrames = Math.max(2, Math.ceil(minimumSeconds / primary.intervalSeconds));
   const compatible = candidates.filter((candidate) => (
-    candidate.intervalSeconds === primary.intervalSeconds
+    (candidate.version ?? 1) === (primary.version ?? 1)
+    && candidate.intervalSeconds === primary.intervalSeconds
+    && candidate.offsetSeconds === primary.offsetSeconds
     && candidate.hashes.length >= minimumFrames
   ));
   const usableFrames = primary.hashes.filter((_, index) => frameIsUsable(primary, index, minimumFrameQuality)).length;
@@ -131,11 +169,13 @@ export function analyzeRepeatedIntro(
     for (let left = 0; left < primary.hashes.length; left += 1) {
       const absoluteStart = primary.offsetSeconds + left * primary.intervalSeconds;
       if (absoluteStart > maximumStartSeconds) break;
+      if (absoluteStart < minimumStartSeconds) continue;
       for (let right = 0; right < candidate.hashes.length; right += 1) {
         let length = 0;
         while (
           left + length < primary.hashes.length
           && right + length < candidate.hashes.length
+          && primary.offsetSeconds + (left + length) * primary.intervalSeconds <= maximumEndSeconds
           && frameIsUsable(primary, left + length, minimumFrameQuality)
           && frameIsUsable(candidate, right + length, minimumFrameQuality)
           && hammingDistance(primary.hashes[left + length]!, candidate.hashes[right + length]!) <= maximumHashDistance
@@ -173,7 +213,7 @@ export function analyzeRepeatedIntro(
   const durationScore = Math.min(0.1, (endMs - startMs) / 900_000);
   const confidence = Math.min(0.98, 0.66 + supportRatio * 0.16 + durationScore + Math.min(0.06, usableFrameRatio * 0.06));
   const marker: TimelineMarker = {
-    kind: 'intro',
+    kind,
     startMs,
     endMs,
     source: 'automatic',
@@ -199,6 +239,62 @@ export function creditsMarkerFromBlackSegments(
     source: 'automatic',
     confidence: 0.58,
   };
+}
+
+const recapChapterPhrases = [
+  'recap',
+  'previously',
+  'previously on',
+  'previous episode',
+  'last episode',
+  'last time',
+  'resume',
+  'recapitulation',
+  'tidligere',
+  'sidst',
+  'sidste gang',
+  'forrige afsnit',
+];
+
+const introChapterPhrases = [
+  'intro',
+  'opening',
+  'opening credits',
+  'title sequence',
+  'main titles',
+  'theme song',
+  'opener',
+  'abning',
+  'titel sekvens',
+  'titelsekvens',
+];
+
+const creditsChapterPhrases = [
+  'credit',
+  'credits',
+  'end credits',
+  'end titles',
+  'closing',
+  'closing credits',
+  'rulletekst',
+  'rulletekster',
+  'sluttekster',
+];
+
+function chapterMarkerKind(value: string): TimelineMarkerKind | null {
+  const title = value.trim().toLocaleLowerCase('en-US').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!title) return null;
+  if (hasChapterPhrase(title, recapChapterPhrases)) return 'recap';
+  if (hasChapterPhrase(title, introChapterPhrases)) return 'intro';
+  if (hasChapterPhrase(title, creditsChapterPhrases)) return 'credits';
+  return null;
+}
+
+function hasChapterPhrase(title: string, phrases: readonly string[]) {
+  return phrases.some((phrase) => {
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`).test(title);
+  });
 }
 
 function hammingDistance(left: string, right: string): number {
@@ -228,13 +324,13 @@ function median(values: number[]) {
 }
 
 function diagnostics(
-  state: IntroDetectionDiagnostics['state'],
-  reason: IntroDetectionReason,
+  state: MarkerDetectionDiagnostics['state'],
+  reason: MarkerDetectionReason,
   referenceCount: number,
   supportCount: number,
   usableFrameRatio: number,
   confidence: number | null,
   marker: TimelineMarker | null,
-): IntroDetectionDiagnostics {
+): MarkerDetectionDiagnostics {
   return { state, reason, referenceCount, supportCount, usableFrameRatio, confidence, marker };
 }

@@ -42,13 +42,29 @@ export type PlaybackIntroAnalysis = {
   confidence: number | null;
 };
 
+export type PlaybackMarkerAnalysis = {
+  intro: PlaybackIntroAnalysis | null;
+  recap: PlaybackIntroAnalysis | null;
+};
+
+export function playbackMarkerAnalysis(manifest: unknown): PlaybackMarkerAnalysis {
+  return {
+    intro: playbackAnalysisForKind(manifest, 'intro'),
+    recap: playbackAnalysisForKind(manifest, 'recap'),
+  };
+}
+
 export function playbackIntroAnalysis(manifest: unknown): PlaybackIntroAnalysis | null {
+  return playbackAnalysisForKind(manifest, 'intro');
+}
+
+function playbackAnalysisForKind(manifest: unknown, kind: 'intro' | 'recap'): PlaybackIntroAnalysis | null {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return null;
   const analysis = (manifest as Record<string, unknown>).analysis;
   if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)) return null;
-  const intro = (analysis as Record<string, unknown>).intro;
-  if (!intro || typeof intro !== 'object' || Array.isArray(intro)) return null;
-  const value = intro as Record<string, unknown>;
+  const markerAnalysis = (analysis as Record<string, unknown>)[kind];
+  if (!markerAnalysis || typeof markerAnalysis !== 'object' || Array.isArray(markerAnalysis)) return null;
+  const value = markerAnalysis as Record<string, unknown>;
   const states = ['detected', 'pending', 'not-detected'];
   const reasons = ['detected', 'chapter_marker', 'insufficient_references', 'low_information', 'no_repeated_sequence'];
   if (!states.includes(String(value.state)) || !reasons.includes(String(value.reason))) return null;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { playbackIntroAnalysis, playbackJobMediaId, validateManualPlaybackMarkers } from './playback-analysis';
+import { playbackIntroAnalysis, playbackJobMediaId, playbackMarkerAnalysis, validateManualPlaybackMarkers } from './playback-analysis';
 
 describe('playback analysis policy', () => {
   it('accepts ordered manual markers inside the media duration', () => {
@@ -47,5 +47,43 @@ describe('playback analysis policy', () => {
       confidence: null,
     });
     expect(playbackIntroAnalysis({ analysis: { intro: { state: 'ready', reason: 'guessed' } } })).toBeNull();
+  });
+
+  it('exposes recap and intro diagnostics separately from manifests', () => {
+    expect(playbackMarkerAnalysis({ analysis: {
+      recap: {
+        state: 'detected',
+        reason: 'chapter_marker',
+        referenceCount: 0,
+        supportCount: 0,
+        usableFrameRatio: 1,
+        confidence: 1,
+      },
+      intro: {
+        state: 'not-detected',
+        reason: 'no_repeated_sequence',
+        referenceCount: 2,
+        supportCount: 0,
+        usableFrameRatio: 0.68,
+        confidence: null,
+      },
+    } })).toEqual({
+      recap: {
+        state: 'detected',
+        reason: 'chapter_marker',
+        referenceCount: 0,
+        supportCount: 0,
+        usableFrameRatio: 1,
+        confidence: 1,
+      },
+      intro: {
+        state: 'not-detected',
+        reason: 'no_repeated_sequence',
+        referenceCount: 2,
+        supportCount: 0,
+        usableFrameRatio: 0.68,
+        confidence: null,
+      },
+    });
   });
 });

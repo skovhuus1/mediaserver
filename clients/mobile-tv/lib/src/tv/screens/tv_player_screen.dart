@@ -140,6 +140,7 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
   final FocusNode _nextNode = FocusNode(debugLabel: 'tv-player-next-episode');
   Timer? _hideTimer;
   Timer? _seekFeedbackTimer;
+  Timer? _awakeTimer;
   _TvSeekFeedbackData? _seekFeedback;
   bool _controlsVisible = true;
   bool _closing = false;
@@ -155,6 +156,10 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
     WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(_changed);
     _setPlaybackAwake(true);
+    _awakeTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _reassertPlaybackAwake(),
+    );
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _requestControlFocus();
@@ -652,6 +657,7 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
     widget.controller.removeListener(_changed);
     _hideTimer?.cancel();
     _seekFeedbackTimer?.cancel();
+    _awakeTimer?.cancel();
     _rootFocus.dispose();
     for (final node in [
       ..._primaryNodes,

@@ -29,6 +29,8 @@ void main() {
       'lib/src/tv/screens/tv_player_screen.dart',
     ).readAsStringSync();
     expect(source, contains('Duration(seconds: 5)'));
+    expect(source, contains('Timer? _awakeTimer'));
+    expect(source, contains('_reassertPlaybackAwake()'));
     expect(source, contains('Duration(seconds: -10)'));
     expect(source, contains('widget.live ? 10 : 30'));
   });
@@ -65,6 +67,24 @@ void main() {
     expect(source, isNot(contains('_isTailStalled(controller)')));
     expect(source, contains('remainingStreamMs <= 2500'));
     expect(source, contains('remainingKnownMs <= 2500'));
+    expect(source, contains('_canStartNextCountdown(marker, absolute)'));
+    expect(source, contains('markerRemainingMs <= 75_000'));
+    expect(source, contains('_isPrematurePlaybackEnd(controller)'));
+    expect(source, contains('_recoverPrematurePlaybackEnd()'));
+    expect(source, contains('Streamen stoppede for tidligt'));
+    expect(source, contains('knownDurationMs - _absolutePositionMs > 15_000'));
+    expect(source, contains('_prematureEndRecovering'));
+  });
+
+  test('TV playback keep-awake is owned by the playback controller', () {
+    final source = File(
+      'lib/src/shared_core/playback/playback_session_controller.dart',
+    ).readAsStringSync();
+    expect(source, contains('Timer? _keepAwakeTimer'));
+    expect(source, contains('const Duration(seconds: 15)'));
+    expect(source, contains('_reassertKeepScreenOn(force: true)'));
+    expect(source, contains('AppLifecycleState.resumed'));
+    expect(source, contains('setKeepScreenOn(true)'));
   });
 
   test('TV next episode handoff does not wait on old session finish', () {

@@ -335,10 +335,12 @@ class PlaybackSessionController extends ChangeNotifier
   List<VideoTrack> _videoTracks = const [];
   TvQualityPolicy? _tvQualityPolicy;
   DateTime? _lastQualityCapAt;
+  DateTime? _lastKeepAwakeAt;
   double? _estimatedDownlinkMbps;
   Timer? _heartbeatTimer;
   Timer? _progressTimer;
   Timer? _uiTimer;
+  Timer? _keepAwakeTimer;
   Timer? _nextTimer;
   Future<void>? _initialization;
   Future<void>? _finishOperation;
@@ -350,8 +352,10 @@ class PlaybackSessionController extends ChangeNotifier
   bool _disposed = false;
   bool _completed = false;
   bool _nextLoading = false;
+  bool _prematureEndRecovering = false;
   bool _qualityChanging = false;
   bool _audioChanging = false;
+  int _prematureEndRetryCount = 0;
   int? _sessionFixedHeight;
   String? _sessionQualityMode;
   bool? _sessionAllowUpscale;
@@ -556,6 +560,7 @@ class PlaybackSessionController extends ChangeNotifier
     await _configureQuality(controller, authorization);
     controller.addListener(_onVideoChanged);
     await controller.play();
+    _reassertKeepScreenOn(force: true);
     _authorization = authorization;
     final buffered = math.max(
       0,
@@ -597,6 +602,10 @@ class PlaybackSessionController extends ChangeNotifier
     if (controller == null || _disposed) return;
     if (controller.value.isBuffering && !_lastBuffering) _stallCount += 1;
     _lastBuffering = controller.value.isBuffering;
+    if (_isPrematurePlaybackEnd(controller)) {
+      unawaited(_recoverPrematurePlaybackEnd());
+      return;
+    }
     if (_isTerminalPlayback(controller)) _completePlayback();
   }
 
@@ -614,16 +623,23 @@ class PlaybackSessionController extends ChangeNotifier
       const Duration(milliseconds: 250),
       (_) => _tick(),
     );
+    _keepAwakeTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _reassertKeepScreenOn(force: true),
+    );
+    _reassertKeepScreenOn(force: true);
   }
 
   void _stopTimers() {
     _heartbeatTimer?.cancel();
     _progressTimer?.cancel();
     _uiTimer?.cancel();
+    _keepAwakeTimer?.cancel();
     _nextTimer?.cancel();
     _heartbeatTimer = null;
     _progressTimer = null;
     _uiTimer = null;
+    _keepAwakeTimer = null;
     _nextTimer = null;
   }
 
@@ -651,16 +667,22 @@ class PlaybackSessionController extends ChangeNotifier
           (value) => absolute >= value.startMs - 750 && absolute < value.endMs,
         )
         .firstOrNull;
-    if (marker?.kind == 'credits' &&
+    if (marker != null &&
+        _canStartNextCountdown(marker, absolute) &&
         media.isEpisode &&
         auth.preferences.autoplayNext &&
         _state.nextEpisodeCountdown == null) {
       _startNextCountdown();
     }
+    if (_isPrematurePlaybackEnd(controller)) {
+      unawaited(_recoverPrematurePlaybackEnd());
+      return;
+    }
     if (_isTerminalPlayback(controller)) {
       _completePlayback();
       return;
     }
+    _reassertKeepScreenOn();
     if (AppConfig.isTvBuild && currentQualityMode == 'auto') {
       unawaited(_applyAutomaticQualityCap(controller, auth));
     }
@@ -762,10 +784,13 @@ class PlaybackSessionController extends ChangeNotifier
   }
 
   bool _isTerminalPlayback(VideoPlayerController controller) {
-    if (_completed || _nextLoading || !controller.value.isInitialized) {
+    if (_completed ||
+        _nextLoading ||
+        _prematureEndRecovering ||
+        !controller.value.isInitialized) {
       return false;
     }
-    if (controller.value.isCompleted) return true;
+    if (controller.value.isCompleted) return !_isPrematurePlaybackEnd(controller);
     final streamDuration = controller.value.duration;
     final streamPosition = controller.value.position;
     if (streamDuration <= Duration.zero) return false;
@@ -781,6 +806,79 @@ class PlaybackSessionController extends ChangeNotifier
       return nearStreamEnd || nearKnownEnd;
     }
     return false;
+  }
+
+  bool _isPrematurePlaybackEnd(VideoPlayerController controller) {
+    if (_completed ||
+        _nextLoading ||
+        _prematureEndRecovering ||
+        !controller.value.isInitialized ||
+        !controller.value.isCompleted) {
+      return false;
+    }
+    final knownDurationMs = _durationMs;
+    if (knownDurationMs <= 0) return false;
+    return knownDurationMs - _absolutePositionMs > 15_000;
+  }
+
+  Future<void> _recoverPrematurePlaybackEnd() async {
+    if (_prematureEndRecovering || _disposed || _released) return;
+    if (_prematureEndRetryCount >= 2) {
+      _setState(
+        _state.copyWith(
+          error:
+              'Streamen stoppede før afsnittet var færdigt. Prøv igen for at genoptage samme afsnit.',
+          loading: false,
+          buffering: false,
+          playing: false,
+          nextEpisodeCountdown: null,
+        ),
+      );
+      return;
+    }
+    _prematureEndRecovering = true;
+    _prematureEndRetryCount += 1;
+    _nextTimer?.cancel();
+    _setState(
+      _state.copyWith(
+        status: 'Streamen stoppede for tidligt - genoptager...',
+        loading: false,
+        buffering: true,
+        playing: false,
+        nextEpisodeCountdown: null,
+      ),
+    );
+    try {
+      await retry();
+    } finally {
+      _prematureEndRecovering = false;
+    }
+  }
+
+  bool _canStartNextCountdown(PlaybackMarker marker, int absoluteMs) {
+    if (marker.kind != 'credits') return false;
+    final durationMs = _durationMs;
+    if (durationMs <= 0) return false;
+    final remainingMs = durationMs - absoluteMs;
+    final markerRemainingMs = durationMs - marker.startMs;
+    return remainingMs <= 75_000 && markerRemainingMs <= 75_000;
+  }
+
+  void _reassertKeepScreenOn({bool force = false}) {
+    if (!AppConfig.isTvBuild || _disposed || _released) return;
+    final controller = _video;
+    if (controller == null || !controller.value.isInitialized) return;
+    final now = DateTime.now();
+    final previous = _lastKeepAwakeAt;
+    if (!force &&
+        previous != null &&
+        now.difference(previous) < const Duration(seconds: 10)) {
+      return;
+    }
+    if (controller.value.isPlaying || controller.value.isBuffering) {
+      _lastKeepAwakeAt = now;
+      unawaited(_platform.setKeepScreenOn(true));
+    }
   }
 
   void _completePlayback() {
@@ -1603,6 +1701,9 @@ class PlaybackSessionController extends ChangeNotifier
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _reassertKeepScreenOn(force: true);
+    }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       unawaited(saveProgress());

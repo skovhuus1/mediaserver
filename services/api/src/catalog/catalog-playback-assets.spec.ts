@@ -12,12 +12,18 @@ describe('catalog playback assets', () => {
         frameCount: 12, sheetCount: 1, durationMs: 120_000,
         manifest: { cues: [{ startMs: 0, endMs: 10_000, sheet: 0, column: 0, row: 0 }] },
       }) },
-      mediaTimelineMarker: { findMany: vi.fn().mockResolvedValue([{ id: 'marker-1', kind: 'intro', startMs: 10_000, endMs: 70_000, source: 'manual', confidence: 1 }]) },
+      mediaTimelineMarker: { findMany: vi.fn().mockResolvedValue([
+        { id: 'marker-1', kind: 'recap', startMs: 0, endMs: 25_000, source: 'manual', confidence: 1 },
+        { id: 'marker-2', kind: 'intro', startMs: 30_000, endMs: 70_000, source: 'manual', confidence: 1 },
+      ]) },
     };
     const service = new CatalogService(prisma as never);
     const result = await service.getPlaybackAssets({ accountId: 'account-1' } as never, 'media-1');
     expect(result.status).toBe('ready');
-    expect(result.markers).toEqual([expect.objectContaining({ kind: 'intro', source: 'manual' })]);
+    expect(result.markers).toEqual([
+      expect.objectContaining({ kind: 'recap', source: 'manual' }),
+      expect.objectContaining({ kind: 'intro', source: 'manual' }),
+    ]);
     expect(result.trickplay).toMatchObject({ sheetCount: 1, cues: [expect.objectContaining({ sheet: 0 })] });
     expect(JSON.stringify(result)).not.toContain('spriteDirectory');
     expect(prisma.mediaTimelineMarker.findMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -33,5 +39,27 @@ describe('catalog playback assets', () => {
     await expect(service.updateTimelineMarkers({ accountId: 'account-1' } as never, 'media-1', {
       intro: { startMs: 10_000, endMs: 90_000 },
     })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'invalid_timeline_marker' }) });
+  });
+
+  it('accepts manual recap markers through the catalog timeline endpoint', async () => {
+    const tx = {
+      mediaTimelineMarker: {
+        deleteMany: vi.fn(),
+        create: vi.fn(),
+      },
+    };
+    const prisma = {
+      mediaItem: { findFirst: vi.fn().mockResolvedValue({ id: 'media-1', file: { status: 'ready', modifiedAt: new Date(), durationMs: 180_000 } }) },
+      $transaction: vi.fn(async (callback) => callback(tx)),
+      mediaPlaybackAsset: { findUnique: vi.fn().mockResolvedValue({ status: 'ready', manifest: { cues: [] } }) },
+      mediaTimelineMarker: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const service = new CatalogService(prisma as never);
+    await service.updateTimelineMarkers({ accountId: 'account-1' } as never, 'media-1', {
+      recap: { startMs: 0, endMs: 30_000 },
+    });
+    expect(tx.mediaTimelineMarker.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ kind: 'recap', source: 'manual' }),
+    }));
   });
 });
