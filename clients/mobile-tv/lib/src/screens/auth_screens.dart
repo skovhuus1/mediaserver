@@ -381,22 +381,26 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     final controls = ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: tv ? 500 : 460),
+      constraints: BoxConstraints(maxWidth: tv ? 470 : 460),
       child: Form(
         key: _form,
         child: Container(
-          padding: tv ? const EdgeInsets.all(22) : EdgeInsets.zero,
+          padding: tv ? const EdgeInsets.all(20) : EdgeInsets.zero,
           decoration: tv
               ? BoxDecoration(
-                  color: TvDesignTokens.surfaceGlass,
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xE0111820), Color(0xC8070A0F)],
+                  ),
                   borderRadius: BorderRadius.circular(
                     TvDesignTokens.panelRadius,
                   ),
-                  border: Border.all(color: TvDesignTokens.panelBorderSoft),
+                  border: Border.all(color: const Color(0x55FFE8A3)),
                   boxShadow: const [
                     BoxShadow(
                       color: Color(0x99000000),
-                      blurRadius: 34,
+                      blurRadius: 38,
                       offset: Offset(0, 18),
                     ),
                   ],
@@ -659,11 +663,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       // both login methods stay visible together.
                       final wide = constraints.maxWidth >= 900;
                       final horizontal = constraints.maxWidth >= 1500
-                          ? 64.0
-                          : 32.0;
+                          ? 58.0
+                          : 28.0;
                       final vertical = constraints.maxHeight >= 800
-                          ? 30.0
-                          : 18.0;
+                          ? 24.0
+                          : 14.0;
                       final panelWidth = (constraints.maxWidth * 0.46)
                           .clamp(410.0, 540.0)
                           .toDouble();
@@ -679,9 +683,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 const BrandLockup(),
-                                const SizedBox(height: 28),
+                                const SizedBox(height: 20),
                                 controls,
-                                const SizedBox(height: 28),
+                                const SizedBox(height: 20),
                                 qrPanel,
                               ],
                             ),
@@ -783,14 +787,14 @@ class _TvQrLoginPanel extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xEE121820), Color(0xE8090B0E)],
+          colors: [Color(0xF0121821), Color(0xE6070A0F)],
         ),
         borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
-        border: Border.all(color: TvDesignTokens.panelBorderSoft),
+        border: Border.all(color: const Color(0x55FFE8A3)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x99000000),
-            blurRadius: 36,
+            blurRadius: 40,
             offset: Offset(0, 18),
           ),
         ],

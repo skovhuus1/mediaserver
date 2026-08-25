@@ -42,7 +42,7 @@ const DEVICE_DEFAULTS = {
   qualityMode: 'auto',
   fixedQualityHeight: null,
   allowUpscale: true,
-  upscaleMode: 'device',
+  upscaleMode: 'server',
   bufferProfile: 'auto',
   dataSaver: false,
   playbackRate: 1,

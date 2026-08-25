@@ -15,7 +15,11 @@ abstract interface class TitleContract {
   Future<void> setWatched(String mediaId, {required bool watched});
 }
 
-class TitleUseCase implements TitleContract {
+abstract interface class SeasonAwareTitleContract implements TitleContract {
+  Future<TitlePayload> loadTitleSeason(String mediaId, int seasonNumber);
+}
+
+class TitleUseCase implements SeasonAwareTitleContract {
   const TitleUseCase({
     required this.api,
     this.attemptTimeout = const Duration(seconds: 4),
@@ -25,10 +29,16 @@ class TitleUseCase implements TitleContract {
   final Duration attemptTimeout;
 
   @override
-  Future<TitlePayload> loadTitle(String mediaId) async {
+  Future<TitlePayload> loadTitle(String mediaId) => _loadTitle(mediaId);
+
+  @override
+  Future<TitlePayload> loadTitleSeason(String mediaId, int seasonNumber) =>
+      _loadTitle(mediaId, seasonNumber: seasonNumber);
+
+  Future<TitlePayload> _loadTitle(String mediaId, {int? seasonNumber}) async {
     final encodedId = Uri.encodeComponent(mediaId);
     final responses = await Future.wait<dynamic>([
-      _loadExperience(encodedId),
+      _loadExperience(encodedId, seasonNumber: seasonNumber),
       _getWithRetry(
         '/playback/history/$encodedId/status',
       ).catchError((_) => <String, dynamic>{}),
@@ -41,11 +51,16 @@ class TitleUseCase implements TitleContract {
     );
   }
 
-  Future<dynamic> _loadExperience(String encodedId) async {
+  Future<dynamic> _loadExperience(String encodedId, {int? seasonNumber}) async {
     try {
       return await _getWithRetry('/experience/titles/$encodedId');
     } catch (_) {
-      final details = await _getWithRetry('/media/$encodedId/details');
+      final seasonQuery = seasonNumber == null
+          ? ''
+          : '?season=${Uri.encodeQueryComponent('$seasonNumber')}';
+      final details = await _getWithRetry(
+        '/media/$encodedId/details$seasonQuery',
+      );
       return _adaptCatalogDetails(details);
     }
   }

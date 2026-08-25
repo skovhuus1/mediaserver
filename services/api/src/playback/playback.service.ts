@@ -260,9 +260,11 @@ export class PlaybackService {
       preferredAudioLanguages,
     );
     const selectedAudioTrack = selectPlaybackAudioTrack(audioTracks, undefined);
-    const upscaleMode = (
-      device.allowUpscale ? device.upscaleMode : 'off'
+    const requestedUpscaleMode = (
+      dto.capabilities.upscaleMode ?? device.upscaleMode ?? 'server'
     ) as 'off' | 'device' | 'server';
+    const upscaleMode: 'off' | 'server' =
+      device.allowUpscale && requestedUpscaleMode !== 'off' ? 'server' : 'off';
     const adaptiveQuality = buildAdaptiveQualityPlan({
       sourceWidth: media.width,
       sourceHeight: media.height,
@@ -303,6 +305,8 @@ export class PlaybackService {
       estimatedDownlinkMbps: dto.capabilities.estimatedDownlinkMbps ?? null,
       dataSaver: device.dataSaver,
       preferDirectPlay: !/^(?:false|0|no)$/i.test(process.env.BB_MEDIA_PREFER_DIRECT_PLAY?.trim() ?? ''),
+      allowUpscale: upscaleMode !== 'off',
+      upscaleMode,
       autoTranscodeOnBandwidth: /^(?:true|1|yes)$/i.test(
         process.env.BB_MEDIA_AUTO_TRANSCODE_ON_BANDWIDTH?.trim() ?? '',
       ),
@@ -437,7 +441,7 @@ export class PlaybackService {
         playbackPreferences: {
           qualityMode: device.qualityMode,
           fixedQualityHeight: device.fixedQualityHeight,
-          allowUpscale: device.allowUpscale,
+          allowUpscale: upscaleMode !== 'off',
           upscaleMode,
           bufferProfile: device.bufferProfile,
           dataSaver: device.dataSaver,
@@ -456,7 +460,7 @@ export class PlaybackService {
         },
         adaptiveQuality: {
           ...deliveryQuality,
-          hardwareUpscale: upscaleMode === 'device',
+          hardwareUpscale: false,
         },
         videoProfile: {
           source: {
@@ -575,6 +579,14 @@ export class PlaybackService {
         message: 'A fixed quality height is required when qualityMode is fixed',
       });
     }
+    const fallbackUpscaleMode: 'server' = 'server';
+    const rawUpscaleMode = (
+      dto.upscaleMode ?? session.device.upscaleMode ?? fallbackUpscaleMode
+    ) as 'off' | 'server' | 'device';
+    const requestedAllowUpscale = dto.allowUpscale ?? (rawUpscaleMode !== 'off');
+    const requestedUpscaleMode: 'off' | 'server' = requestedAllowUpscale && rawUpscaleMode !== 'off'
+      ? 'server'
+      : 'off';
     const audioTracks = playbackAudioTracks(session.media.file.probe, []);
     const selectedAudioTrack = selectPlaybackAudioTrack(
       audioTracks,
@@ -613,15 +625,15 @@ export class PlaybackService {
       planMaxBitrate: entitlement.effective.maxVideoBitrate * 1_000,
       serverMaxHeight: cpuTranscodeProfile.maxHeight,
       serverMaxRenditions: cpuTranscodeProfile.maxRenditions,
-      screenHeight: null,
-      devicePixelRatio: null,
-      estimatedDownlinkMbps: null,
+      screenHeight: dto.capabilities?.screenHeight ?? null,
+      devicePixelRatio: dto.capabilities?.devicePixelRatio ?? null,
+      estimatedDownlinkMbps: dto.capabilities?.estimatedDownlinkMbps ?? null,
       qualityMode: requestedQualityMode,
       fixedQualityHeight: requestedQualityMode === 'fixed'
         ? requestedFixedQualityHeight
         : null,
-      allowUpscale: session.device.allowUpscale,
-      upscaleMode: /tv/i.test(session.device.type) ? 'device' : 'server',
+      allowUpscale: requestedAllowUpscale,
+      upscaleMode: requestedUpscaleMode,
       dataSaver: session.device.dataSaver,
       hdrMode: session.device.hdrMode as 'auto' | 'prefer_hdr' | 'force_sdr',
     });
@@ -679,6 +691,8 @@ export class PlaybackService {
           audioStreamIndex: selectedAudioTrack?.streamIndex ?? null,
           qualityMode: requestedQualityMode,
           fixedQualityHeight: requestedFixedQualityHeight,
+          allowUpscale: requestedAllowUpscale,
+          upscaleMode: requestedUpscaleMode,
           startPositionMs,
           hlsGeneration,
         },

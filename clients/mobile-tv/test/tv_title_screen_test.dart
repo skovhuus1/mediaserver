@@ -111,6 +111,42 @@ void main() {
     expect(find.text('Naboserien'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('TV title hydrates counted seasons and keeps simple labels', (
+    tester,
+  ) async {
+    _setTvViewport(tester);
+    final contract = _HydratingTitleContract();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: TvTitleScreen(
+          api: _api(),
+          media: contract.initial.experience.title,
+          titleContract: contract,
+          onPlay: (_, _) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.text('Sæson 1'), findsOneWidget);
+    expect(find.text('Sæson 1 · 1'), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(contract.seasonLoads, [2]);
+    expect(find.textContaining('S02E01'), findsOneWidget);
+    expect(find.text('Der er ingen afsnit i denne sæson.'), findsNothing);
+    expect(find.text('Sæson 2'), findsOneWidget);
+    expect(find.text('Sæson 2 · 1'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 void _setTvViewport(WidgetTester tester) {
@@ -227,4 +263,99 @@ class _FakeTitleContract implements TitleContract {
   Future<void> setWatched(String mediaId, {required bool watched}) async {
     watchedValues.add(watched);
   }
+}
+
+class _HydratingTitleContract implements SeasonAwareTitleContract {
+  final List<int> seasonLoads = [];
+  final List<bool> watchlistValues = [];
+  final List<bool> watchedValues = [];
+
+  late final TitlePayload initial = _payload(
+    selectedSeasonNumber: 1,
+    hydrateSeason2: false,
+  );
+
+  @override
+  Future<TitlePayload> loadTitle(String mediaId) async => initial;
+
+  @override
+  Future<TitlePayload> loadTitleSeason(String mediaId, int seasonNumber) async {
+    seasonLoads.add(seasonNumber);
+    return _payload(selectedSeasonNumber: seasonNumber, hydrateSeason2: true);
+  }
+
+  @override
+  Future<void> setWatchlist(String mediaId, {required bool included}) async {
+    watchlistValues.add(included);
+  }
+
+  @override
+  Future<void> setWatched(String mediaId, {required bool watched}) async {
+    watchedValues.add(watched);
+  }
+
+  TitlePayload _payload({
+    required int selectedSeasonNumber,
+    required bool hydrateSeason2,
+  }) => TitlePayload(
+    experience: TitleExperience(
+      mode: 'series',
+      title: const MediaItem(
+        id: 'series-hydrate',
+        title: 'Hydrer serien',
+        type: 'series',
+        overview: 'En serie med lazy-loadede sæsoner.',
+      ),
+      genres: const ['Drama'],
+      selectedSeasonNumber: selectedSeasonNumber,
+      resumeEpisode: null,
+      nextEpisode: null,
+      seasons: [
+        SeasonItem(
+          number: 1,
+          label: 'Sæson 1',
+          episodeCount: 1,
+          episodes: const [
+            EpisodeItem(
+              media: MediaItem(
+                id: 'hydrate-s01e01',
+                title: 'Pilot',
+                type: 'episode',
+                seriesTitle: 'Hydrer serien',
+                seasonNumber: 1,
+                episodeNumber: 1,
+              ),
+              watched: false,
+              positionMs: 0,
+              progressPercent: 0,
+            ),
+          ],
+        ),
+        SeasonItem(
+          number: 2,
+          label: 'Sæson 2',
+          episodeCount: 1,
+          episodes: hydrateSeason2
+              ? const [
+                  EpisodeItem(
+                    media: MediaItem(
+                      id: 'hydrate-s02e01',
+                      title: 'Retur',
+                      type: 'episode',
+                      seriesTitle: 'Hydrer serien',
+                      seasonNumber: 2,
+                      episodeNumber: 1,
+                    ),
+                    watched: false,
+                    positionMs: 0,
+                    progressPercent: 0,
+                  ),
+                ]
+              : const [],
+        ),
+      ],
+    ),
+    inWatchlist: watchlistValues.isEmpty ? false : watchlistValues.last,
+    watched: watchedValues.isEmpty ? false : watchedValues.last,
+  );
 }

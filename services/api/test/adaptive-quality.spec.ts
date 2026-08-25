@@ -31,6 +31,23 @@ describe('adaptive quality plan', () => {
     });
   });
 
+  it('caps automatic server upscaling to the safe network budget', () => {
+    const plan = buildAdaptiveQualityPlan({
+      ...defaults,
+      sourceHeight: 720,
+      sourceBitrate: 3_000_000,
+      estimatedDownlinkMbps: 10,
+      upscaleMode: 'server',
+    });
+
+    expect(plan.effectiveMaxHeight).toBe(1080);
+    expect(plan.effectiveMaxBitrate).toBe(7_200_000);
+    expect(plan.renditions.at(-1)).toMatchObject({
+      height: 1080,
+      upscaled: true,
+    });
+  });
+
   it('respects plan, physical screen and disabled upscaling', () => {
     const plan = buildAdaptiveQualityPlan({
       ...defaults,

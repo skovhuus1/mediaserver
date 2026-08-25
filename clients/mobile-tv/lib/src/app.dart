@@ -7,6 +7,7 @@ import 'state/app_controller.dart';
 import 'widgets/cast_miniplayer.dart';
 import 'widgets/push_message_banner.dart';
 import 'shared_core/app_shell_screens.dart';
+import 'shared_core/ui_tokens/tv_design_tokens.dart';
 import 'shared_core/ui_mode.dart';
 
 class BoltBytesApp extends StatelessWidget {
@@ -24,12 +25,12 @@ class BoltBytesApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tv = forceTvLayout == true;
-    const background = BoltColors.background;
-    const surface = BoltColors.surface;
-    const panel = BoltColors.panel;
-    const rail = BoltColors.backgroundRaised;
-    const blue = BoltColors.primary;
-    const cyan = BoltColors.cyan;
+    final background = tv ? Colors.transparent : BoltColors.background;
+    final surface = tv ? TvDesignTokens.surface : BoltColors.surface;
+    final panel = tv ? TvDesignTokens.surfaceRaised : BoltColors.panel;
+    final rail = tv ? TvDesignTokens.surfaceGlass : BoltColors.backgroundRaised;
+    final blue = tv ? TvDesignTokens.gold : BoltColors.primary;
+    final cyan = tv ? TvDesignTokens.cyan : BoltColors.cyan;
 
     final scheme =
         ColorScheme.fromSeed(
@@ -60,9 +61,9 @@ class BoltBytesApp extends StatelessWidget {
           colorScheme: scheme,
           scaffoldBackgroundColor: background,
           visualDensity: tv
-              ? const VisualDensity(horizontal: -0.4, vertical: -0.2)
+              ? const VisualDensity(horizontal: -0.55, vertical: -0.35)
               : VisualDensity.adaptivePlatformDensity,
-          fontFamily: 'sans-serif',
+          fontFamily: tv ? 'sans-serif-condensed' : 'sans-serif',
           splashFactory: NoSplash.splashFactory,
           pageTransitionsTheme: const PageTransitionsTheme(
             builders: {
@@ -178,7 +179,7 @@ class BoltBytesApp extends StatelessWidget {
               ),
             ),
           ),
-          floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          floatingActionButtonTheme: FloatingActionButtonThemeData(
             foregroundColor: Colors.black,
             backgroundColor: blue,
           ),
@@ -215,7 +216,7 @@ class BoltBytesApp extends StatelessWidget {
           ),
           focusColor: const Color(0x554EA1FF),
           hoverColor: const Color(0x1AFFFFFF),
-          progressIndicatorTheme: const ProgressIndicatorThemeData(color: blue),
+          progressIndicatorTheme: ProgressIndicatorThemeData(color: blue),
           chipTheme: ChipThemeData(
             backgroundColor: const Color(0xC40A121B),
             side: const BorderSide(color: Color(0xFF26313A)),
@@ -240,12 +241,12 @@ class BoltBytesApp extends StatelessWidget {
                   : const Color(0xFF2D3640),
             ),
           ),
-          sliderTheme: const SliderThemeData(
+          sliderTheme: SliderThemeData(
             thumbColor: blue,
             activeTrackColor: blue,
-            inactiveTrackColor: Color(0xFF29323D),
-            overlayShape: RoundSliderOverlayShape(overlayRadius: 18),
-            valueIndicatorTextStyle: TextStyle(
+            inactiveTrackColor: const Color(0xFF29323D),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
+            valueIndicatorTextStyle: const TextStyle(
               color: Colors.black,
               fontWeight: FontWeight.w700,
             ),

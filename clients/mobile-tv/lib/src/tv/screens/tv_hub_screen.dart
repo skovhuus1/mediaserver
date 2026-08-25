@@ -21,12 +21,19 @@ import 'tv_player_screen.dart';
 import 'tv_recordings_screen.dart';
 import 'tv_settings_screen.dart';
 import 'tv_title_screen.dart';
+import '../widgets/tv_media_context_menu.dart';
 
 class TvHubScreen extends StatefulWidget {
-  const TvHubScreen({required this.controller, this.library, super.key});
+  const TvHubScreen({
+    required this.controller,
+    this.library,
+    this.initialTopTab = 0,
+    super.key,
+  });
 
   final AppController controller;
   final LibraryContract? library;
+  final int initialTopTab;
 
   @override
   State<TvHubScreen> createState() => _TvHubScreenState();
@@ -80,12 +87,17 @@ class _TvHubScreenState extends State<TvHubScreen> {
   Timer? _searchDebounce;
   bool _loading = true;
   bool _searchLoading = false;
+  bool _exitPromptOpen = false;
+  bool _selectHoldFired = false;
+  bool _selectHoldTracking = false;
   String? _error;
   String? _searchError;
   String _searchQuery = '';
   int _searchEpoch = 0;
-  int _configuredTopTab = 0;
+  late int _configuredTopTab;
   int _unreadCount = 0;
+  Timer? _selectHoldTimer;
+  MediaItem? _selectHoldMedia;
 
   ApiClient get api => widget.controller.api;
 
@@ -94,13 +106,16 @@ class _TvHubScreenState extends State<TvHubScreen> {
     super.initState();
     _library = widget.library ?? LibraryUseCase(api: api);
     _notifications = NotificationUseCase(api: api);
+    _configuredTopTab = widget.initialTopTab
+        .clamp(0, _topTabs.length - 1)
+        .toInt();
     _topNodes = List.generate(
       _topTabs.length,
       (index) => FocusNode(debugLabel: 'tv-top-$index'),
     );
     _focusController = TvFocusController(
       topRowNodes: _topNodes,
-      activeTopTab: 0,
+      activeTopTab: _configuredTopTab,
       activeSection: -1,
       activeItem: 0,
       verticalNavigation: true,
@@ -128,6 +143,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _resetSelectHold();
     _searchEpoch++;
     _searchController.removeListener(_onSearchQueryChanged);
     _focusController.removeListener(_onFocusStateChanged);
@@ -424,13 +440,20 @@ class _TvHubScreenState extends State<TvHubScreen> {
         addMedia(
           id: 20,
           title: 'Nye episoder',
-          items: payload.latestEpisodes.items,
+          items: collapseEpisodeSeriesCards(payload.latestEpisodes.items),
           emptyMessage: 'Ingen nye episoder.',
-          activate: (item) => unawaited(_play(item)),
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        addMedia(
+          id: 25,
+          title: 'Senest tilføjet',
+          items: payload.recentlyAddedSeries,
+          emptyMessage: 'Der er ikke tilføjet nye serieafsnit endnu.',
+          activate: (item) => unawaited(_openTitle(item)),
         );
         sections.add(
           _TvHubSection.genres(
-            id: 30,
+            id: 35,
             title: 'Seriegenrer',
             genres: payload.seriesCatalog.categories,
             mediaType: 'series',
@@ -478,12 +501,20 @@ class _TvHubScreenState extends State<TvHubScreen> {
         addMedia(
           id: 20,
           title: 'Nye episoder klar',
-          items: payload.latestEpisodes.items,
+          items: collapseEpisodeSeriesCards(payload.latestEpisodes.items),
           emptyMessage: 'Ingen nye episoder lige nu.',
-          activate: (item) => unawaited(_play(item)),
+          activate: (item) => unawaited(_openTitle(item)),
         );
         return sections;
       case 5:
+        sections.add(
+          _TvHubSection.message(
+            id: 5,
+            title: 'Find efter stemning',
+            message:
+                'Vælg en genre og åbn et fuldt katalog med TV-navigation. Genrer er nu en discovery-side med store brikker i stedet for små filterknapper.',
+          ),
+        );
         sections.add(
           _TvHubSection.genres(
             id: 10,
@@ -669,6 +700,20 @@ class _TvHubScreenState extends State<TvHubScreen> {
           );
         }
         addMedia(
+          id: 40,
+          title: 'Nye episoder',
+          items: collapseEpisodeSeriesCards(payload.latestEpisodes.items),
+          emptyMessage: 'Ingen nye episoder.',
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        addMedia(
+          id: 45,
+          title: 'Senest tilføjet',
+          items: payload.recentlyAddedSeries,
+          emptyMessage: 'Der er ikke tilføjet nye serieafsnit endnu.',
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        addMedia(
           id: 50,
           title: 'Nyeste film',
           items: payload.movieCatalog.items,
@@ -694,19 +739,82 @@ class _TvHubScreenState extends State<TvHubScreen> {
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (_isSelectKey(event.logicalKey)) {
+      return _handleSelectKey(event)
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    _resetSelectHold();
     final handled = switch (event.logicalKey) {
       LogicalKeyboardKey.arrowLeft => _focusController.moveLeft(),
       LogicalKeyboardKey.arrowRight => _focusController.moveRight(),
       LogicalKeyboardKey.arrowDown => _focusController.moveDown(),
       LogicalKeyboardKey.arrowUp => _focusController.moveUp(),
-      LogicalKeyboardKey.enter || LogicalKeyboardKey.select => _activate(),
       LogicalKeyboardKey.escape ||
       LogicalKeyboardKey.goBack ||
       LogicalKeyboardKey.browserBack => _handleBackAction(),
       _ => false,
     };
     return handled ? KeyEventResult.handled : KeyEventResult.ignored;
+  }
+
+  bool _isSelectKey(LogicalKeyboardKey key) =>
+      key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.select;
+
+  bool _handleSelectKey(KeyEvent event) {
+    final media = _focusedContextMedia();
+    if (media == null) {
+      if (event is KeyDownEvent) return _activate();
+      return event is KeyUpEvent || event is KeyRepeatEvent;
+    }
+
+    if (event is KeyDownEvent) {
+      if (_selectHoldTracking) return true;
+      _selectHoldTracking = true;
+      _selectHoldFired = false;
+      _selectHoldMedia = media;
+      _selectHoldTimer = Timer(const Duration(milliseconds: 560), () {
+        final heldMedia = _selectHoldMedia;
+        if (!mounted || !_selectHoldTracking || heldMedia == null) return;
+        _selectHoldFired = true;
+        _selectHoldTracking = false;
+        _selectHoldMedia = null;
+        _selectHoldTimer = null;
+        unawaited(_openContextMenu(heldMedia));
+      });
+      return true;
+    }
+    if (event is KeyRepeatEvent) return true;
+    if (event is KeyUpEvent) {
+      final fired = _selectHoldFired;
+      _resetSelectHold();
+      if (!fired) return _activate();
+      return true;
+    }
+    return false;
+  }
+
+  void _resetSelectHold() {
+    _selectHoldTimer?.cancel();
+    _selectHoldTimer = null;
+    _selectHoldTracking = false;
+    _selectHoldFired = false;
+    _selectHoldMedia = null;
+  }
+
+  MediaItem? _focusedContextMedia() {
+    final state = _focusController.state;
+    if (state.isTopRow || state.itemIndex < 0) return null;
+    final section = _sections.firstWhere(
+      (section) => section.id == state.sectionIndex,
+      orElse: () => _TvHubSection.message(id: -1, title: '', message: ''),
+    );
+    return switch (section.kind) {
+      _TvHubSectionKind.hero => section.media,
+      _TvHubSectionKind.media => section.items.elementAtOrNull(state.itemIndex),
+      _ => null,
+    };
   }
 
   bool _handleBackAction() {
@@ -723,7 +831,90 @@ class _TvHubScreenState extends State<TvHubScreen> {
       _focusController.setActive(topTab: 0, sectionIndex: -1, itemIndex: 0);
       return true;
     }
+    unawaited(_confirmExit());
     return true;
+  }
+
+  Future<void> _confirmExit() async {
+    if (_exitPromptOpen || !mounted) return;
+    setState(() => _exitPromptOpen = true);
+    final shouldExit = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.42),
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color(0xF00A0D12),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: const Color(0x55FFE8A3), width: 1.4),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0xCC000000),
+                  blurRadius: 48,
+                  offset: Offset(0, 22),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Luk appen?',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 27,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Tryk tilbage for at blive i TV-appen, eller vælg Luk app.',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton(
+                          autofocus: true,
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: const Text('Bliv her'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: const Text('Luk app'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    if (mounted) setState(() => _exitPromptOpen = false);
+    if (!mounted || shouldExit != true) {
+      _focusController.setActive(topTab: 0, sectionIndex: -1, itemIndex: 0);
+      return;
+    }
+    await SystemNavigator.pop();
   }
 
   bool _activate() {
@@ -771,6 +962,10 @@ class _TvHubScreenState extends State<TvHubScreen> {
   }
 
   Future<void> _play(MediaItem media) async {
+    await _playWithPosition(media, media.progress?.positionMs ?? 0);
+  }
+
+  Future<void> _playWithPosition(MediaItem media, int resumePositionMs) async {
     if (media.isSeries) {
       await _openTitle(media);
       return;
@@ -780,11 +975,22 @@ class _TvHubScreenState extends State<TvHubScreen> {
         builder: (_) => TvPlayerScreen(
           api: api,
           media: media,
-          resumePositionMs: media.progress?.positionMs ?? 0,
+          resumePositionMs: resumePositionMs,
         ),
       ),
     );
     await _refreshIfNeeded();
+  }
+
+  Future<void> _openContextMenu(MediaItem media) async {
+    await showTvMediaContextMenu(
+      context: context,
+      api: api,
+      media: media,
+      onOpen: _openTitle,
+      onPlay: _playWithPosition,
+    );
+    if (mounted) _focusController.requestCurrentFocus();
   }
 
   Future<void> _openSettings() async {
@@ -851,6 +1057,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
           mediaType: mediaType,
           category: genre,
           onPlay: _play,
+          onPlayWithPosition: _playWithPosition,
           onOpen: _openTitle,
         ),
       ),
@@ -867,6 +1074,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
           label: mediaType == 'movie' ? 'Film' : 'Serier',
           mediaType: mediaType,
           onPlay: _play,
+          onPlayWithPosition: _playWithPosition,
           onOpen: _openTitle,
         ),
       ),
@@ -1271,6 +1479,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
                 focusNode: nodes[index],
                 heroTag: 'tv-hub-${section.id}-${item.id}',
                 onPressed: () => section.onActivate!(index),
+                onLongPressed: () => unawaited(_openContextMenu(item)),
               );
             },
           ),
@@ -1301,58 +1510,155 @@ class _TvHubScreenState extends State<TvHubScreen> {
       );
     }
     final nodes = _sectionNodes[section.id]!;
+    const palettes = [
+      [Color(0xFF2B5B7C), Color(0xFF121A2A)],
+      [Color(0xFF7B4A24), Color(0xFF1C140E)],
+      [Color(0xFF365C3C), Color(0xFF101C13)],
+      [Color(0xFF633D67), Color(0xFF18101B)],
+      [Color(0xFF6F3333), Color(0xFF1A0F0F)],
+      [Color(0xFF4A5D7C), Color(0xFF101622)],
+    ];
+    final typeLabel = section.mediaType == 'series' ? 'SERIER' : 'FILM';
+    final subtitle = section.mediaType == 'series'
+        ? 'Åbn serie-katalog'
+        : 'Åbn film-katalog';
+
     return Column(
       key: ValueKey('tv-section-${section.id}'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionHeader(section.title),
         SizedBox(
-          height: TvDesignTokens.genreChipHeight,
+          height: 128,
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(
               horizontal: TvDesignTokens.pageHorizontalPadding,
             ),
             scrollDirection: Axis.horizontal,
             itemCount: section.genres.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            separatorBuilder: (_, _) => const SizedBox(width: 10),
             itemBuilder: (_, index) {
               final focused = nodes[index].hasFocus;
+              final genre = section.genres[index];
+              final palette = palettes[index % palettes.length];
               return AnimatedScale(
                 scale: focused ? TvDesignTokens.focusScale : 1,
                 duration: const Duration(milliseconds: 140),
                 child: InkWell(
                   focusNode: nodes[index],
                   onTap: () => section.onActivate!(index),
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(
+                    TvDesignTokens.panelRadius,
+                  ),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 140),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 10,
-                    ),
+                    duration: TvDesignTokens.focusAnimationDuration,
+                    width: 248,
+                    padding: const EdgeInsets.all(17),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      color: focused
-                          ? const Color(0xFF362F22)
-                          : const Color(0xFF090B0E),
+                      borderRadius: BorderRadius.circular(
+                        TvDesignTokens.panelRadius,
+                      ),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: focused
+                            ? const [
+                                TvDesignTokens.gold,
+                                TvDesignTokens.focusFill,
+                              ]
+                            : palette,
+                      ),
                       border: Border.all(
                         color: focused
-                            ? const Color(0xFFFFF4D0)
-                            : const Color(0xFF332D21),
+                            ? Colors.white
+                            : TvDesignTokens.panelBorderSoft,
                         width: focused ? TvDesignTokens.focusBorderWidth : 1,
                       ),
+                      boxShadow: focused
+                          ? const [
+                              BoxShadow(
+                                color: Color(0x66FFC857),
+                                blurRadius: 26,
+                                offset: Offset(0, 14),
+                              ),
+                            ]
+                          : const [
+                              BoxShadow(
+                                color: Color(0x66000000),
+                                blurRadius: 18,
+                                offset: Offset(0, 10),
+                              ),
+                            ],
                     ),
-                    child: Center(
-                      child: Text(
-                        section.genres[index],
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: focused
-                              ? FontWeight.w900
-                              : FontWeight.w700,
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          right: -8,
+                          bottom: -10,
+                          child: Icon(
+                            _genreIcon(genre),
+                            size: 82,
+                            color: focused
+                                ? Colors.black.withValues(alpha: 0.14)
+                                : Colors.white.withValues(alpha: 0.12),
+                          ),
                         ),
-                      ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              typeLabel,
+                              style: TextStyle(
+                                color: focused
+                                    ? Colors.black.withValues(alpha: 0.62)
+                                    : TvDesignTokens.gold,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.3,
+                              ),
+                            ),
+                            Text(
+                              genre,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: focused
+                                    ? const Color(0xFF080704)
+                                    : Colors.white,
+                                fontSize: 23,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    subtitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: focused
+                                          ? Colors.black.withValues(alpha: 0.68)
+                                          : Colors.white70,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: focused
+                                      ? const Color(0xFF080704)
+                                      : Colors.white70,
+                                  size: 22,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -1383,15 +1689,15 @@ class _TvHubScreenState extends State<TvHubScreen> {
         decoration: InputDecoration(
           isDense: true,
           filled: true,
-          fillColor: const Color(0xFF090B0E),
+          fillColor: TvDesignTokens.surfaceGlass,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(7),
-            borderSide: const BorderSide(color: Color(0xFF332D21)),
+            borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
+            borderSide: const BorderSide(color: TvDesignTokens.panelBorderSoft),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(7),
+            borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
             borderSide: BorderSide(
-              color: const Color(0xFFFFF4D0),
+              color: TvDesignTokens.focusFill,
               width: TvDesignTokens.focusBorderWidth,
             ),
           ),
@@ -1441,7 +1747,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
             ),
           ),
         SizedBox(
-          height: 76,
+          height: 70,
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(
               horizontal: TvDesignTokens.pageHorizontalPadding,
@@ -1475,7 +1781,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
         child: Text(
           section.message ?? '',
           style: const TextStyle(
-            color: Colors.white60,
+            color: TvDesignTokens.textMuted,
             fontSize: TvDesignTokens.bodyTextSize,
           ),
         ),
@@ -1524,14 +1830,10 @@ class _TvHubScreenState extends State<TvHubScreen> {
           onKeyEvent: _handleKey,
           child: DecoratedBox(
             decoration: const BoxDecoration(
-              color: TvDesignTokens.background,
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [
-                  TvDesignTokens.backgroundWarm,
-                  TvDesignTokens.background,
-                ],
+                colors: [Color(0xC81B1207), Color(0xE6010204)],
               ),
             ),
             child: SafeArea(
@@ -1584,6 +1886,32 @@ class _TvAmbientGlow extends StatelessWidget {
   );
 }
 
+IconData _genreIcon(String genre) {
+  final normalized = genre.toLowerCase();
+  if (normalized.contains('action') || normalized.contains('thriller')) {
+    return Icons.local_fire_department_rounded;
+  }
+  if (normalized.contains('animation') || normalized.contains('familie')) {
+    return Icons.auto_awesome_rounded;
+  }
+  if (normalized.contains('dokumentar') || normalized.contains('documentary')) {
+    return Icons.travel_explore_rounded;
+  }
+  if (normalized.contains('drama')) {
+    return Icons.theater_comedy_rounded;
+  }
+  if (normalized.contains('sci') || normalized.contains('fantasy')) {
+    return Icons.public_rounded;
+  }
+  if (normalized.contains('gys') || normalized.contains('horror')) {
+    return Icons.dark_mode_rounded;
+  }
+  if (normalized.contains('komed') || normalized.contains('comedy')) {
+    return Icons.sentiment_very_satisfied_rounded;
+  }
+  return Icons.movie_filter_rounded;
+}
+
 enum _TvHubSectionKind { hero, media, genres, search, actions, message }
 
 class _TvHubSection {
@@ -1593,6 +1921,7 @@ class _TvHubSection {
     required this.title,
     this.message,
     this.media,
+    this.mediaType = 'media',
     this.items = const [],
     this.genres = const [],
     this.actions = const [],
@@ -1645,6 +1974,7 @@ class _TvHubSection {
     id: id,
     kind: _TvHubSectionKind.genres,
     title: title,
+    mediaType: mediaType,
     genres: genres.take(TvDesignTokens.maxGenreItems).toList(growable: false),
     onActivate: onActivate,
   );
@@ -1689,6 +2019,7 @@ class _TvHubSection {
   final String title;
   final String? message;
   final MediaItem? media;
+  final String mediaType;
   final List<MediaItem> items;
   final List<String> genres;
   final List<_TvHubAction> actions;
@@ -1738,20 +2069,20 @@ class _TvFocusAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final focused = focusNode.hasFocus;
     final primaryBg = const LinearGradient(
-      colors: [TvDesignTokens.goldSoft, TvDesignTokens.gold],
+      colors: [TvDesignTokens.focusFill, TvDesignTokens.gold],
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
     );
     final style =
         (primary
                 ? FilledButton.styleFrom(
-                    backgroundColor: TvDesignTokens.goldSoft,
+                    backgroundColor: TvDesignTokens.focusFill,
                     foregroundColor: const Color(0xFF090806),
                     elevation: 0,
                   )
                 : OutlinedButton.styleFrom(
                     foregroundColor: Colors.white,
-                    backgroundColor: TvDesignTokens.surfaceRaised,
+                    backgroundColor: const Color(0xD00B1017),
                   ))
             .copyWith(
               minimumSize: const WidgetStatePropertyAll(
@@ -1760,18 +2091,18 @@ class _TvFocusAction extends StatelessWidget {
               side: WidgetStatePropertyAll(
                 BorderSide(
                   color: focused
-                      ? TvDesignTokens.goldSoft
+                      ? TvDesignTokens.focusFill
                       : primary
                       ? Colors.transparent
-                      : Colors.white38,
+                      : TvDesignTokens.panelBorderSoft,
                   width: focused ? TvDesignTokens.focusBorderWidth : 1,
                 ),
               ),
               textStyle: WidgetStatePropertyAll(
                 TextStyle(
-                  fontSize: 13.5,
+                  fontSize: 13,
                   fontWeight: focused ? FontWeight.w900 : FontWeight.w700,
-                  letterSpacing: 0,
+                  letterSpacing: -0.05,
                 ),
               ),
               shape: WidgetStatePropertyAll(
@@ -1782,7 +2113,7 @@ class _TvFocusAction extends StatelessWidget {
                 ),
               ),
               padding: const WidgetStatePropertyAll(
-                EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                EdgeInsets.symmetric(horizontal: 15, vertical: 12),
               ),
             );
     final button = primary
@@ -1810,10 +2141,10 @@ class _TvFocusAction extends StatelessWidget {
           boxShadow: focused
               ? const [
                   BoxShadow(
-                    color: Color(0x44F7C35F),
-                    blurRadius: 20,
+                    color: Color(0x55FFC857),
+                    blurRadius: 18,
                     spreadRadius: 0.4,
-                    offset: Offset(0, 8),
+                    offset: Offset(0, 7),
                   ),
                 ]
               : const [],

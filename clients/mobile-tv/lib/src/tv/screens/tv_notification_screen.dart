@@ -142,7 +142,7 @@ class _TvNotificationScreenState extends State<TvNotificationScreen> {
   Widget build(BuildContext context) {
     final selected = _items.elementAtOrNull(_index);
     return Scaffold(
-      backgroundColor: TvDesignTokens.background,
+      backgroundColor: Colors.transparent,
       body: Focus(
         focusNode: _root,
         autofocus: true,

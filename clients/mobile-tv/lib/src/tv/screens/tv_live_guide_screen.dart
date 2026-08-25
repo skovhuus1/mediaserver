@@ -367,7 +367,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: TvDesignTokens.background,
+      backgroundColor: Colors.transparent,
       body: Focus(
         focusNode: _root,
         autofocus: true,

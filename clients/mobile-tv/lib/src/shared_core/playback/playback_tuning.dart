@@ -6,7 +6,7 @@ const playbackUpscaleModes = <String>{'off', 'device', 'server'};
 class PlaybackTuning {
   const PlaybackTuning({
     this.bufferProfile = 'auto',
-    this.upscaleMode = 'device',
+    this.upscaleMode = 'server',
   });
 
   final String bufferProfile;
@@ -15,14 +15,17 @@ class PlaybackTuning {
   factory PlaybackTuning.normalized({
     String? bufferProfile,
     String? upscaleMode,
-  }) => PlaybackTuning(
-    bufferProfile: playbackBufferProfiles.contains(bufferProfile)
-        ? bufferProfile!
-        : 'auto',
-    upscaleMode: playbackUpscaleModes.contains(upscaleMode)
+  }) {
+    final normalizedUpscale = playbackUpscaleModes.contains(upscaleMode)
         ? upscaleMode!
-        : 'device',
-  );
+        : 'server';
+    return PlaybackTuning(
+      bufferProfile: playbackBufferProfiles.contains(bufferProfile)
+          ? bufferProfile!
+          : 'auto',
+      upscaleMode: normalizedUpscale == 'device' ? 'server' : normalizedUpscale,
+    );
+  }
 }
 
 class PlaybackTuningStore {

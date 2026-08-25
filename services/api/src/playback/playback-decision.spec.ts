@@ -81,4 +81,17 @@ describe('compatible source Direct Play policy', () => {
       code: 'bandwidth_limited',
     });
   });
+
+  it('forces HLS when server upscaling can output above the source height', () => {
+    expect(shouldTranscodeCompatibleSource({
+      ...input,
+      sourceHeight: 720,
+      targetHeight: 1080,
+      allowUpscale: true,
+      upscaleMode: 'server',
+    })).toMatchObject({
+      required: true,
+      code: 'server_upscale',
+    });
+  });
 });

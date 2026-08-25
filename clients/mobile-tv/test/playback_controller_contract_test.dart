@@ -86,14 +86,36 @@ void main() {
       ).readAsStringSync();
       expect(controller, contains('String get currentQualityMode'));
       expect(controller, contains('int? get currentFixedQualityHeight'));
+      expect(controller, contains('String get currentUpscaleMode'));
       expect(controller, contains("status: 'Kvalitet:"));
       expect(controller, contains('Future<void> selectAudioTrack'));
+      expect(controller, contains('Future<void> selectUpscaleMode'));
       expect(controller, contains("'audioTrackId': preservedAudioTrackId"));
+      expect(controller, contains("'allowUpscale': requestedAllowUpscale"));
+      expect(controller, contains("'upscaleMode': requestedUpscaleMode"));
       expect(controller, isNot(contains("'/devices/me/preferences'")));
       expect(player, contains('controller.currentQualityMode'));
       expect(player, contains('controller.currentFixedQualityHeight'));
-      expect(player, contains("title: 'Lydspor'"));
+      expect(player, contains("panelTitle: 'Lydspor'"));
+      expect(player, contains("panelTitle: 'Kvalitet'"));
+      expect(player, contains("panelTitle: 'Opskalering'"));
       expect(player, contains('state.qualityLabel.isEmpty'));
+      expect(player, contains('state.upscaleLabel.isEmpty'));
     },
   );
+
+  test('TV playback reconfigure contract accepts upscale selections', () {
+    final dto = File(
+      '../../services/api/src/playback/playback.dto.ts',
+    ).readAsStringSync();
+    final service = File(
+      '../../services/api/src/playback/playback.service.ts',
+    ).readAsStringSync();
+    expect(dto, contains('allowUpscale?: boolean'));
+    expect(dto, contains("upscaleMode?: 'off' | 'server' | 'device'"));
+    expect(service, contains('requestedAllowUpscale'));
+    expect(service, contains('requestedUpscaleMode'));
+    expect(service, contains('allowUpscale: requestedAllowUpscale'));
+    expect(service, contains('upscaleMode: requestedUpscaleMode'));
+  });
 }

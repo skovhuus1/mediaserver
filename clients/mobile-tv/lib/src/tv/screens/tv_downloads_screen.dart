@@ -182,7 +182,7 @@ class _TvDownloadsScreenState extends State<TvDownloadsScreen> {
       builder: (context, _) {
         final records = _records;
         return Scaffold(
-          backgroundColor: TvDesignTokens.background,
+          backgroundColor: Colors.transparent,
           body: Focus(
             focusNode: _root,
             autofocus: true,

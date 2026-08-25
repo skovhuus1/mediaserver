@@ -26,6 +26,6 @@ void main() {
 
     final value = await PlaybackTuningStore().load();
     expect(value.bufferProfile, 'auto');
-    expect(value.upscaleMode, 'device');
+    expect(value.upscaleMode, 'server');
   });
 }

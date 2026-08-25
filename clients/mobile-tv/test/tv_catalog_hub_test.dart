@@ -14,6 +14,41 @@ import 'support/memory_session_storage.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('TV episode rows collapse repeated series into one artwork card', () {
+    final cards = collapseEpisodeSeriesCards([
+      for (var index = 0; index < 7; index++)
+        MediaItem(
+          id: 'dna-episode-$index',
+          title: 'DNA episode $index',
+          type: 'episode',
+          seriesTitle: 'series-dna',
+          seriesDisplayTitle: 'DNA',
+          seasonNumber: 1,
+          episodeNumber: index + 1,
+          posterPath: '/dna-poster.jpg',
+          backdropPath: '/dna-backdrop.jpg',
+        ),
+      const MediaItem(
+        id: 'other-episode-1',
+        title: 'Pilot',
+        type: 'episode',
+        seriesTitle: 'series-other',
+        seriesDisplayTitle: 'Anden serie',
+        seasonNumber: 1,
+        episodeNumber: 1,
+        posterPath: '/other-poster.jpg',
+      ),
+    ]);
+
+    expect(cards, hasLength(2));
+    expect(cards.first.type, 'series');
+    expect(cards.first.displayTitle, 'DNA');
+    expect(cards.first.posterPath, '/dna-poster.jpg');
+    expect(cards.first.backdropPath, '/dna-backdrop.jpg');
+    expect(cards.first.badgeCount, 7);
+    expect(cards.last.badgeCount, 1);
+  });
+
   testWidgets('TV hub has deterministic sidebar and content focus', (
     tester,
   ) async {
@@ -136,6 +171,17 @@ void main() {
     await _press(tester, LogicalKeyboardKey.enter);
 
     expect(fixture.controller.stage, AppStage.profiles);
+    fixture.client.close();
+  });
+
+  testWidgets('root Back asks before leaving the TV hub', (tester) async {
+    final fixture = await _pumpHub(tester);
+
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'tv-top-0');
+    await _press(tester, LogicalKeyboardKey.escape);
+
+    expect(find.text('Luk appen?'), findsOneWidget);
+    expect(find.byType(TvHubScreen), findsOneWidget);
     fixture.client.close();
   });
 }
@@ -296,6 +342,18 @@ LibraryHomePayload _homePayload({required bool includeContinue}) {
       total: episodes.length,
       totalPages: 1,
     ),
+    recentlyAddedSeries: [
+      MediaItem(
+        id: episodes.first.id,
+        title: episodes.first.displayTitle,
+        type: 'series',
+        seriesTitle: episodes.first.seriesTitle,
+        seriesDisplayTitle: episodes.first.seriesDisplayTitle,
+        posterPath: episodes.first.posterPath,
+        backdropPath: episodes.first.backdropPath,
+        badgeCount: episodes.length,
+      ),
+    ],
     continueItems: includeContinue ? [movies.first] : const [],
     watchlistItems: [series.first],
     recommendations: RecommendationFeed(

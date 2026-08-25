@@ -18,6 +18,7 @@ class MediaPosterCard extends StatefulWidget {
     this.showMeta = true,
     this.heroTag,
     this.onFocus,
+    this.onLongPressed,
     super.key,
   });
 
@@ -29,6 +30,7 @@ class MediaPosterCard extends StatefulWidget {
   final bool showMeta;
   final Object? heroTag;
   final ValueChanged<bool>? onFocus;
+  final VoidCallback? onLongPressed;
   final FocusNode? focusNode;
 
   @override
@@ -63,27 +65,37 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
       imageSize: 'w500',
     );
     final progress = media.progress?.percent.clamp(0, 100) ?? 0;
-    final posterHeight = widget.width * (widget.isTv ? 1.46 : 1.48);
-    final focusScale = _focused ? (widget.isTv ? 1.045 : 1.05) : 1.0;
-    final titleStyle = _focused ? FontWeight.w800 : FontWeight.w700;
-    final radius = widget.isTv ? TvDesignTokens.chromeRadius : 18.0;
+    final posterHeight = widget.width * (widget.isTv ? 1.42 : 1.48);
+    final focusScale = _focused
+        ? (widget.isTv ? TvDesignTokens.focusScale : 1.05)
+        : 1.0;
+    final titleStyle = _focused ? FontWeight.w900 : FontWeight.w700;
+    final radius = widget.isTv ? TvDesignTokens.panelRadius : 18.0;
     final focusRing = _focused
         ? <BoxShadow>[
             BoxShadow(
               color: widget.isTv
-                  ? const Color(0x66FFF4D0)
+                  ? const Color(0x76FFE8A3)
                   : const Color(0xB04EA1FF),
               blurRadius: widget.isTv ? 30 : 22,
               spreadRadius: widget.isTv ? 0.2 : 1,
               offset: const Offset(0, 12),
             ),
+            if (widget.isTv)
+              const BoxShadow(
+                color: Color(0x99000000),
+                blurRadius: 24,
+                offset: Offset(0, 14),
+              ),
           ]
-        : const <BoxShadow>[
+        : <BoxShadow>[
             BoxShadow(
-              color: Color(0x22000000),
-              blurRadius: 18,
-              spreadRadius: 0.3,
-              offset: Offset(0, 4),
+              color: widget.isTv
+                  ? const Color(0x66000000)
+                  : const Color(0x22000000),
+              blurRadius: widget.isTv ? 20 : 18,
+              spreadRadius: 0.2,
+              offset: const Offset(0, 8),
             ),
           ];
 
@@ -98,7 +110,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
           width: widget.width,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(radius),
-            color: widget.isTv ? const Color(0x00040506) : BoltColors.panel,
+            color: widget.isTv ? Colors.transparent : BoltColors.panel,
             border: widget.isTv
                 ? null
                 : Border.all(
@@ -114,6 +126,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
             focusNode: widget.focusNode,
             onFocusChange: _setFocus,
             onTap: widget.onPressed,
+            onLongPress: widget.onLongPressed,
             autofocus: false,
             borderRadius: BorderRadius.circular(radius),
             focusColor: Colors.transparent,
@@ -131,8 +144,8 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                     border: widget.isTv
                         ? Border.all(
                             color: _focused
-                                ? TvDesignTokens.goldSoft
-                                : const Color(0x444F5F6E),
+                                ? Colors.white
+                                : TvDesignTokens.panelBorderSoft,
                             width: _focused ? 2.2 : 1,
                           )
                         : null,
@@ -162,6 +175,14 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                               if (media.isEpisode) const _Badge('Sæson'),
                             ],
                           ),
+                        ),
+                      if (widget.isTv &&
+                          media.badgeCount != null &&
+                          media.badgeCount! > 1)
+                        Positioned(
+                          right: 8,
+                          top: 8,
+                          child: _CountBadge(media.badgeCount!),
                         ),
                       if (_focused && !widget.isTv)
                         Positioned(
@@ -262,55 +283,30 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                         ),
                       if (widget.isTv && _focused)
                         Positioned(
-                          left: 9,
-                          right: 9,
-                          bottom: 9,
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 5,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xD9040506),
-                                  borderRadius: BorderRadius.circular(99),
-                                  border: Border.all(
-                                    color: const Color(0x99FFF4D0),
-                                    width: 1.2,
-                                  ),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.play_arrow_rounded,
-                                      color: Color(0xFFFFF4D0),
-                                      size: 18,
-                                    ),
-                                    SizedBox(width: 3),
-                                    Text(
-                                      'OK',
-                                      style: TextStyle(
-                                        color: Color(0xFFFFF4D0),
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: 0.5,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                          right: 10,
+                          bottom: 10,
+                          child: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xD9040506),
+                              border: Border.all(
+                                color: TvDesignTokens.focusFill,
+                                width: 1.4,
                               ),
-                              const Spacer(),
-                              Container(
-                                width: 5,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  color: TvDesignTokens.gold,
-                                  borderRadius: BorderRadius.circular(99),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x77000000),
+                                  blurRadius: 14,
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.play_arrow_rounded,
+                              color: TvDesignTokens.focusFill,
+                              size: 22,
+                            ),
                           ),
                         ),
                     ],
@@ -330,15 +326,16 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                         children: [
                           Text(
                             media.displayTitle,
-                            maxLines: widget.isTv ? 2 : 1,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontWeight: titleStyle,
-                              fontSize: widget.isTv ? 13.5 : 14,
-                              height: 1.12,
+                              fontSize: widget.isTv ? 13.2 : 14,
+                              height: 1.08,
+                              letterSpacing: widget.isTv ? -0.1 : 0,
                             ),
                           ),
-                          SizedBox(height: widget.isTv ? 4 : 6),
+                          SizedBox(height: widget.isTv ? 2 : 6),
                           Text(
                             [
                               if (media.releaseYear != null)
@@ -455,20 +452,69 @@ class _Badge extends StatelessWidget {
   );
 }
 
+class _CountBadge extends StatelessWidget {
+  const _CountBadge(this.count);
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: TvDesignTokens.focusFill,
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: Colors.white, width: 1.2),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x88000000),
+          blurRadius: 14,
+          offset: Offset(0, 5),
+        ),
+      ],
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Text(
+        '$count',
+        style: const TextStyle(
+          color: Color(0xFF090806),
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
+          height: 1,
+        ),
+      ),
+    ),
+  );
+}
+
 class _PosterFallback extends StatelessWidget {
   const _PosterFallback();
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: const BoxDecoration(
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF211A10), Color(0xFF060708), Color(0xFF10161B)],
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
+    children: [
+      const DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF2A200D), Color(0xFF060708), Color(0xFF11202A)],
+            stops: [0, 0.52, 1],
+          ),
+        ),
       ),
-    ),
-    child: const Center(
-      child: Icon(Icons.movie_outlined, size: 42, color: Color(0x55FFF4D0)),
-    ),
+      Positioned(
+        right: -26,
+        bottom: -22,
+        child: Icon(
+          Icons.movie_creation_outlined,
+          size: 96,
+          color: Colors.white.withValues(alpha: 0.06),
+        ),
+      ),
+      const Center(
+        child: Icon(Icons.movie_outlined, size: 42, color: Color(0x70FFF4D0)),
+      ),
+    ],
   );
 }

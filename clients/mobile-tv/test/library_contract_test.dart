@@ -68,7 +68,7 @@ void main() {
       expect(payload.isEmpty, isFalse);
       expect(
         requests.where((uri) => uri.path.endsWith('/media/catalog')),
-        hasLength(5),
+        hasLength(6),
       );
     },
   );

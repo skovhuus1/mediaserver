@@ -157,7 +157,11 @@ describe('series catalog aggregation', () => {
     });
 
     expect(findMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      orderBy: [{ releaseDate: 'desc' }, { releaseYear: 'desc' }, { title: 'asc' }],
+      orderBy: [
+        { releaseDate: { sort: 'desc', nulls: 'last' } },
+        { releaseYear: 'desc' },
+        { title: 'asc' },
+      ],
     }));
   });
 });

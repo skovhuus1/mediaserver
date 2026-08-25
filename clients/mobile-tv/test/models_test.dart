@@ -74,6 +74,8 @@ void main() {
       'playbackPreferences': {
         'qualityMode': 'auto',
         'playbackRate': 1,
+        'allowUpscale': true,
+        'upscaleMode': 'device',
         'preferredSubtitleLanguages': ['da', 'en'],
         'subtitleMode': 'auto',
         'autoplayNext': true,
@@ -93,6 +95,8 @@ void main() {
     expect(authorization.subtitleTracks.single.isText, isTrue);
     expect(authorization.preferences.preferredSubtitleLanguages.first, 'da');
     expect(authorization.hardwareUpscale, isTrue);
+    expect(authorization.preferences.allowUpscale, isTrue);
+    expect(authorization.preferences.upscaleMode, 'device');
     expect(authorization.preferences.subtitleTextColor, '#FFE66D');
     expect(authorization.preferences.subtitleTimingOffsetMs, -250);
   });

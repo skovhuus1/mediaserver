@@ -352,7 +352,7 @@ export class CatalogService {
       query.sort === 'title'
         ? [{ title: 'asc' }]
         : query.sort === 'released'
-          ? [{ releaseDate: 'desc' }, { releaseYear: 'desc' }, { title: 'asc' }]
+          ? [{ releaseDate: { sort: 'desc', nulls: 'last' } }, { releaseYear: 'desc' }, { title: 'asc' }]
         : query.sort === 'year'
           ? [{ releaseYear: 'desc' }, { title: 'asc' }]
           : [{ updatedAt: 'desc' }];

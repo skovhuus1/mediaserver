@@ -36,6 +36,7 @@ class LibraryUseCase implements LibraryContract {
       api.getJson('/media/catalog?type=movie&pageSize=36&sort=released'),
       api.getJson('/media/catalog?type=series&pageSize=36&sort=released'),
       api.getJson('/media/catalog?type=episode&pageSize=36&sort=released'),
+      api.getJson('/media/catalog?type=episode&pageSize=100&sort=newest'),
       api.getJson('/playback/history/continue'),
       api.getJson('/playback/watchlist'),
       api
@@ -49,9 +50,12 @@ class LibraryUseCase implements LibraryContract {
       releasedMovies: LibraryCatalogPayload.fromJson(responses[2]),
       releasedSeries: LibraryCatalogPayload.fromJson(responses[3]),
       latestEpisodes: LibraryCatalogPayload.fromJson(responses[4]),
-      continueItems: jsonList(responses[5]).map(MediaItem.fromJson).toList(),
-      watchlistItems: jsonList(responses[6]).map(MediaItem.fromJson).toList(),
-      recommendations: RecommendationFeed.fromJson(responses[7]),
+      recentlyAddedSeries: collapseEpisodeSeriesCards(
+        LibraryCatalogPayload.fromJson(responses[5]).items,
+      ),
+      continueItems: jsonList(responses[6]).map(MediaItem.fromJson).toList(),
+      watchlistItems: jsonList(responses[7]).map(MediaItem.fromJson).toList(),
+      recommendations: RecommendationFeed.fromJson(responses[8]),
     );
   }
 
@@ -130,6 +134,7 @@ class LibraryHomePayload {
     required this.releasedMovies,
     required this.releasedSeries,
     required this.latestEpisodes,
+    required this.recentlyAddedSeries,
     required this.continueItems,
     required this.watchlistItems,
     required this.recommendations,
@@ -140,6 +145,7 @@ class LibraryHomePayload {
   final LibraryCatalogPayload releasedMovies;
   final LibraryCatalogPayload releasedSeries;
   final LibraryCatalogPayload latestEpisodes;
+  final List<MediaItem> recentlyAddedSeries;
   final List<MediaItem> continueItems;
   final List<MediaItem> watchlistItems;
   final RecommendationFeed recommendations;
@@ -155,6 +161,7 @@ class LibraryHomePayload {
       releasedMovies.items.isEmpty &&
       releasedSeries.items.isEmpty &&
       latestEpisodes.items.isEmpty &&
+      recentlyAddedSeries.isEmpty &&
       continueItems.isEmpty &&
       watchlistItems.isEmpty &&
       recommendations.sections.isEmpty &&
@@ -166,10 +173,69 @@ class LibraryHomePayload {
     releasedMovies: LibraryCatalogPayload.empty,
     releasedSeries: LibraryCatalogPayload.empty,
     latestEpisodes: LibraryCatalogPayload.empty,
+    recentlyAddedSeries: [],
     continueItems: [],
     watchlistItems: [],
     recommendations: RecommendationFeed(sections: []),
   );
+}
+
+List<MediaItem> collapseEpisodeSeriesCards(List<MediaItem> episodes) {
+  final groups = <String, List<MediaItem>>{};
+  for (final episode in episodes.where((item) => item.isEpisode)) {
+    final key =
+        [
+              episode.seriesMetadataProviderId,
+              episode.seriesDisplayTitle,
+              episode.seriesTitle,
+              episode.displayTitle,
+            ]
+            .whereType<String>()
+            .map((value) => value.trim().toLowerCase())
+            .firstWhere((value) => value.isNotEmpty, orElse: () => episode.id);
+    groups.putIfAbsent(key, () => []).add(episode);
+  }
+  return groups.values
+      .map((items) {
+        final representative = items.first;
+        final posterPath = _firstNonEmpty(items.map((item) => item.posterPath));
+        final backdropPath = _firstNonEmpty(
+          items.map((item) => item.backdropPath),
+        );
+        return MediaItem(
+          id: representative.id,
+          title: representative.displayTitle,
+          type: 'series',
+          seriesTitle: representative.seriesTitle,
+          seriesDisplayTitle:
+              representative.seriesDisplayTitle ?? representative.seriesTitle,
+          seriesMetadataProviderId: representative.seriesMetadataProviderId,
+          releaseYear: representative.releaseYear,
+          overview: representative.overview,
+          posterPath: posterPath,
+          backdropPath: backdropPath,
+          width: representative.width,
+          height: representative.height,
+          hdr: representative.hdr,
+          rating: representative.rating,
+          bitrate: representative.bitrate,
+          container: representative.container,
+          videoCodec: representative.videoCodec,
+          audioCodec: representative.audioCodec,
+          durationMs: representative.durationMs,
+          reason: representative.reason,
+          badgeCount: items.length,
+        );
+      })
+      .toList(growable: false);
+}
+
+String? _firstNonEmpty(Iterable<String?> values) {
+  for (final value in values) {
+    final normalized = value?.trim();
+    if (normalized != null && normalized.isNotEmpty) return normalized;
+  }
+  return null;
 }
 
 class LibraryCatalogPayload {

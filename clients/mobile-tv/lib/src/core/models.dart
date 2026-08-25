@@ -215,6 +215,7 @@ class MediaItem {
     this.durationMs,
     this.progress,
     this.reason,
+    this.badgeCount,
   });
 
   final String id;
@@ -240,6 +241,7 @@ class MediaItem {
   final int? durationMs;
   final PlaybackProgress? progress;
   final String? reason;
+  final int? badgeCount;
 
   bool get isEpisode => type == 'episode' || seasonNumber != null;
   bool get isSeries => type == 'series';
@@ -290,6 +292,7 @@ class MediaItem {
           ? null
           : PlaybackProgress.fromJson(json['progress']),
       reason: reason ?? stringValue(outer['reason'] ?? outer['explanation']),
+      badgeCount: intValue(json['badgeCount']),
     );
   }
 }
@@ -737,6 +740,7 @@ class PlaybackPreferences {
     this.subtitleBottomOffsetPercent = 6,
     this.subtitleTimingOffsetMs = 0,
     this.bufferProfile,
+    this.allowUpscale = true,
     this.upscaleMode,
   });
 
@@ -753,6 +757,7 @@ class PlaybackPreferences {
   final int subtitleBottomOffsetPercent;
   final int subtitleTimingOffsetMs;
   final String? bufferProfile;
+  final bool allowUpscale;
   final String? upscaleMode;
 
   factory PlaybackPreferences.fromJson(dynamic value) {
@@ -776,9 +781,54 @@ class PlaybackPreferences {
           intValue(json['subtitleBottomOffsetPercent']) ?? 6,
       subtitleTimingOffsetMs: intValue(json['subtitleTimingOffsetMs']) ?? 0,
       bufferProfile: stringValue(json['bufferProfile']),
+      allowUpscale: boolValue(json['allowUpscale'], fallback: true),
       upscaleMode: stringValue(json['upscaleMode']),
     );
   }
+
+  PlaybackPreferences copyWith({
+    String? qualityMode,
+    Object? fixedQualityHeight = _modelUnset,
+    double? playbackRate,
+    List<String>? preferredAudioLanguages,
+    List<String>? preferredSubtitleLanguages,
+    String? subtitleMode,
+    bool? autoplayNext,
+    String? subtitleStyle,
+    String? subtitleTextColor,
+    int? subtitleSizePercent,
+    int? subtitleBottomOffsetPercent,
+    int? subtitleTimingOffsetMs,
+    Object? bufferProfile = _modelUnset,
+    bool? allowUpscale,
+    Object? upscaleMode = _modelUnset,
+  }) => PlaybackPreferences(
+    qualityMode: qualityMode ?? this.qualityMode,
+    fixedQualityHeight: identical(fixedQualityHeight, _modelUnset)
+        ? this.fixedQualityHeight
+        : fixedQualityHeight as int?,
+    playbackRate: playbackRate ?? this.playbackRate,
+    preferredAudioLanguages:
+        preferredAudioLanguages ?? this.preferredAudioLanguages,
+    preferredSubtitleLanguages:
+        preferredSubtitleLanguages ?? this.preferredSubtitleLanguages,
+    subtitleMode: subtitleMode ?? this.subtitleMode,
+    autoplayNext: autoplayNext ?? this.autoplayNext,
+    subtitleStyle: subtitleStyle ?? this.subtitleStyle,
+    subtitleTextColor: subtitleTextColor ?? this.subtitleTextColor,
+    subtitleSizePercent: subtitleSizePercent ?? this.subtitleSizePercent,
+    subtitleBottomOffsetPercent:
+        subtitleBottomOffsetPercent ?? this.subtitleBottomOffsetPercent,
+    subtitleTimingOffsetMs:
+        subtitleTimingOffsetMs ?? this.subtitleTimingOffsetMs,
+    bufferProfile: identical(bufferProfile, _modelUnset)
+        ? this.bufferProfile
+        : bufferProfile as String?,
+    allowUpscale: allowUpscale ?? this.allowUpscale,
+    upscaleMode: identical(upscaleMode, _modelUnset)
+        ? this.upscaleMode
+        : upscaleMode as String?,
+  );
 }
 
 class PlaybackAuthorization {
@@ -834,6 +884,10 @@ class PlaybackAuthorization {
     List<Rendition>? renditions,
     List<PlaybackAudioTrack>? audioTracks,
     Object? selectedAudioTrackId = _modelUnset,
+    PlaybackPreferences? preferences,
+    int? sourceBitrate,
+    int? sourceHeight,
+    bool? hardwareUpscale,
   }) => PlaybackAuthorization(
     sessionId: sessionId,
     streamToken: streamToken,
@@ -847,10 +901,10 @@ class PlaybackAuthorization {
         ? this.selectedAudioTrackId
         : selectedAudioTrackId as String?,
     renditions: renditions ?? this.renditions,
-    preferences: preferences,
-    sourceBitrate: sourceBitrate,
-    sourceHeight: sourceHeight,
-    hardwareUpscale: hardwareUpscale,
+    preferences: preferences ?? this.preferences,
+    sourceBitrate: sourceBitrate ?? this.sourceBitrate,
+    sourceHeight: sourceHeight ?? this.sourceHeight,
+    hardwareUpscale: hardwareUpscale ?? this.hardwareUpscale,
   );
 
   factory PlaybackAuthorization.fromJson(dynamic value) {

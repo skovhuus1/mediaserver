@@ -9,8 +9,9 @@ import '../../core/api_client.dart';
 import '../../core/models.dart';
 import '../../core/playback_platform.dart';
 import '../../shared_core/playback/playback_session_controller.dart';
+import '../../shared_core/ui_tokens/tv_design_tokens.dart';
 import '../../widgets/broadcast_subtitle.dart';
-import '../../widgets/playback_option_sheet.dart';
+import '../widgets/tv_option_overlay.dart';
 
 class TvPlayerScreen extends StatefulWidget {
   const TvPlayerScreen({
@@ -124,21 +125,25 @@ class TvPlaybackScaffold extends StatefulWidget {
   State<TvPlaybackScaffold> createState() => _TvPlaybackScaffoldState();
 }
 
-class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
+class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
+    with WidgetsBindingObserver {
   final FocusNode _rootFocus = FocusNode(debugLabel: 'tv-player-root');
   late final List<FocusNode> _primaryNodes = List.generate(
     3,
     (index) => FocusNode(debugLabel: 'tv-player-primary-$index'),
   );
   late final List<FocusNode> _secondaryNodes = List.generate(
-    4,
+    5,
     (index) => FocusNode(debugLabel: 'tv-player-secondary-$index'),
   );
   final FocusNode _markerNode = FocusNode(debugLabel: 'tv-player-skip-marker');
   final FocusNode _nextNode = FocusNode(debugLabel: 'tv-player-next-episode');
   Timer? _hideTimer;
+  Timer? _seekFeedbackTimer;
+  _TvSeekFeedbackData? _seekFeedback;
   bool _controlsVisible = true;
   bool _closing = false;
+  bool _keepScreenOnActive = false;
   int _row = 0;
   int _index = 1;
 
@@ -147,8 +152,9 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(_changed);
-    unawaited(PlaybackPlatform.instance.setKeepScreenOn(true));
+    _setPlaybackAwake(true);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _requestControlFocus();
@@ -162,10 +168,14 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
     if (oldWidget.controller == widget.controller) return;
     oldWidget.controller.removeListener(_changed);
     widget.controller.addListener(_changed);
+    _setPlaybackAwake(true);
   }
 
   void _changed() {
     if (!mounted) return;
+    if (state.initialized || state.playing || state.buffering) {
+      _setPlaybackAwake(true);
+    }
     if (_row == -1 && state.activeMarker == null) {
       _row = 0;
       _index = 1;
@@ -181,6 +191,25 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
         state.error == null &&
         !(_hideTimer?.isActive ?? false)) {
       _scheduleHide();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    if (lifecycleState != AppLifecycleState.resumed || _closing) return;
+    _reassertPlaybackAwake();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  void _setPlaybackAwake(bool active) {
+    if (_keepScreenOnActive == active) return;
+    _keepScreenOnActive = active;
+    unawaited(PlaybackPlatform.instance.setKeepScreenOn(active));
+  }
+
+  void _reassertPlaybackAwake() {
+    if (_keepScreenOnActive) {
+      unawaited(PlaybackPlatform.instance.setKeepScreenOn(true));
     }
   }
 
@@ -202,6 +231,54 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
       if (mounted && state.playing && !state.buffering && state.error == null) {
         _hideControls();
       }
+    });
+  }
+
+  void _remoteSeek(Duration delta) {
+    if (!state.seekable) {
+      _showSeekFeedback(
+        const _TvSeekFeedbackData(
+          icon: Icons.sensors_rounded,
+          label: 'LIVE',
+          subtitle: 'Streamen kan ikke spoles',
+        ),
+      );
+      return;
+    }
+    unawaited(widget.controller.seekBy(delta));
+    _showSeekFeedback(
+      _TvSeekFeedbackData(
+        icon: delta.isNegative
+            ? Icons.replay_10_rounded
+            : widget.live
+            ? Icons.forward_10_rounded
+            : Icons.forward_30_rounded,
+        label: delta.isNegative
+            ? '10 sek. tilbage'
+            : widget.live
+            ? '10 sek. frem'
+            : '30 sek. frem',
+        subtitle: _seekTargetLabel(delta),
+      ),
+    );
+  }
+
+  String _seekTargetLabel(Duration delta) {
+    if (state.duration <= Duration.zero) return 'Spoler';
+    final target = state.position + delta;
+    final clamped = target < Duration.zero
+        ? Duration.zero
+        : target > state.duration
+        ? state.duration
+        : target;
+    return _clock(clamped);
+  }
+
+  void _showSeekFeedback(_TvSeekFeedbackData feedback) {
+    _seekFeedbackTimer?.cancel();
+    setState(() => _seekFeedback = feedback);
+    _seekFeedbackTimer = Timer(const Duration(milliseconds: 820), () {
+      if (mounted) setState(() => _seekFeedback = null);
     });
   }
 
@@ -236,16 +313,12 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
       return KeyEventResult.ignored;
     }
     if (!_controlsVisible) {
-      if (key == LogicalKeyboardKey.arrowLeft && state.seekable) {
-        unawaited(widget.controller.seekBy(const Duration(seconds: -10)));
-        _showControls(requestFocus: false);
+      if (key == LogicalKeyboardKey.arrowLeft) {
+        _remoteSeek(const Duration(seconds: -10));
         return KeyEventResult.handled;
       }
-      if (key == LogicalKeyboardKey.arrowRight && state.seekable) {
-        unawaited(
-          widget.controller.seekBy(Duration(seconds: widget.live ? 10 : 30)),
-        );
-        _showControls(requestFocus: false);
+      if (key == LogicalKeyboardKey.arrowRight) {
+        _remoteSeek(Duration(seconds: widget.live ? 10 : 30));
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.arrowUp &&
@@ -262,7 +335,6 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
       if (key == LogicalKeyboardKey.enter ||
           key == LogicalKeyboardKey.select ||
           key == LogicalKeyboardKey.space) {
-        unawaited(widget.controller.togglePlayback());
         _showControls();
         return KeyEventResult.handled;
       }
@@ -341,32 +413,84 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
         controller.state.authorization?.subtitleTracks ??
         const <SubtitleTrack>[];
     const off = '__off__';
-    final selected = await showPlaybackOptionSheet<String>(
+    const shiftEarlier = '__shift_earlier__';
+    const shiftLater = '__shift_later__';
+    const shiftReset = '__shift_reset__';
+    _hideTimer?.cancel();
+    final selected = await showDialog<String>(
       context: context,
-      tv: true,
-      title: 'Undertekster',
-      description: tracks.isEmpty
-          ? 'Der blev ikke fundet undertekster.'
-          : 'Vælg et spor. Valget følger næste episode.',
-      options: [
-        PlaybackOption<String>(
-          value: off,
-          title: 'Fra',
-          icon: Icons.subtitles_off_outlined,
-          selected: state.selectedSubtitle == null,
-        ),
-        for (final track in tracks)
-          PlaybackOption<String>(
-            value: track.id,
-            title: track.label,
+      barrierColor: Colors.black.withValues(alpha: 0.18),
+      builder: (_) => TvOptionOverlay<String>(
+        playbackTitle: widget.title,
+        playbackSubtitle: widget.subtitle,
+        panelTitle: 'Undertekster',
+        panelDescription: tracks.isEmpty
+            ? 'Der blev ikke fundet undertekstspor til denne titel.'
+            : 'Vælg spor eller forskyd teksttimingen frem og tilbage i små trin.',
+        previewText: 'Synk: ${_subtitleOffsetLabel(state.subtitleOffset)}',
+        choices: [
+          TvPlaybackChoice<String>(
+            value: shiftEarlier,
+            title: 'Vis tekst tidligere',
             subtitle:
-                '${track.language.toUpperCase()} · ${track.isText ? 'Tekst' : 'Indbrænding'}',
-            icon: Icons.subtitles_outlined,
-            selected: state.selectedSubtitle?.id == track.id,
+                '+0,5 sek. · nu ${_subtitleOffsetLabel(state.subtitleOffset)}',
+            icon: Icons.keyboard_double_arrow_left_rounded,
+            selected: false,
           ),
-      ],
+          TvPlaybackChoice<String>(
+            value: shiftLater,
+            title: 'Vis tekst senere',
+            subtitle:
+                '-0,5 sek. · nu ${_subtitleOffsetLabel(state.subtitleOffset)}',
+            icon: Icons.keyboard_double_arrow_right_rounded,
+            selected: false,
+          ),
+          TvPlaybackChoice<String>(
+            value: shiftReset,
+            title: 'Nulstil forskydning',
+            subtitle: 'Tilbage til normal timing',
+            icon: Icons.sync_rounded,
+            selected: false,
+          ),
+          TvPlaybackChoice<String>(
+            value: off,
+            title: 'Fra',
+            subtitle: 'Afspil uden undertekster',
+            icon: Icons.subtitles_off_rounded,
+            selected: state.selectedSubtitle == null,
+          ),
+          for (final track in tracks)
+            TvPlaybackChoice<String>(
+              value: track.id,
+              title: track.label,
+              subtitle: _subtitleTrackMeta(track),
+              icon: track.forced
+                  ? Icons.g_translate_rounded
+                  : Icons.subtitles_rounded,
+              selected: state.selectedSubtitle?.id == track.id,
+            ),
+        ],
+      ),
     );
-    if (selected == null || !mounted) return;
+    if (selected == null || !mounted) {
+      if (mounted) _showControls();
+      return;
+    }
+    if (selected == shiftEarlier) {
+      await controller.adjustSubtitleOffset(const Duration(milliseconds: 500));
+      _showControls();
+      return;
+    }
+    if (selected == shiftLater) {
+      await controller.adjustSubtitleOffset(const Duration(milliseconds: -500));
+      _showControls();
+      return;
+    }
+    if (selected == shiftReset) {
+      await controller.resetSubtitleOffset();
+      _showControls();
+      return;
+    }
     await controller.selectSubtitle(
       selected == off
           ? null
@@ -381,29 +505,30 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
     final tracks =
         controller.state.authorization?.audioTracks ??
         const <PlaybackAudioTrack>[];
-    final selected = await showPlaybackOptionSheet<PlaybackAudioTrack>(
+    _hideTimer?.cancel();
+    final selected = await showDialog<PlaybackAudioTrack>(
       context: context,
-      tv: true,
-      title: 'Lydspor',
-      description: tracks.isEmpty
-          ? 'Der blev ikke fundet alternative lydspor.'
-          : 'Skifter lydspor på den aktuelle stream.',
-      options: [
-        for (final track in tracks)
-          PlaybackOption<PlaybackAudioTrack>(
-            value: track,
-            title: track.label,
-            subtitle: [
-              if (track.language.isNotEmpty) track.language.toUpperCase(),
-              if ((track.codec ?? '').isNotEmpty) track.codec!,
-              if ((track.channels ?? 0) > 0) '${track.channels} kanaler',
-              if (track.isDefault) 'Standard',
-            ].join(' · '),
-            icon: Icons.audiotrack_rounded,
-            selected:
-                state.selectedAudioTrack?.id == track.id || track.selected,
-          ),
-      ],
+      barrierColor: Colors.black.withValues(alpha: 0.18),
+      builder: (_) => TvOptionOverlay<PlaybackAudioTrack>(
+        playbackTitle: widget.title,
+        playbackSubtitle: widget.subtitle,
+        panelTitle: 'Lydspor',
+        panelDescription: tracks.isEmpty
+            ? 'Der blev ikke fundet alternative lydspor.'
+            : 'Skifter lydspor på den aktuelle stream og bevarer positionen.',
+        previewText: state.selectedAudioTrack?.label ?? 'Vælg lydspor',
+        choices: [
+          for (final track in tracks)
+            TvPlaybackChoice<PlaybackAudioTrack>(
+              value: track,
+              title: track.label,
+              subtitle: _audioTrackMeta(track),
+              icon: Icons.audiotrack_rounded,
+              selected:
+                  state.selectedAudioTrack?.id == track.id || track.selected,
+            ),
+        ],
+      ),
     );
     if (selected != null) await controller.selectAudioTrack(selected);
     _showControls();
@@ -428,36 +553,87 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
       _ => controller.currentFixedQualityHeight?.toString(),
     };
 
-    final selected = await showPlaybackOptionSheet<String>(
+    _hideTimer?.cancel();
+    final selected = await showDialog<String>(
       context: context,
-      tv: true,
-      title: 'Kvalitet',
-      description: 'Auto tilpasser streamen efter buffer og netværk.',
-      options: [
-        PlaybackOption<String>(
-          value: 'auto',
-          title: 'Automatisk',
-          icon: Icons.auto_awesome,
-          selected: 'auto' == selectedValue,
-        ),
-        PlaybackOption<String>(
-          value: 'original',
-          title: 'Original',
-          icon: Icons.high_quality,
-          selected: 'original' == selectedValue,
-        ),
-        for (final rendition in ordered)
-          PlaybackOption<String>(
-            value: '${rendition.height}',
-            title: '${rendition.height}p',
-            subtitle:
-                '${(rendition.bitrate / 1000000).toStringAsFixed(1)} Mbps · ${rendition.hdr ? 'HDR' : 'SDR'}',
-            icon: Icons.hd_outlined,
-            selected: selectedValue == '${rendition.height}',
+      barrierColor: Colors.black.withValues(alpha: 0.18),
+      builder: (_) => TvOptionOverlay<String>(
+        playbackTitle: widget.title,
+        playbackSubtitle: widget.subtitle,
+        panelTitle: 'Kvalitet',
+        panelDescription:
+            'Auto tilpasser streamen efter buffer og netværk. Original forsøger kildefilen.',
+        previewText: state.qualityLabel.isEmpty
+            ? 'Automatisk kvalitet'
+            : state.qualityLabel,
+        choices: [
+          TvPlaybackChoice<String>(
+            value: 'auto',
+            title: 'Auto',
+            subtitle: 'Tilpas automatisk efter forbindelse og buffer',
+            icon: Icons.auto_awesome,
+            selected: 'auto' == selectedValue,
           ),
-      ],
+          TvPlaybackChoice<String>(
+            value: 'original',
+            title: 'Original',
+            subtitle: 'Brug kildekvalitet når enheden og planen tillader det',
+            icon: Icons.high_quality,
+            selected: 'original' == selectedValue,
+          ),
+          for (final rendition in ordered)
+            TvPlaybackChoice<String>(
+              value: '${rendition.height}',
+              title: '${rendition.height}p',
+              subtitle: _qualityMeta(rendition),
+              icon: Icons.hd_outlined,
+              selected: selectedValue == '${rendition.height}',
+            ),
+        ],
+      ),
     );
     if (selected != null) await controller.selectQuality(selected);
+    _showControls();
+  }
+
+  Future<void> _showUpscale() async {
+    final controller = widget.controller;
+    if (controller is! PlaybackSessionController) return;
+    final serverTarget = _serverUpscaleTarget(controller.state.authorization);
+    _hideTimer?.cancel();
+    final selected = await showDialog<String>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.18),
+      builder: (_) => TvOptionOverlay<String>(
+        playbackTitle: widget.title,
+        playbackSubtitle: widget.subtitle,
+        panelTitle: 'Opskalering',
+        panelDescription:
+            'Server-opskalering laver en ny FFmpeg-stream i højere opløsning. TV-hardware-skalering er ikke en app-styret kvalitetsforbedring.',
+        previewText: state.upscaleLabel.isEmpty
+            ? 'Opskalering: Fra'
+            : state.upscaleLabel,
+        choices: [
+          TvPlaybackChoice<String>(
+            value: 'server',
+            title: serverTarget == null ? 'Server' : 'Server ${serverTarget}p',
+            subtitle: serverTarget == null
+                ? 'Bed serveren levere en opskaleret stream når muligt'
+                : 'Tving en opskaleret FFmpeg-stream til ${serverTarget}p',
+            icon: Icons.dns_rounded,
+            selected: controller.currentUpscaleMode == 'server',
+          ),
+          TvPlaybackChoice<String>(
+            value: 'off',
+            title: 'Fra',
+            subtitle: 'Brug streamens valgte opløsning uden ekstra opskalering',
+            icon: Icons.block_rounded,
+            selected: controller.currentUpscaleMode == 'off',
+          ),
+        ],
+      ),
+    );
+    if (selected != null) await controller.selectUpscaleMode(selected);
     _showControls();
   }
 
@@ -475,6 +651,7 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
   void dispose() {
     widget.controller.removeListener(_changed);
     _hideTimer?.cancel();
+    _seekFeedbackTimer?.cancel();
     _rootFocus.dispose();
     for (final node in [
       ..._primaryNodes,
@@ -484,7 +661,8 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
     ]) {
       node.dispose();
     }
-    unawaited(PlaybackPlatform.instance.setKeepScreenOn(false));
+    WidgetsBinding.instance.removeObserver(this);
+    _setPlaybackAwake(false);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
@@ -535,6 +713,7 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
                 duration: const Duration(milliseconds: 180),
                 child: _buildOverlay(),
               ),
+              _TvSeekFeedbackOverlay(feedback: _seekFeedback),
             ],
           ),
         ),
@@ -548,12 +727,17 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0x8F000000), Color(0x00000000), Color(0xF9040506)],
-          stops: [0, 0.58, 1],
+          colors: [
+            Color(0x78000000),
+            Color(0x00000000),
+            Color(0xD9000000),
+            Color(0xFF000000),
+          ],
+          stops: [0, 0.46, 0.78, 1],
         ),
       ),
       child: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(46, 14, 46, 4),
+        minimum: const EdgeInsets.fromLTRB(42, 12, 42, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -568,9 +752,9 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 22,
+                          fontSize: 19,
                           fontWeight: FontWeight.w900,
-                          letterSpacing: 0,
+                          letterSpacing: -0.2,
                         ),
                       ),
                       if (widget.subtitle != null)
@@ -589,18 +773,22 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
                   decoration: BoxDecoration(
                     color: const Color(0xD9040506),
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: const Color(0xFF3B3325)),
+                    border: Border.all(color: const Color(0x55FFE8A3)),
                   ),
                   child: Text(
                     widget.live
                         ? 'LIVE'
+                        : state.qualityChanging
+                        ? 'Skifter kvalitet'
+                        : state.audioChanging
+                        ? 'Skifter lyd'
                         : state.qualityLabel.isEmpty
                         ? state.status
                         : state.qualityLabel,
                     style: const TextStyle(
-                      color: Color(0xFFFFF4D0),
+                      color: Color(0xFFFFE8A3),
                       fontWeight: FontWeight.w900,
-                      fontSize: 12.5,
+                      fontSize: 11.5,
                     ),
                   ),
                 ),
@@ -670,152 +858,185 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
   }
 
   Widget _buildControlDeck() {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1180),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 7, 14, 8),
-          decoration: BoxDecoration(
-            color: const Color(0xE6070A0E),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: const Color(0x4DFFF4D0)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0xB8000000),
-                blurRadius: 34,
-                offset: Offset(0, 12),
+    return Transform.translate(
+      offset: const Offset(0, 8),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 960),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(10, 4, 10, 5),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xEA14191F), Color(0xEA05070A)],
               ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (state.buffering) ...[
-                const _TvPlayerStatusLine(
-                  icon: Icons.hourglass_top_rounded,
-                  label: 'Bufferer streamen',
+              borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
+              border: Border.all(color: const Color(0x40FFE8A3)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0xCC000000),
+                  blurRadius: 32,
+                  offset: Offset(0, 14),
                 ),
-                const SizedBox(height: 7),
               ],
-              _buildTimeline(),
-              const SizedBox(height: 7),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _TvPlayerButton(
-                      focusNode: _primaryNodes[0],
-                      label: '10 sek. tilbage',
-                      icon: Icons.replay_10_rounded,
-                      iconOnly: true,
-                      onFocus: () {
-                        _row = 0;
-                        _index = 0;
-                      },
-                      onPressed: state.seekable
-                          ? () => widget.controller.seekBy(
-                              const Duration(seconds: -10),
-                            )
-                          : null,
-                    ),
-                    const SizedBox(width: 10),
-                    _TvPlayerButton(
-                      focusNode: _primaryNodes[1],
-                      label: state.playing ? 'Pause' : 'Afspil',
-                      icon: state.playing
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                      primary: true,
-                      iconOnly: true,
-                      large: true,
-                      onFocus: () {
-                        _row = 0;
-                        _index = 1;
-                      },
-                      onPressed: widget.controller.togglePlayback,
-                    ),
-                    const SizedBox(width: 10),
-                    _TvPlayerButton(
-                      focusNode: _primaryNodes[2],
-                      label: widget.live ? '10 sek. frem' : '30 sek. frem',
-                      icon: widget.live
-                          ? Icons.forward_10_rounded
-                          : Icons.forward_30_rounded,
-                      iconOnly: true,
-                      onFocus: () {
-                        _row = 0;
-                        _index = 2;
-                      },
-                      onPressed: state.seekable
-                          ? () => widget.controller.seekBy(
-                              Duration(seconds: widget.live ? 10 : 30),
-                            )
-                          : null,
-                    ),
-                    const SizedBox(width: 18),
-                    Container(width: 1, height: 32, color: Colors.white12),
-                    const SizedBox(width: 14),
-                    _TvPlayerButton(
-                      focusNode: _secondaryNodes[0],
-                      label: state.selectedSubtitle?.label ?? 'Undertekster',
-                      icon: Icons.subtitles_rounded,
-                      onFocus: () {
-                        _row = 1;
-                        _index = 0;
-                      },
-                      onPressed: widget.controller is PlaybackSessionController
-                          ? _showSubtitles
-                          : null,
-                    ),
-                    const SizedBox(width: 8),
-                    _TvPlayerButton(
-                      focusNode: _secondaryNodes[1],
-                      label: state.selectedAudioTrack?.label ?? 'Lydspor',
-                      icon: Icons.audiotrack_rounded,
-                      onFocus: () {
-                        _row = 1;
-                        _index = 1;
-                      },
-                      onPressed:
-                          widget.controller is PlaybackSessionController &&
-                              (state.authorization?.audioTracks.isNotEmpty ??
-                                  false)
-                          ? _showAudio
-                          : null,
-                    ),
-                    const SizedBox(width: 8),
-                    _TvPlayerButton(
-                      focusNode: _secondaryNodes[2],
-                      label: widget.live
-                          ? 'Live-kvalitet'
-                          : state.qualityLabel.isEmpty
-                          ? 'Kvalitet'
-                          : state.qualityLabel,
-                      icon: Icons.tune_rounded,
-                      onFocus: () {
-                        _row = 1;
-                        _index = 2;
-                      },
-                      onPressed: widget.controller is PlaybackSessionController
-                          ? _showQuality
-                          : null,
-                    ),
-                    const SizedBox(width: 8),
-                    _TvPlayerButton(
-                      focusNode: _secondaryNodes[3],
-                      label: '${state.playbackRate.toStringAsFixed(2)}x',
-                      icon: Icons.speed_rounded,
-                      onFocus: () {
-                        _row = 1;
-                        _index = 3;
-                      },
-                      onPressed: widget.live ? null : _cycleSpeed,
-                    ),
-                  ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (state.buffering) ...[
+                  const _TvPlayerStatusLine(
+                    icon: Icons.hourglass_top_rounded,
+                    label: 'Bufferer streamen',
+                  ),
+                  const SizedBox(height: 6),
+                ],
+                _buildTimeline(),
+                const SizedBox(height: 6),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _TvPlayerButton(
+                        focusNode: _primaryNodes[0],
+                        label: '10 sek. tilbage',
+                        icon: Icons.replay_10_rounded,
+                        iconOnly: true,
+                        onFocus: () {
+                          _row = 0;
+                          _index = 0;
+                        },
+                        onPressed: state.seekable
+                            ? () => widget.controller.seekBy(
+                                const Duration(seconds: -10),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _TvPlayerButton(
+                        focusNode: _primaryNodes[1],
+                        label: state.playing ? 'Pause' : 'Afspil',
+                        icon: state.playing
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        primary: true,
+                        iconOnly: true,
+                        large: true,
+                        onFocus: () {
+                          _row = 0;
+                          _index = 1;
+                        },
+                        onPressed: widget.controller.togglePlayback,
+                      ),
+                      const SizedBox(width: 8),
+                      _TvPlayerButton(
+                        focusNode: _primaryNodes[2],
+                        label: widget.live ? '10 sek. frem' : '30 sek. frem',
+                        icon: widget.live
+                            ? Icons.forward_10_rounded
+                            : Icons.forward_30_rounded,
+                        iconOnly: true,
+                        onFocus: () {
+                          _row = 0;
+                          _index = 2;
+                        },
+                        onPressed: state.seekable
+                            ? () => widget.controller.seekBy(
+                                Duration(seconds: widget.live ? 10 : 30),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 14),
+                      Container(width: 1, height: 28, color: Colors.white12),
+                      const SizedBox(width: 12),
+                      _TvPlayerButton(
+                        focusNode: _secondaryNodes[0],
+                        label: state.subtitleOffset == Duration.zero
+                            ? state.selectedSubtitle?.label ?? 'Undertekster'
+                            : 'Tekst ${_subtitleOffsetLabel(state.subtitleOffset)}',
+                        icon: Icons.subtitles_rounded,
+                        onFocus: () {
+                          _row = 1;
+                          _index = 0;
+                        },
+                        onPressed:
+                            widget.controller is PlaybackSessionController
+                            ? _showSubtitles
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _TvPlayerButton(
+                        focusNode: _secondaryNodes[1],
+                        label: state.audioChanging
+                            ? 'Skifter lyd'
+                            : state.selectedAudioTrack?.label ?? 'Lydspor',
+                        icon: Icons.audiotrack_rounded,
+                        onFocus: () {
+                          _row = 1;
+                          _index = 1;
+                        },
+                        onPressed:
+                            widget.controller is PlaybackSessionController &&
+                                (state.authorization?.audioTracks.isNotEmpty ??
+                                    false)
+                            ? _showAudio
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _TvPlayerButton(
+                        focusNode: _secondaryNodes[2],
+                        label: widget.live
+                            ? 'Live-kvalitet'
+                            : state.qualityChanging
+                            ? 'Skifter kvalitet'
+                            : state.qualityLabel.isEmpty
+                            ? 'Kvalitet'
+                            : state.qualityLabel,
+                        icon: Icons.tune_rounded,
+                        onFocus: () {
+                          _row = 1;
+                          _index = 2;
+                        },
+                        onPressed:
+                            widget.controller is PlaybackSessionController
+                            ? _showQuality
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _TvPlayerButton(
+                        focusNode: _secondaryNodes[3],
+                        label: state.qualityChanging
+                            ? 'Skifter opskalering'
+                            : state.upscaleLabel.isEmpty
+                            ? 'Opskalering'
+                            : state.upscaleLabel,
+                        icon: Icons.auto_fix_high_rounded,
+                        onFocus: () {
+                          _row = 1;
+                          _index = 3;
+                        },
+                        onPressed:
+                            widget.controller is PlaybackSessionController
+                            ? _showUpscale
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _TvPlayerButton(
+                        focusNode: _secondaryNodes[4],
+                        label: '${state.playbackRate.toStringAsFixed(2)}x',
+                        icon: Icons.speed_rounded,
+                        onFocus: () {
+                          _row = 1;
+                          _index = 4;
+                        },
+                        onPressed: widget.live ? null : _cycleSpeed,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -851,13 +1072,13 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
         const SizedBox(width: 10),
         Expanded(
           child: SizedBox(
-            height: 6,
+            height: 5,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(999),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Container(height: 6, color: const Color(0x33FFFFFF)),
+                  Container(height: 5, color: const Color(0x33FFFFFF)),
                   if (!widget.live || state.seekable)
                     Positioned.fill(
                       child: Align(
@@ -866,9 +1087,9 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
                           widthFactor: math.max(0, math.min(1, buffered)),
                           alignment: Alignment.centerLeft,
                           child: Container(
-                            height: 6,
+                            height: 5,
                             decoration: BoxDecoration(
-                              color: const Color(0xFF8EDCFF),
+                              color: TvDesignTokens.cyan,
                               borderRadius: BorderRadius.circular(999),
                             ),
                           ),
@@ -886,9 +1107,9 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
                           ),
                           alignment: Alignment.centerLeft,
                           child: Container(
-                            height: 6,
+                            height: 5,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFFF4D0),
+                              color: TvDesignTokens.focusFill,
                               borderRadius: BorderRadius.circular(999),
                             ),
                           ),
@@ -916,6 +1137,151 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
       ],
     );
   }
+
+  String _subtitleTrackMeta(SubtitleTrack track) {
+    final parts = [
+      if (track.language.trim().isNotEmpty) track.language.toUpperCase(),
+      track.isText ? 'Tekstspor' : 'Kræver indbrænding',
+      if (track.forced) 'Tvungen',
+    ];
+    return parts.join(' · ');
+  }
+
+  String _subtitleOffsetLabel(Duration offset) {
+    final ms = offset.inMilliseconds;
+    if (ms == 0) return '0,0 sek.';
+    final seconds = (ms.abs() / 1000).toStringAsFixed(1).replaceAll('.', ',');
+    return ms > 0 ? 'tidligere $seconds sek.' : 'senere $seconds sek.';
+  }
+
+  String _audioTrackMeta(PlaybackAudioTrack track) {
+    final parts = [
+      if (track.language.trim().isNotEmpty) track.language.toUpperCase(),
+      if ((track.codec ?? '').trim().isNotEmpty) track.codec!,
+      if ((track.channels ?? 0) > 0) '${track.channels} kanaler',
+      if (track.isDefault) 'Standard',
+    ];
+    return parts.isEmpty ? 'Lydspor' : parts.join(' · ');
+  }
+
+  String _qualityMeta(Rendition rendition) {
+    final parts = [
+      '${(rendition.bitrate / 1000000).toStringAsFixed(1)} Mbps',
+      rendition.hdr ? 'HDR' : 'SDR',
+      if (rendition.upscaled) 'Opskaleret',
+    ];
+    return parts.join(' · ');
+  }
+
+  int? _serverUpscaleTarget(PlaybackAuthorization? authorization) {
+    if (authorization == null) return null;
+    final sourceHeight = authorization.sourceHeight ?? 0;
+    final upscaled = authorization.renditions
+        .where(
+          (rendition) =>
+              rendition.height > 0 &&
+              (rendition.upscaled || rendition.height > sourceHeight),
+        )
+        .map((rendition) => rendition.height)
+        .toList()
+      ..sort();
+    if (upscaled.isNotEmpty) return upscaled.last;
+    return null;
+  }
+}
+
+class _TvSeekFeedbackData {
+  const _TvSeekFeedbackData({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String label;
+  final String subtitle;
+}
+
+class _TvSeekFeedbackOverlay extends StatelessWidget {
+  const _TvSeekFeedbackOverlay({required this.feedback});
+
+  final _TvSeekFeedbackData? feedback;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = feedback;
+    return IgnorePointer(
+      child: Opacity(
+        opacity: data == null ? 0 : 1,
+        child: Center(
+          child: AnimatedScale(
+            scale: data == null ? 0.92 : 1,
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutBack,
+            child: data == null
+                ? const SizedBox.shrink()
+                : Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 18,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xD9080B10),
+                      borderRadius: BorderRadius.circular(26),
+                      border: Border.all(
+                        color: const Color(0x8CFFE8A3),
+                        width: 1.3,
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0xCC000000),
+                          blurRadius: 32,
+                          offset: Offset(0, 16),
+                        ),
+                        BoxShadow(color: Color(0x44FFE8A3), blurRadius: 24),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          data.icon,
+                          color: TvDesignTokens.focusFill,
+                          size: 48,
+                        ),
+                        const SizedBox(width: 14),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              data.label,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              data.subtitle,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _TvPlayerStatusLine extends StatelessWidget {
@@ -936,7 +1302,7 @@ class _TvPlayerStatusLine extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: const Color(0xFFF7C35F)),
+          Icon(icon, size: 14, color: TvDesignTokens.gold),
           const SizedBox(width: 6),
           Text(
             label,
@@ -1003,41 +1369,41 @@ class _TvPlayerButtonState extends State<_TvPlayerButton> {
             ? null
             : () => unawaited(Future<void>.sync(widget.onPressed!)),
         child: AnimatedScale(
-          scale: _focused ? 1.035 : 1,
-          duration: const Duration(milliseconds: 120),
+          scale: _focused ? 1.028 : 1,
+          duration: TvDesignTokens.focusAnimationDuration,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
+            duration: TvDesignTokens.focusAnimationDuration,
             constraints: widget.iconOnly
                 ? null
-                : const BoxConstraints(maxWidth: 190, minHeight: 38),
-            width: widget.iconOnly ? (widget.large ? 50 : 40) : null,
-            height: widget.iconOnly ? (widget.large ? 50 : 40) : null,
+                : const BoxConstraints(maxWidth: 172, minHeight: 34),
+            width: widget.iconOnly ? (widget.large ? 46 : 38) : null,
+            height: widget.iconOnly ? (widget.large ? 46 : 38) : null,
             padding: widget.iconOnly
                 ? EdgeInsets.zero
-                : const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                : const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
             decoration: BoxDecoration(
               color: widget.onPressed == null
                   ? const Color(0x221A1D21)
                   : _focused
-                  ? const Color(0xFFFFF4D0)
+                  ? TvDesignTokens.focusFill
                   : widget.primary
-                  ? const Color(0xFFF7C35F)
-                  : const Color(0xC20D1117),
+                  ? TvDesignTokens.gold
+                  : const Color(0xD00C1118),
               borderRadius: BorderRadius.circular(widget.iconOnly ? 999 : 999),
               border: Border.all(
                 color: _focused
                     ? const Color(0xFFFFFFFF)
                     : widget.primary
-                    ? const Color(0x99FFF4D0)
-                    : const Color(0x3DFFF4D0),
+                    ? const Color(0x99FFE8A3)
+                    : const Color(0x3DFFE8A3),
                 width: _focused ? 2 : 1,
               ),
               boxShadow: _focused
                   ? const [
                       BoxShadow(
-                        color: Color(0x8AF7C35F),
-                        blurRadius: 18,
-                        offset: Offset(0, 8),
+                        color: Color(0x78FFC857),
+                        blurRadius: 16,
+                        offset: Offset(0, 7),
                       ),
                     ]
                   : const [],
@@ -1048,7 +1414,7 @@ class _TvPlayerButtonState extends State<_TvPlayerButton> {
               child: widget.iconOnly
                   ? Icon(
                       widget.icon,
-                      size: widget.large ? 29 : 23,
+                      size: widget.large ? 27 : 22,
                       color: _focused || widget.primary
                           ? const Color(0xFF090806)
                           : Colors.white,
@@ -1074,7 +1440,7 @@ class _TvPlayerButtonState extends State<_TvPlayerButton> {
                                   ? const Color(0xFF090806)
                                   : Colors.white,
                               fontWeight: FontWeight.w800,
-                              fontSize: 11,
+                              fontSize: 10.8,
                             ),
                           ),
                         ),
@@ -1103,24 +1469,35 @@ class _TvPlayerMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(maxWidth: 620),
-    padding: const EdgeInsets.all(28),
+    constraints: const BoxConstraints(maxWidth: 560),
+    padding: const EdgeInsets.all(24),
     decoration: BoxDecoration(
-      color: const Color(0xE6101B27),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: const Color(0xFF332D21)),
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xEE121923), Color(0xEE070A0F)],
+      ),
+      borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
+      border: Border.all(color: const Color(0x55FFE8A3)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0xB8000000),
+          blurRadius: 42,
+          offset: Offset(0, 18),
+        ),
+      ],
     ),
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 58, color: const Color(0xFFF7C35F)),
-        const SizedBox(height: 18),
+        Icon(icon, size: 52, color: TvDesignTokens.gold),
+        const SizedBox(height: 16),
         if (onPressed == null) const CircularProgressIndicator(),
         if (onPressed == null) const SizedBox(height: 16),
         Text(
           message,
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 20),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
         ),
         if (onPressed != null) ...[
           const SizedBox(height: 18),

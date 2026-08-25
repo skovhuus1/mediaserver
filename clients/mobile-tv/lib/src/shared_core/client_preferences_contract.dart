@@ -193,7 +193,7 @@ class DevicePreferences {
     this.qualityMode = 'auto',
     this.fixedQualityHeight,
     this.allowUpscale = true,
-    this.upscaleMode = 'device',
+    this.upscaleMode = 'server',
     this.bufferProfile = 'auto',
     this.dataSaver = false,
     this.playbackRate = 1,
@@ -212,15 +212,15 @@ class DevicePreferences {
   factory DevicePreferences.fromJson(dynamic value) {
     final json = jsonMap(value);
     final allowUpscale = boolValue(json['allowUpscale'], fallback: true);
+    final normalizedUpscaleMode = PlaybackTuning.normalized(
+      upscaleMode:
+          stringValue(json['upscaleMode']) ?? (allowUpscale ? 'server' : 'off'),
+    ).upscaleMode;
     return DevicePreferences(
       qualityMode: stringValue(json['qualityMode']) ?? 'auto',
       fixedQualityHeight: intValue(json['fixedQualityHeight']),
       allowUpscale: allowUpscale,
-      upscaleMode: PlaybackTuning.normalized(
-        upscaleMode:
-            stringValue(json['upscaleMode']) ??
-            (allowUpscale ? 'device' : 'off'),
-      ).upscaleMode,
+      upscaleMode: normalizedUpscaleMode,
       bufferProfile: PlaybackTuning.normalized(
         bufferProfile: stringValue(json['bufferProfile']),
       ).bufferProfile,

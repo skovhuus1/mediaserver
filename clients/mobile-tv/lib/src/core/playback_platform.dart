@@ -121,7 +121,7 @@ class PlaybackPlatform {
   Future<void> configureTvVideoPlayer(
     bool enabled, {
     String bufferProfile = 'auto',
-    String upscaleMode = 'device',
+    String upscaleMode = 'server',
   }) async {
     try {
       await _videoMethods.invokeMethod<void>('configureTvMode', {

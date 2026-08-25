@@ -247,9 +247,12 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
         'Opskalering',
         _upscaleLabel(_device.upscaleMode),
         () {
+          final current = _effectiveTvUpscaleMode(_device.upscaleMode);
           final mode = _cycle(
-            playbackUpscaleModes.toList(growable: false),
-            _device.upscaleMode,
+            playbackUpscaleModes
+                .where((value) => value != 'device')
+                .toList(growable: false),
+            current,
             1,
           );
           _device = _device.copyWith(
@@ -258,9 +261,12 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
           );
         },
         () {
+          final current = _effectiveTvUpscaleMode(_device.upscaleMode);
           final mode = _cycle(
-            playbackUpscaleModes.toList(growable: false),
-            _device.upscaleMode,
+            playbackUpscaleModes
+                .where((value) => value != 'device')
+                .toList(growable: false),
+            current,
             -1,
           );
           _device = _device.copyWith(
@@ -397,8 +403,11 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
   String _upscaleLabel(String value) => switch (value) {
     'off' => 'Fra',
     'server' => 'Server · FFmpeg',
-    _ => 'Enhed · TV-hardware',
+    _ => 'Server · FFmpeg',
   };
+
+  String _effectiveTvUpscaleMode(String value) =>
+      value == 'off' ? 'off' : 'server';
 
   Future<void> _save(Future<void> Function() operation) async {
     setState(() {
@@ -539,7 +548,7 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
     final options = _options;
     _option = _option.clamp(0, options.length - 1);
     return Scaffold(
-      backgroundColor: TvDesignTokens.background,
+      backgroundColor: Colors.transparent,
       body: Focus(
         focusNode: _root,
         autofocus: true,
@@ -630,7 +639,14 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
                               width: 282,
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: TvDesignTokens.surfaceGlass,
+                                gradient: const LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Color(0xE80E141C),
+                                    Color(0xE806090D),
+                                  ],
+                                ),
                                 borderRadius: BorderRadius.circular(
                                   TvDesignTokens.panelRadius,
                                 ),
@@ -685,8 +701,8 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
                                     begin: Alignment.topLeft,
                                     end: Alignment.bottomRight,
                                     colors: [
-                                      Color(0xF00B0F14),
-                                      Color(0xE807090C),
+                                      Color(0xF0121821),
+                                      Color(0xE807090D),
                                     ],
                                   ),
                                   borderRadius: BorderRadius.circular(
@@ -776,21 +792,28 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
     required bool selected,
     required Widget child,
   }) => AnimatedScale(
-    scale: focused ? TvDesignTokens.focusScale : 1,
+    scale: focused ? 1.025 : 1,
     duration: TvDesignTokens.focusAnimationDuration,
     child: AnimatedContainer(
       duration: TvDesignTokens.focusAnimationDuration,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
+        gradient: focused
+            ? const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF2A2214), Color(0xFF151B22)],
+              )
+            : null,
         color: focused
-            ? const Color(0xFF332A1A)
+            ? null
             : selected
-            ? const Color(0xAA17130D)
-            : const Color(0xAA040506),
+            ? TvDesignTokens.selectedFill
+            : const Color(0xAA070B10),
         borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
         border: Border.all(
           color: focused
-              ? TvDesignTokens.goldSoft
+              ? TvDesignTokens.focusFill
               : selected
               ? const Color(0x665E4A26)
               : TvDesignTokens.panelBorderSoft,
@@ -799,7 +822,7 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
         boxShadow: focused
             ? const [
                 BoxShadow(
-                  color: Color(0x44F7C35F),
+                  color: Color(0x55FFC857),
                   blurRadius: 18,
                   offset: Offset(0, 7),
                 ),

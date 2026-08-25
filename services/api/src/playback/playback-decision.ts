@@ -109,10 +109,20 @@ export function shouldTranscodeCompatibleSource(input: {
   estimatedDownlinkMbps: number | null;
   dataSaver: boolean;
   preferDirectPlay: boolean;
+  allowUpscale?: boolean;
+  upscaleMode?: 'off' | 'server' | 'device' | null;
   autoTranscodeOnBandwidth?: boolean;
 }): { required: boolean; code: string; reason: string } {
   if (input.qualityMode === 'original') {
     return { required: false, code: 'original_requested', reason: 'Original quality explicitly prefers Direct Play' };
+  }
+  if (
+    input.allowUpscale === true
+    && input.upscaleMode === 'server'
+    && input.sourceHeight !== null
+    && input.targetHeight > input.sourceHeight
+  ) {
+    return { required: true, code: 'server_upscale', reason: 'Server upscaling requires a managed adaptive stream' };
   }
   if (
     input.dataSaver

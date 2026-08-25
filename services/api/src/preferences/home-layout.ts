@@ -3,12 +3,13 @@ export const HOME_ROW_IDS = [
   'continue',
   'watchlist',
   'latest_episodes',
+  'recently_added',
   'new_movies',
   'new_series',
   'genres',
   'popular',
 ] as const;
-export const HOME_ROW_ID_PATTERN = /^(?:recommendations|continue|watchlist|latest_episodes|new_movies|new_series|genres|popular|playlist:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/iu;
+export const HOME_ROW_ID_PATTERN = /^(?:recommendations|continue|watchlist|latest_episodes|recently_added|new_movies|new_series|genres|popular|playlist:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/iu;
 export type HomeRowId = string;
 
 export function normalizeHomeLayout(order: unknown, hidden: unknown) {

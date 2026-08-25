@@ -10,6 +10,7 @@ import '../../shared_core/library_contract.dart';
 import '../../shared_core/paged_catalog_controller.dart';
 import '../../shared_core/ui_tokens/tv_design_tokens.dart';
 import '../../widgets/media_card.dart';
+import '../widgets/tv_media_context_menu.dart';
 
 class TvLibraryScreen extends StatefulWidget {
   const TvLibraryScreen({
@@ -19,6 +20,7 @@ class TvLibraryScreen extends StatefulWidget {
     required this.mediaType,
     required this.onPlay,
     required this.onOpen,
+    this.onPlayWithPosition,
     this.category,
     this.sort = 'title',
     super.key,
@@ -31,6 +33,7 @@ class TvLibraryScreen extends StatefulWidget {
   final String? category;
   final String sort;
   final ValueChanged<MediaItem> onPlay;
+  final TvMediaContextPlayHandler? onPlayWithPosition;
   final ValueChanged<MediaItem> onOpen;
 
   @override
@@ -44,6 +47,10 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
   late final PagedCatalogController _catalog;
   int _focusedItemIndex = 0;
   int _columnCount = 1;
+  bool _selectHoldFired = false;
+  bool _selectHoldTracking = false;
+  Timer? _selectHoldTimer;
+  MediaItem? _selectHoldMedia;
 
   PagedCatalogState get _state => _catalog.state;
   bool get _showFooter => _state.error != null || _state.loadingMore;
@@ -95,6 +102,7 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
 
   @override
   void dispose() {
+    _resetSelectHold();
     _catalog.removeListener(_catalogChanged);
     _catalog.dispose();
     _gridController
@@ -135,7 +143,13 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (_isSelectKey(event.logicalKey)) {
+      return _handleSelectKey(event)
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    _resetSelectHold();
     switch (event.logicalKey) {
       case LogicalKeyboardKey.arrowLeft:
         _moveHorizontal(-1);
@@ -149,10 +163,6 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
       case LogicalKeyboardKey.arrowDown:
         _moveVertical(1);
         return KeyEventResult.handled;
-      case LogicalKeyboardKey.enter:
-      case LogicalKeyboardKey.select:
-        _activate();
-        return KeyEventResult.handled;
       case LogicalKeyboardKey.escape:
       case LogicalKeyboardKey.goBack:
       case LogicalKeyboardKey.browserBack:
@@ -161,6 +171,57 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
       default:
         return KeyEventResult.ignored;
     }
+  }
+
+  bool _isSelectKey(LogicalKeyboardKey key) =>
+      key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.select;
+
+  bool _handleSelectKey(KeyEvent event) {
+    final item = _focusedContextMedia();
+    if (item == null) {
+      if (event is KeyDownEvent) {
+        _activate();
+        return true;
+      }
+      return event is KeyUpEvent || event is KeyRepeatEvent;
+    }
+    if (event is KeyDownEvent) {
+      if (_selectHoldTracking) return true;
+      _selectHoldTracking = true;
+      _selectHoldFired = false;
+      _selectHoldMedia = item;
+      _selectHoldTimer = Timer(const Duration(milliseconds: 560), () {
+        final heldItem = _selectHoldMedia;
+        if (!mounted || !_selectHoldTracking || heldItem == null) return;
+        _selectHoldFired = true;
+        _selectHoldTracking = false;
+        _selectHoldMedia = null;
+        _selectHoldTimer = null;
+        unawaited(_openContextMenu(heldItem));
+      });
+      return true;
+    }
+    if (event is KeyRepeatEvent) return true;
+    if (event is KeyUpEvent) {
+      final fired = _selectHoldFired;
+      _resetSelectHold();
+      if (!fired) _activate();
+      return true;
+    }
+    return false;
+  }
+
+  void _resetSelectHold() {
+    _selectHoldTimer?.cancel();
+    _selectHoldTimer = null;
+    _selectHoldTracking = false;
+    _selectHoldFired = false;
+    _selectHoldMedia = null;
+  }
+
+  MediaItem? _focusedContextMedia() {
+    if (_footerNode.hasFocus) return null;
+    return _state.items.elementAtOrNull(_focusedItemIndex);
   }
 
   void _moveHorizontal(int delta) {
@@ -229,6 +290,27 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
     final item = _state.items.elementAtOrNull(_focusedItemIndex);
     if (item == null) return;
     item.isSeries ? widget.onOpen(item) : widget.onPlay(item);
+  }
+
+  Future<void> _openContextMenu(MediaItem media) async {
+    await showTvMediaContextMenu(
+      context: context,
+      api: widget.api,
+      media: media,
+      onOpen: (item) async => widget.onOpen(item),
+      onPlay: (item, resumePositionMs) async {
+        final positioned = widget.onPlayWithPosition;
+        if (positioned != null) {
+          await positioned(item, resumePositionMs);
+        } else {
+          widget.onPlay(item);
+        }
+      },
+    );
+    if (mounted && _itemNodes.isNotEmpty) {
+      _itemNodes[_focusedItemIndex.clamp(0, _itemNodes.length - 1).toInt()]
+          .requestFocus();
+    }
   }
 
   @override
@@ -328,6 +410,9 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
                                   _focusedItemIndex = index;
                                   _activate();
                                 },
+                                onLongPressed: () => unawaited(
+                                  _openContextMenu(_state.items[index]),
+                                ),
                               ),
                             ),
                           );

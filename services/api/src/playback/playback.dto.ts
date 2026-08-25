@@ -117,6 +117,19 @@ export class ReconfigurePlaybackDto {
   forceTranscode?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  allowUpscale?: boolean;
+
+  @IsOptional()
+  @IsIn(['off', 'server', 'device'])
+  upscaleMode?: 'off' | 'server' | 'device';
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PlaybackCapabilitiesDto)
+  capabilities?: PlaybackCapabilitiesDto;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)

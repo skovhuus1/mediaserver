@@ -70,7 +70,8 @@ void main() {
     expect(find.text('Sæsoner og afsnit'), findsOneWidget);
     expect(find.textContaining('Pilot'), findsOneWidget);
     expect(find.textContaining('Naboen'), findsOneWidget);
-    expect(find.textContaining('Sæson 1 · 2'), findsOneWidget);
+    expect(find.text('Sæson 1'), findsOneWidget);
+    expect(find.textContaining('Sæson 1 · 2'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -122,7 +123,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('S03E01'), findsOneWidget);
 
-    await tester.tap(find.text('Sæson 1 · 1'));
+    await tester.tap(find.text('Sæson 1'));
     await tester.pumpAndSettle();
 
     expect(requestedSeasons, [null]);

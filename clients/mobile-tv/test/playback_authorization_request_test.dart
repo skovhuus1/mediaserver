@@ -12,6 +12,7 @@ void main() {
       screenHeight: 9000.4,
       devicePixelRatio: 8,
       supportsHdr: true,
+      estimatedDownlinkMbps: 42.5,
     ).toJson();
 
     final capabilities = request['capabilities'] as Map<String, dynamic>;
@@ -20,6 +21,7 @@ void main() {
     expect(capabilities['screenHeight'], isA<int>());
     expect(capabilities['devicePixelRatio'], 4.0);
     expect(capabilities['devicePixelRatio'], isA<double>());
+    expect(capabilities['estimatedDownlinkMbps'], 42.5);
     expect(capabilities['supportsHdr'], isTrue);
   });
 

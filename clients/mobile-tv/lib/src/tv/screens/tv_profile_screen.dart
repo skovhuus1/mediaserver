@@ -257,7 +257,7 @@ class _TvProfileScreenState extends State<TvProfileScreen> {
   Widget build(BuildContext context) {
     final user = widget.controller.user;
     return Scaffold(
-      backgroundColor: TvDesignTokens.background,
+      backgroundColor: Colors.transparent,
       body: Focus(
         canRequestFocus: true,
         onKeyEvent: _handleKey,

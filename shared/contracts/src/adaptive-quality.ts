@@ -70,6 +70,14 @@ export function buildAdaptiveQualityPlan(
       ? sourceHeight
       : Number.POSITIVE_INFINITY;
   const dataCap = input.dataSaver ? 720 : Number.POSITIVE_INFINITY;
+  const networkBitrateCap =
+    input.qualityMode === 'original'
+      ? Number.POSITIVE_INFINITY
+      : smoothNetworkBitrateCap(input.estimatedDownlinkMbps);
+  const networkHeightCap =
+    input.qualityMode === 'original'
+      ? Number.POSITIVE_INFINITY
+      : smoothNetworkHeightCap(networkBitrateCap);
   const effectiveMaxHeight = Math.max(
     360,
     Math.min(
@@ -79,11 +87,16 @@ export function buildAdaptiveQualityPlan(
       fixedHeight,
       upscaleCap,
       dataCap,
+      networkHeightCap,
     ),
   );
   const effectiveMaxBitrate = Math.max(
     800_000,
-    Math.min(input.planMaxBitrate, input.dataSaver ? 3_000_000 : Number.POSITIVE_INFINITY),
+    Math.min(
+      input.planMaxBitrate,
+      input.dataSaver ? 3_000_000 : Number.POSITIVE_INFINITY,
+      networkBitrateCap,
+    ),
   );
   const hdr = input.sourceHdr && input.hdrMode !== 'force_sdr';
 
@@ -136,6 +149,23 @@ function positive(value: number | null | undefined) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? value
     : null;
+}
+
+function smoothNetworkBitrateCap(value: number | null | undefined) {
+  const downlink = positive(value);
+  return downlink
+    ? Math.max(800_000, Math.round(downlink * 1_000_000 * 0.72))
+    : Number.POSITIVE_INFINITY;
+}
+
+function smoothNetworkHeightCap(bitrateCap: number) {
+  if (!Number.isFinite(bitrateCap)) return Number.POSITIVE_INFINITY;
+  const safeLevels = LEVELS.filter(
+    (level) => Math.round(level.bitrate * 1.08) <= bitrateCap,
+  );
+  return safeLevels.length > 0
+    ? safeLevels[safeLevels.length - 1]!.height
+    : LEVELS[0]!.height;
 }
 
 function even(value: number) {

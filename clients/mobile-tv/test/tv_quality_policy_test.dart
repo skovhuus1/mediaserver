@@ -66,4 +66,21 @@ void main() {
       720,
     );
   });
+
+  test('server upscale can unlock above source when stable and bandwidth allows', () {
+    final policy = TvQualityPolicy(
+      startedAt: started,
+      sourceHeight: 720,
+      allowUpscale: true,
+    );
+    expect(
+      policy.automaticMaximumHeight(
+        now: started.add(const Duration(minutes: 3)),
+        bufferAheadMs: 60000,
+        bandwidthEstimate: 12000000,
+        tracks: tracks,
+      ),
+      1080,
+    );
+  });
 }

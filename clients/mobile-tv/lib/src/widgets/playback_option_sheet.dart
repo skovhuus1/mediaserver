@@ -33,13 +33,13 @@ Future<T?> showPlaybackOptionSheet<T>({
   if (tv) {
     return showDialog<T>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.72),
+      barrierColor: Colors.black.withValues(alpha: 0.62),
       builder: (_) => Dialog(
         alignment: Alignment.centerRight,
-        insetPadding: const EdgeInsets.fromLTRB(32, 28, 56, 28),
+        insetPadding: const EdgeInsets.fromLTRB(32, 26, 48, 26),
         backgroundColor: Colors.transparent,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 388, maxHeight: 620),
+          constraints: const BoxConstraints(maxWidth: 420, maxHeight: 660),
           child: content,
         ),
       ),
@@ -71,20 +71,27 @@ class _PlaybackOptionSheet<T> extends StatelessWidget {
     final selectedIndex = options.indexWhere((option) => option.selected);
     final autofocusIndex = selectedIndex < 0 ? 0 : selectedIndex;
     return Material(
-      color: tv ? const Color(0xF2090A0C) : const Color(0xFF0B1726),
-      borderRadius: BorderRadius.circular(tv ? 12 : 18),
+      color: tv ? const Color(0xF4070A0F) : const Color(0xFF0B1726),
+      borderRadius: BorderRadius.circular(tv ? 22 : 18),
       clipBehavior: Clip.antiAlias,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(tv ? 12 : 18),
+          gradient: tv
+              ? const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xF6151A20), Color(0xF006080C)],
+                )
+              : null,
+          borderRadius: BorderRadius.circular(tv ? 22 : 18),
           border: Border.all(
-            color: tv ? const Color(0x88403322) : const Color(0x334DD9FF),
+            color: tv ? const Color(0x66FFE8A3) : const Color(0x334DD9FF),
           ),
           boxShadow: const [
             BoxShadow(
               color: Color(0xB8000000),
-              blurRadius: 30,
-              offset: Offset(0, 14),
+              blurRadius: 46,
+              offset: Offset(0, 20),
             ),
           ],
         ),
@@ -96,10 +103,10 @@ class _PlaybackOptionSheet<T> extends StatelessWidget {
               SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(
-                    tv ? 18 : 20,
-                    tv ? 17 : 12,
-                    tv ? 18 : 20,
-                    tv ? 12 : 18,
+                    tv ? 20 : 20,
+                    tv ? 18 : 12,
+                    tv ? 20 : 20,
+                    tv ? 13 : 18,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -107,16 +114,16 @@ class _PlaybackOptionSheet<T> extends StatelessWidget {
                       Text(
                         title,
                         style: TextStyle(
-                          fontSize: tv ? 23 : 22,
+                          fontSize: tv ? 22 : 22,
                           fontWeight: FontWeight.w900,
-                          letterSpacing: -0.2,
+                          letterSpacing: -0.35,
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         description,
                         style: TextStyle(
-                          color: Colors.white60,
+                          color: tv ? const Color(0xFF9FB1C1) : Colors.white60,
                           height: 1.28,
                           fontSize: tv ? 12.5 : null,
                         ),
@@ -127,10 +134,10 @@ class _PlaybackOptionSheet<T> extends StatelessWidget {
               ),
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(
-                  tv ? 9 : 10,
+                  tv ? 10 : 10,
                   0,
-                  tv ? 9 : 10,
-                  tv ? 9 : 12,
+                  tv ? 10 : 10,
+                  tv ? 10 : 12,
                 ),
                 sliver: SliverList.builder(
                   itemCount: options.length,
@@ -176,25 +183,34 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: AnimatedScale(
-        duration: const Duration(milliseconds: 110),
-        scale: _focused && widget.tv ? 1.018 : 1,
+        duration: const Duration(milliseconds: 105),
+        scale: _focused && widget.tv ? 1.025 : 1,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 110),
+          duration: const Duration(milliseconds: 105),
           decoration: BoxDecoration(
             color: _focused
-                ? const Color(0xFFFFF4D0)
+                ? const Color(0xFFFFE8A3)
                 : option.selected
-                ? const Color(0xFF221D14)
-                : const Color(0xFF0A0C0F),
-            borderRadius: BorderRadius.circular(8),
+                ? const Color(0xFF21190D)
+                : const Color(0xE60A0E14),
+            borderRadius: BorderRadius.circular(widget.tv ? 16 : 8),
             border: Border.all(
               color: _focused
                   ? Colors.white
                   : option.selected
-                  ? const Color(0x99F7C35F)
-                  : const Color(0x333B3325),
+                  ? const Color(0xAAFFC857)
+                  : const Color(0x4039414A),
               width: _focused ? 2 : 1,
             ),
+            boxShadow: _focused && widget.tv
+                ? const [
+                    BoxShadow(
+                      color: Color(0x55FFC857),
+                      blurRadius: 18,
+                      offset: Offset(0, 8),
+                    ),
+                  ]
+                : const [],
           ),
           child: Shortcuts(
             shortcuts: const {
@@ -206,7 +222,7 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
               child: InkWell(
                 key: ValueKey('playback-option-${option.value}'),
                 autofocus: widget.autofocus,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(widget.tv ? 16 : 8),
                 onFocusChange: (focused) {
                   setState(() => _focused = focused);
                   if (!focused) return;
@@ -222,8 +238,8 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
                 onTap: () => Navigator.of(context).pop(option.value),
                 child: Padding(
                   padding: EdgeInsets.symmetric(
-                    horizontal: widget.tv ? 13 : 16,
-                    vertical: widget.tv ? 9 : 12,
+                    horizontal: widget.tv ? 14 : 16,
+                    vertical: widget.tv ? 10 : 12,
                   ),
                   child: Row(
                     children: [
@@ -232,7 +248,7 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
                         size: widget.tv ? 20 : null,
                         color: _focused
                             ? const Color(0xFF090806)
-                            : const Color(0xFFF7C35F),
+                            : const Color(0xFFFFC857),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -242,8 +258,8 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
                             Text(
                               option.title,
                               style: TextStyle(
-                                fontSize: widget.tv ? 15.5 : 16,
-                                fontWeight: FontWeight.w800,
+                                fontSize: widget.tv ? 15 : 16,
+                                fontWeight: FontWeight.w900,
                                 color: _focused
                                     ? const Color(0xFF090806)
                                     : Colors.white,
@@ -265,9 +281,11 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
                         ),
                       ),
                       if (option.selected)
-                        const Icon(
+                        Icon(
                           Icons.check_circle,
-                          color: Color(0xFFF7C35F),
+                          color: _focused
+                              ? const Color(0xFF090806)
+                              : const Color(0xFFFFC857),
                         ),
                     ],
                   ),

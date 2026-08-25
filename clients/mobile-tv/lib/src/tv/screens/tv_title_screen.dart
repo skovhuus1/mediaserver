@@ -50,12 +50,14 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
   TitleExperience? _experience;
   int? _selectedSeason;
   bool _loading = true;
+  bool _loadingSeason = false;
   bool _actionBusy = false;
   bool _downloadBusy = false;
   bool _inWatchlist = false;
   bool _watched = false;
   String? _error;
   int _focusRequestEpoch = 0;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -104,40 +106,103 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
-    final preferredSeason = _selectedSeason;
+  Future<void> _load({
+    int? seasonNumber,
+    bool focusPlaybackPosition = false,
+    String? playedMediaId,
+  }) async {
+    final generation = ++_loadGeneration;
+    final preferredSeason = seasonNumber ?? _selectedSeason;
+    final loadingFullTitle = _experience == null || seasonNumber == null;
     setState(() {
-      _loading = true;
+      if (loadingFullTitle) {
+        _loading = true;
+      } else {
+        _loadingSeason = true;
+      }
       _error = null;
     });
     try {
-      final payload = await _title.loadTitle(widget.media.id);
-      if (!mounted) return;
+      final payload = await _loadTitlePayload(seasonNumber: seasonNumber);
+      if (!mounted || generation != _loadGeneration) return;
       final next = payload.experience;
-      final selected = _containsSeason(next, preferredSeason)
-          ? preferredSeason
-          : next.selectedSeasonNumber ??
-                (next.seasons.isEmpty ? null : next.seasons.first.number);
+      final focusEpisode = focusPlaybackPosition
+          ? _resolvePlaybackFocusEpisode(next, playedMediaId)
+          : null;
+      final selected =
+          focusEpisode?.media.seasonNumber ??
+          _resolveSelectedSeason(next, preferredSeason);
       setState(() {
         _experience = next;
         _selectedSeason = selected;
         _inWatchlist = payload.inWatchlist;
         _watched = payload.watched;
         _loading = false;
+        _loadingSeason = false;
       });
       _rebuildFocusGraph(rebuildSeasons: true);
+      if (focusEpisode != null) {
+        _focusEpisodeById(focusEpisode.media.id);
+      }
     } catch (failure) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
-        _loading = false;
+        if (loadingFullTitle) {
+          _loading = false;
+        }
+        _loadingSeason = false;
         _error = _failureMessage(failure);
       });
     }
   }
 
-  bool _containsSeason(TitleExperience experience, int? number) =>
-      number != null &&
-      experience.seasons.any((season) => season.number == number);
+  Future<TitlePayload> _loadTitlePayload({int? seasonNumber}) {
+    final contract = _title;
+    if (seasonNumber != null && contract is SeasonAwareTitleContract) {
+      return contract.loadTitleSeason(widget.media.id, seasonNumber);
+    }
+    return contract.loadTitle(widget.media.id);
+  }
+
+  int? _resolveSelectedSeason(TitleExperience experience, int? preferred) {
+    if (experience.seasons.isEmpty) return null;
+    final preferredSeason = _seasonByNumber(experience, preferred);
+    if (preferredSeason != null &&
+        (preferredSeason.episodes.isNotEmpty ||
+            preferredSeason.episodeCount == 0)) {
+      return preferredSeason.number;
+    }
+    final serverSeason = _seasonByNumber(
+      experience,
+      experience.selectedSeasonNumber,
+    );
+    if (serverSeason != null &&
+        (serverSeason.episodes.isNotEmpty || serverSeason.episodeCount == 0)) {
+      return serverSeason.number;
+    }
+    for (final season in experience.seasons) {
+      if (season.episodes.isNotEmpty) return season.number;
+    }
+    return preferredSeason?.number ??
+        serverSeason?.number ??
+        experience.seasons.first.number;
+  }
+
+  SeasonItem? _seasonByNumber(TitleExperience experience, int? number) {
+    if (number == null) return null;
+    for (final season in experience.seasons) {
+      if (season.number == number) return season;
+    }
+    return null;
+  }
+
+  bool _seasonNeedsHydration(SeasonItem season) =>
+      season.episodeCount > 0 &&
+      season.episodes.isEmpty &&
+      _title is SeasonAwareTitleContract;
+
+  String _seasonButtonLabel(SeasonItem season) =>
+      season.number == 0 ? 'Specials' : 'Sæson ${season.number}';
 
   void _rebuildFocusGraph({required bool rebuildSeasons}) {
     final data = _experience;
@@ -263,6 +328,56 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
       if (season.episodes.isNotEmpty) return season.episodes.first;
     }
     return null;
+  }
+
+  EpisodeItem? _resolvePlaybackFocusEpisode(
+    TitleExperience experience,
+    String? playedMediaId,
+  ) {
+    final targetIds = <String>[
+      if (experience.resumeEpisode?.media.id.isNotEmpty ?? false)
+        experience.resumeEpisode!.media.id,
+      if (experience.nextEpisode?.media.id.isNotEmpty ?? false)
+        experience.nextEpisode!.media.id,
+      if ((playedMediaId ?? '').isNotEmpty) playedMediaId!,
+    ];
+    for (final targetId in targetIds) {
+      final episode = _findEpisodeById(experience, targetId);
+      if (episode != null) return episode;
+    }
+    for (final season in experience.seasons) {
+      for (final episode in season.episodes) {
+        if (!episode.watched &&
+            (episode.positionMs > 0 || episode.progressPercent > 0)) {
+          return episode;
+        }
+      }
+    }
+    return null;
+  }
+
+  EpisodeItem? _findEpisodeById(TitleExperience experience, String id) {
+    for (final season in experience.seasons) {
+      for (final episode in season.episodes) {
+        if (episode.media.id == id) return episode;
+      }
+    }
+    return null;
+  }
+
+  void _focusEpisodeById(String episodeId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final index = _selectedEpisodes.indexWhere(
+        (episode) => episode.media.id == episodeId,
+      );
+      if (index < 0 || index >= _episodeNodes.length) return;
+      _focusNode(
+        sectionIndex: _episodeSectionBase + index,
+        itemIndex: 0,
+        node: _episodeNodes[index],
+      );
+    });
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
@@ -580,6 +695,7 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
     final data = _experience;
     if (data == null || index < 0 || index >= data.seasons.length) return;
     final season = data.seasons[index];
+    final needsHydration = _seasonNeedsHydration(season);
     if (_selectedSeason != season.number) {
       setState(() => _selectedSeason = season.number);
       _rebuildFocusGraph(rebuildSeasons: false);
@@ -589,6 +705,9 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
       sectionIndex: _seasonSection,
       itemIndex: index,
     );
+    if (needsHydration) {
+      unawaited(_load(seasonNumber: season.number));
+    }
   }
 
   Future<void> _playPrimary({required bool fromStart}) async {
@@ -631,7 +750,12 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
         ),
       ),
     );
-    if (mounted) await _load();
+    if (mounted) {
+      await _load(
+        focusPlaybackPosition: media.isEpisode,
+        playedMediaId: media.id,
+      );
+    }
   }
 
   Future<void> _openRelated(MediaItem media) async {
@@ -656,14 +780,18 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF101B26),
+        backgroundColor: TvDesignTokens.surfaceRaised,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
+          side: const BorderSide(color: TvDesignTokens.panelBorderSoft),
+        ),
         title: Text(person.name),
         content: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             CircleAvatar(
               radius: 42,
-              backgroundColor: const Color(0xFF1A2A38),
+              backgroundColor: const Color(0xFF172231),
               backgroundImage: image.isEmpty ? null : NetworkImage(image),
               child: image.isEmpty
                   ? const Icon(Icons.person_outline, size: 42)
@@ -677,7 +805,7 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
                     .whereType<String>()
                     .where((value) => value.trim().isNotEmpty)
                     .join(' · '),
-                style: const TextStyle(color: Color(0xFFB8C8D6)),
+                style: const TextStyle(color: TvDesignTokens.textMuted),
               ),
             ),
           ],
@@ -852,7 +980,7 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
       canPop: false,
       onPopInvokedWithResult: (_, _) => _goBack(),
       child: Scaffold(
-        backgroundColor: TvDesignTokens.background,
+        backgroundColor: Colors.transparent,
         body: Focus(
           canRequestFocus: true,
           onKeyEvent: _handleKey,
@@ -1002,10 +1130,10 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 36,
+                        fontSize: 34,
                         height: 1.04,
                         fontWeight: FontWeight.w900,
-                        letterSpacing: 0,
+                        letterSpacing: -0.35,
                       ),
                     ),
                     if (metadata.isNotEmpty) ...[
@@ -1013,9 +1141,9 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
                       Text(
                         metadata.join('  •  '),
                         style: const TextStyle(
-                          color: Color(0xFFC8D8E6),
+                          color: TvDesignTokens.textMuted,
                           fontSize: 12.8,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
@@ -1176,7 +1304,7 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
                   child: _TvSeasonButton(
                     focusNode: _seasonNodes[index],
                     onKeyEvent: _handleKey,
-                    label: '${season.label} · ${season.episodeCount}',
+                    label: _seasonButtonLabel(season),
                     selected: season.number == _selectedSeason,
                     onPressed: () => _selectSeason(index),
                   ),
@@ -1185,10 +1313,21 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          if (episodes.isEmpty)
+          if (_loadingSeason)
             const Text(
-              'Der er ingen afsnit i denne sæson.',
+              'Indlæser sæson...',
               style: TextStyle(
+                color: Color(0xFF9CAFC0),
+                fontSize: TvDesignTokens.bodyTextSize,
+              ),
+            )
+          else if (episodes.isEmpty)
+            Text(
+              _selectedSeasonData != null &&
+                      _seasonNeedsHydration(_selectedSeasonData!)
+                  ? 'Sæsonen kunne ikke indlæses. Vælg den igen for at prøve.'
+                  : 'Der er ingen afsnit i denne sæson.',
+              style: const TextStyle(
                 color: Color(0xFF9CAFC0),
                 fontSize: TvDesignTokens.bodyTextSize,
               ),
@@ -1203,6 +1342,7 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
                   onKeyEvent: _handleKey,
                   api: widget.api,
                   episode: episodes[index],
+                  statusLabel: _episodeStatusLabel(episodes[index], data),
                   onPressed: () => unawaited(_playEpisode(episodes[index])),
                 ),
               ),
@@ -1290,6 +1430,20 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
     if (minutes < 60) return '$minutes min';
     return '${minutes ~/ 60} t ${minutes % 60} min';
   }
+
+  String? _episodeStatusLabel(EpisodeItem episode, TitleExperience data) {
+    final id = episode.media.id;
+    if (data.resumeEpisode?.media.id == id) return 'Fortsæt her';
+    if (data.nextEpisode?.media.id == id) return 'Næste afsnit';
+    if (!episode.watched &&
+        (episode.positionMs > 0 || episode.progressPercent > 0)) {
+      final percent = episode.progressPercent > 0
+          ? episode.progressPercent.round()
+          : null;
+      return percent == null ? 'I gang' : '$percent% set';
+    }
+    return null;
+  }
 }
 
 class _TvPersonCard extends StatefulWidget {
@@ -1334,7 +1488,14 @@ class _TvPersonCardState extends State<_TvPersonCard> {
           width: 106,
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: _focused ? const Color(0xFF332A1A) : TvDesignTokens.surface,
+            gradient: _focused
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF2A2214), Color(0xFF171E26)],
+                  )
+                : null,
+            color: _focused ? null : TvDesignTokens.surfaceGlass,
             borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
             border: Border.all(
               color: _focused
@@ -1345,9 +1506,9 @@ class _TvPersonCardState extends State<_TvPersonCard> {
             boxShadow: _focused
                 ? const [
                     BoxShadow(
-                      color: Color(0x44F7C35F),
-                      blurRadius: 13,
-                      offset: Offset(0, 5),
+                      color: Color(0x44FFC857),
+                      blurRadius: 16,
+                      offset: Offset(0, 7),
                     ),
                   ]
                 : const [],
@@ -1356,7 +1517,7 @@ class _TvPersonCardState extends State<_TvPersonCard> {
             children: [
               CircleAvatar(
                 radius: 30,
-                backgroundColor: const Color(0xFF1B2A38),
+                backgroundColor: const Color(0xFF172231),
                 backgroundImage: image.isEmpty ? null : NetworkImage(image),
                 child: image.isEmpty
                     ? const Icon(Icons.person_outline, size: 34)
@@ -1428,19 +1589,28 @@ class _TvTitleActionButtonState extends State<_TvTitleActionButton> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(999),
-          color: widget.primary
-              ? TvDesignTokens.goldSoft
-              : const Color(0xB3040506),
+          gradient: widget.primary
+              ? const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [TvDesignTokens.focusFill, TvDesignTokens.gold],
+                )
+              : null,
+          color: widget.primary ? null : const Color(0xD00B1017),
           border: Border.all(
-            color: _focused ? Colors.white : TvDesignTokens.panelBorderSoft,
+            color: _focused
+                ? Colors.white
+                : widget.primary
+                ? const Color(0x99FFE8A3)
+                : TvDesignTokens.panelBorderSoft,
             width: _focused ? 2 : 1,
           ),
           boxShadow: _focused
               ? const [
                   BoxShadow(
-                    color: Color(0x55F7C35F),
-                    blurRadius: 15,
-                    offset: Offset(0, 5),
+                    color: Color(0x55FFC857),
+                    blurRadius: 18,
+                    offset: Offset(0, 7),
                   ),
                 ]
               : const [],
@@ -1467,8 +1637,8 @@ class _TvTitleActionButtonState extends State<_TvTitleActionButton> {
                 widget.label,
                 style: TextStyle(
                   color: widget.primary ? Colors.black : Colors.white,
-                  fontSize: 12.8,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
             ],
@@ -1544,24 +1714,44 @@ class _TvSeasonButtonState extends State<_TvSeasonButton> {
         duration: const Duration(milliseconds: 130),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(999),
+          gradient: _focused
+              ? const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [TvDesignTokens.focusFill, TvDesignTokens.gold],
+                )
+              : null,
           color: _focused
-              ? const Color(0xFF332A1A)
+              ? null
               : widget.selected
-              ? const Color(0xFF211A10)
-              : TvDesignTokens.surface,
+              ? TvDesignTokens.selectedFill
+              : TvDesignTokens.surfaceGlass,
           border: Border.all(
             color: _focused
-                ? TvDesignTokens.goldSoft
+                ? Colors.white
                 : widget.selected
-                ? const Color(0x99F7C35F)
+                ? const Color(0x99FFC857)
                 : TvDesignTokens.panelBorderSoft,
             width: _focused ? TvDesignTokens.focusBorderWidth : 1,
           ),
+          boxShadow: _focused
+              ? const [
+                  BoxShadow(
+                    color: Color(0x55FFC857),
+                    blurRadius: 16,
+                    offset: Offset(0, 7),
+                  ),
+                ]
+              : const [],
         ),
         child: Text(
           widget.label,
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          style: TextStyle(
+            color: _focused ? const Color(0xFF090806) : Colors.white,
+            fontSize: 14.5,
+            fontWeight: FontWeight.w900,
+          ),
         ),
       ),
     ),
@@ -1574,6 +1764,7 @@ class _TvEpisodeTile extends StatefulWidget {
     required this.onKeyEvent,
     required this.api,
     required this.episode,
+    this.statusLabel,
     required this.onPressed,
   });
 
@@ -1581,10 +1772,38 @@ class _TvEpisodeTile extends StatefulWidget {
   final KeyEventResult Function(FocusNode, KeyEvent) onKeyEvent;
   final ApiClient api;
   final EpisodeItem episode;
+  final String? statusLabel;
   final VoidCallback onPressed;
 
   @override
   State<_TvEpisodeTile> createState() => _TvEpisodeTileState();
+}
+
+class _TvEpisodeStatusBadge extends StatelessWidget {
+  const _TvEpisodeStatusBadge(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: const Color(0xE6FFE8A3),
+      borderRadius: BorderRadius.circular(999),
+      boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 10)],
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFF090806),
+          fontSize: 10.5,
+          height: 1,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    ),
+  );
 }
 
 class _TvEpisodeTileState extends State<_TvEpisodeTile> {
@@ -1593,6 +1812,8 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
   @override
   Widget build(BuildContext context) {
     final media = widget.episode.media;
+    final statusLabel = widget.statusLabel;
+    final active = statusLabel != null && statusLabel.isNotEmpty;
     final still = widget.api.absoluteMediaUrl(
       widget.episode.stillPath ?? media.backdropPath,
     );
@@ -1609,20 +1830,51 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
           duration: const Duration(milliseconds: 130),
           height: TvDesignTokens.episodeTileHeight,
           decoration: BoxDecoration(
-            color: _focused ? const Color(0xFF332A1A) : TvDesignTokens.surface,
+            gradient: _focused
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF2A2214), Color(0xFF141A21)],
+                  )
+                : active
+                ? const LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [Color(0x332A2214), Color(0x19141A21)],
+                  )
+                : null,
+            color: _focused || active ? null : TvDesignTokens.surfaceGlass,
             borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
             border: Border.all(
               color: _focused
-                  ? TvDesignTokens.goldSoft
+                  ? TvDesignTokens.focusFill
+                  : active
+                  ? const Color(0x99FFE8A3)
                   : TvDesignTokens.panelBorderSoft,
               width: _focused ? TvDesignTokens.focusBorderWidth : 1,
             ),
           ),
           clipBehavior: Clip.antiAlias,
+          foregroundDecoration: _focused
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(
+                    TvDesignTokens.chromeRadius,
+                  ),
+                  border: Border.all(color: const Color(0x33FFFFFF), width: 1),
+                )
+              : null,
           child: Row(
             children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 130),
+                width: active || _focused ? 5 : 0,
+                height: double.infinity,
+                color: _focused
+                    ? TvDesignTokens.focusFill
+                    : const Color(0x99FFE8A3),
+              ),
               SizedBox(
-                width: 176,
+                width: 170,
                 height: double.infinity,
                 child: Stack(
                   fit: StackFit.expand,
@@ -1639,7 +1891,7 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
                       child: Icon(
                         Icons.play_circle_fill_rounded,
                         size: 38,
-                        color: Colors.white,
+                        color: Color(0xEEFFFFFF),
                       ),
                     ),
                     if (widget.episode.progressPercent > 0)
@@ -1650,7 +1902,7 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
                           value: (widget.episode.progressPercent / 100)
                               .clamp(0, 1)
                               .toDouble(),
-                          color: const Color(0xFF51A5FF),
+                          color: TvDesignTokens.cyan,
                           backgroundColor: const Color(0x66000000),
                         ),
                       ),
@@ -1660,8 +1912,8 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 12,
+                    horizontal: 16,
+                    vertical: 10,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1675,8 +1927,8 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
+                                fontSize: 16.5,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
                           ),
@@ -1685,6 +1937,11 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
                               Icons.check_circle,
                               color: Color(0xFF65C58A),
                             ),
+                          if (statusLabel != null &&
+                              statusLabel.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            _TvEpisodeStatusBadge(statusLabel),
+                          ],
                         ],
                       ),
                       if ((media.overview ?? '').trim().isNotEmpty) ...[
@@ -1694,8 +1951,8 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: Color(0xFFAFC0CF),
-                            fontSize: 14,
+                            color: TvDesignTokens.textMuted,
+                            fontSize: 13.5,
                             height: 1.25,
                           ),
                         ),

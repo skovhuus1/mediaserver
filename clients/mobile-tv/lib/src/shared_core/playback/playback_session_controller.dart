@@ -8,6 +8,7 @@ import '../../core/api_client.dart';
 import '../../core/app_config.dart';
 import '../../core/models.dart';
 import '../../core/playback_platform.dart';
+import '../../core/tv_quality_policy.dart';
 import '../../core/webvtt.dart';
 import 'playback_tuning.dart';
 
@@ -40,11 +41,13 @@ class PlaybackViewState {
     required this.playbackRate,
     required this.bufferedPosition,
     required this.subtitleText,
+    required this.subtitleOffset,
     required this.subtitleStyle,
     required this.subtitleTextColor,
     required this.subtitleSizePercent,
     required this.subtitleBottomOffsetPercent,
     required this.qualityLabel,
+    required this.upscaleLabel,
     required this.qualityChanging,
     required this.audioChanging,
     required this.markers,
@@ -71,11 +74,13 @@ class PlaybackViewState {
     playbackRate: 1,
     bufferedPosition: Duration.zero,
     subtitleText: '',
+    subtitleOffset: Duration.zero,
     subtitleStyle: 'broadcast',
     subtitleTextColor: '#FFFFFF',
     subtitleSizePercent: 100,
     subtitleBottomOffsetPercent: 6,
     qualityLabel: '',
+    upscaleLabel: '',
     qualityChanging: false,
     audioChanging: false,
     markers: [],
@@ -95,11 +100,13 @@ class PlaybackViewState {
   final double playbackRate;
   final Duration bufferedPosition;
   final String subtitleText;
+  final Duration subtitleOffset;
   final String subtitleStyle;
   final String subtitleTextColor;
   final int subtitleSizePercent;
   final int subtitleBottomOffsetPercent;
   final String qualityLabel;
+  final String upscaleLabel;
   final bool qualityChanging;
   final bool audioChanging;
   final PlaybackAuthorization? authorization;
@@ -125,11 +132,13 @@ class PlaybackViewState {
     double? playbackRate,
     Duration? bufferedPosition,
     String? subtitleText,
+    Duration? subtitleOffset,
     String? subtitleStyle,
     String? subtitleTextColor,
     int? subtitleSizePercent,
     int? subtitleBottomOffsetPercent,
     String? qualityLabel,
+    String? upscaleLabel,
     bool? qualityChanging,
     bool? audioChanging,
     Object? authorization = _stateUnset,
@@ -154,12 +163,14 @@ class PlaybackViewState {
     playbackRate: playbackRate ?? this.playbackRate,
     bufferedPosition: bufferedPosition ?? this.bufferedPosition,
     subtitleText: subtitleText ?? this.subtitleText,
+    subtitleOffset: subtitleOffset ?? this.subtitleOffset,
     subtitleStyle: subtitleStyle ?? this.subtitleStyle,
     subtitleTextColor: subtitleTextColor ?? this.subtitleTextColor,
     subtitleSizePercent: subtitleSizePercent ?? this.subtitleSizePercent,
     subtitleBottomOffsetPercent:
         subtitleBottomOffsetPercent ?? this.subtitleBottomOffsetPercent,
     qualityLabel: qualityLabel ?? this.qualityLabel,
+    upscaleLabel: upscaleLabel ?? this.upscaleLabel,
     qualityChanging: qualityChanging ?? this.qualityChanging,
     audioChanging: audioChanging ?? this.audioChanging,
     authorization: identical(authorization, _stateUnset)
@@ -227,10 +238,13 @@ class PlaybackAuthorizationRequest {
     required double devicePixelRatio,
     required this.supportsHdr,
     this.bufferProfile = 'auto',
-    this.upscaleMode = 'device',
+    this.upscaleMode = 'server',
+    double? estimatedDownlinkMbps,
   }) : startPositionMs = startPositionMs.clamp(0, 2147483647).toInt(),
        screenHeight = screenHeight.round().clamp(240, 4320).toInt(),
-       devicePixelRatio = devicePixelRatio.clamp(0.5, 4).toDouble() {
+       devicePixelRatio = devicePixelRatio.clamp(0.5, 4).toDouble(),
+       estimatedDownlinkMbps =
+           estimatedDownlinkMbps?.clamp(0.1, 1000).toDouble() {
     for (final entry in {
       'profileId': profileId,
       'mediaId': mediaId,
@@ -259,6 +273,7 @@ class PlaybackAuthorizationRequest {
   final bool supportsHdr;
   final String bufferProfile;
   final String upscaleMode;
+  final double? estimatedDownlinkMbps;
 
   Map<String, dynamic> toJson({bool compatibility = false}) => {
     'profileId': profileId,
@@ -271,6 +286,8 @@ class PlaybackAuthorizationRequest {
       'supportedCodecs': const <String>['h264', 'hevc'],
       'supportedContainers': const <String>['mov', 'mp4', 'matroska', 'mpegts'],
       'supportsHdr': supportsHdr,
+      if (estimatedDownlinkMbps != null)
+        'estimatedDownlinkMbps': estimatedDownlinkMbps,
       if (!compatibility) ...{
         'supportedAudioCodecs': const <String>['aac', 'ac3', 'eac3'],
         'upscaleMode': upscaleMode,
@@ -316,6 +333,9 @@ class PlaybackSessionController extends ChangeNotifier
   PlaybackAuthorization? _authorization;
   List<WebVttCue> _cues = const [];
   List<VideoTrack> _videoTracks = const [];
+  TvQualityPolicy? _tvQualityPolicy;
+  DateTime? _lastQualityCapAt;
+  double? _estimatedDownlinkMbps;
   Timer? _heartbeatTimer;
   Timer? _progressTimer;
   Timer? _uiTimer;
@@ -334,6 +354,8 @@ class PlaybackSessionController extends ChangeNotifier
   bool _audioChanging = false;
   int? _sessionFixedHeight;
   String? _sessionQualityMode;
+  bool? _sessionAllowUpscale;
+  String? _sessionUpscaleMode;
   final PlaybackPlatform _platform = PlaybackPlatform.instance;
 
   String get currentQualityMode =>
@@ -341,6 +363,21 @@ class PlaybackSessionController extends ChangeNotifier
 
   int? get currentFixedQualityHeight =>
       _sessionFixedHeight ?? _authorization?.preferences.fixedQualityHeight;
+
+  String get currentUpscaleMode {
+    final mode = _normalizedUpscaleMode(
+      _sessionUpscaleMode ??
+          _authorization?.preferences.upscaleMode ??
+          _tuning.upscaleMode,
+    );
+    final allowed =
+        _sessionAllowUpscale ??
+        _authorization?.preferences.allowUpscale ??
+        (mode != 'off');
+    return allowed ? mode : 'off';
+  }
+
+  bool get currentAllowUpscale => currentUpscaleMode != 'off';
 
   @override
   Future<void> initialize() =>
@@ -370,6 +407,10 @@ class PlaybackSessionController extends ChangeNotifier
       _released = false;
       _sessionQualityMode ??= authorization.preferences.qualityMode;
       _sessionFixedHeight ??= authorization.preferences.fixedQualityHeight;
+      _sessionAllowUpscale ??= authorization.preferences.allowUpscale;
+      _sessionUpscaleMode ??= _normalizedUpscaleMode(
+        authorization.preferences.upscaleMode,
+      );
       _timelineOffsetMs = authorization.isDirectPlay ? 0 : startPositionMs;
       await _loadAssets();
       if (authorization.transcodeStatusUrl != null) {
@@ -418,6 +459,7 @@ class PlaybackSessionController extends ChangeNotifier
         supportsHdr: supportsHdr,
         bufferProfile: _tuning.bufferProfile,
         upscaleMode: _tuning.upscaleMode,
+        estimatedDownlinkMbps: _estimatedDownlinkMbpsForPayload,
       );
       try {
         return PlaybackAuthorization.fromJson(
@@ -495,7 +537,7 @@ class PlaybackSessionController extends ChangeNotifier
       AppConfig.isTvBuild,
       bufferProfile:
           authorization.preferences.bufferProfile ?? _tuning.bufferProfile,
-      upscaleMode: authorization.preferences.upscaleMode ?? _tuning.upscaleMode,
+      upscaleMode: currentUpscaleMode,
     );
     final controller = VideoPlayerController.networkUrl(
       api.endpoint(authorization.streamUrl),
@@ -537,6 +579,8 @@ class PlaybackSessionController extends ChangeNotifier
         playbackRate: controller.value.playbackSpeed,
         authorization: authorization,
         selectedAudioTrack: authorization.selectedAudioTrack,
+        qualityLabel: _qualityLabel,
+        upscaleLabel: _upscaleLabel,
         qualityChanging: false,
         audioChanging: false,
         subtitleStyle: authorization.preferences.subtitleStyle,
@@ -590,13 +634,15 @@ class PlaybackSessionController extends ChangeNotifier
       return;
     }
     final absolute = _absolutePositionMs;
+    final subtitlePositionMs = math.max(
+      0,
+      absolute +
+          auth.preferences.subtitleTimingOffsetMs +
+          _state.subtitleOffset.inMilliseconds,
+    );
     final cueText = _cues
         .where(
-          (cue) => cue.contains(
-            Duration(
-              milliseconds: absolute + auth.preferences.subtitleTimingOffsetMs,
-            ),
-          ),
+          (cue) => cue.contains(Duration(milliseconds: subtitlePositionMs)),
         )
         .map((cue) => cue.text)
         .join('\n');
@@ -614,6 +660,9 @@ class PlaybackSessionController extends ChangeNotifier
     if (_isTerminalPlayback(controller)) {
       _completePlayback();
       return;
+    }
+    if (AppConfig.isTvBuild && currentQualityMode == 'auto') {
+      unawaited(_applyAutomaticQualityCap(controller, auth));
     }
     final durationMs = math.max(1, _durationMs);
     final bufferedMs = math.max(
@@ -669,6 +718,11 @@ class PlaybackSessionController extends ChangeNotifier
     final controller = _video;
     if (auth == null || controller == null || _released) return;
     try {
+      final telemetry = await _platform.videoTelemetry();
+      final bandwidth = telemetry?.bandwidthEstimate ?? 0;
+      if (bandwidth > 0) {
+        _estimatedDownlinkMbps = bandwidth / 1000000;
+      }
       await api.patchJson(
         '/playback/sessions/${Uri.encodeComponent(auth.sessionId)}/heartbeat',
         {
@@ -679,11 +733,12 @@ class PlaybackSessionController extends ChangeNotifier
               : 'paused',
           'positionMs': _absolutePositionMs,
           if (_durationMs > 0) 'durationMs': _durationMs,
-          'currentBitrate': auth.sourceBitrate,
-          'currentHeight': auth.sourceHeight,
+          'currentBitrate': telemetry?.bitrate ?? auth.sourceBitrate,
+          'currentHeight': telemetry?.height ?? auth.sourceHeight,
           'bufferAheadMs': _bufferAheadMs,
           'stallCount': _stallCount,
           'playbackRate': controller.value.playbackSpeed,
+          if (bandwidth > 0) 'bandwidthEstimate': bandwidth,
           'audioTrack': _state.selectedAudioTrack?.label,
           'subtitleTrack': _state.selectedSubtitle?.label,
         },
@@ -854,6 +909,22 @@ class PlaybackSessionController extends ChangeNotifier
     }
   }
 
+  Future<void> adjustSubtitleOffset(Duration delta) async {
+    await setSubtitleOffset(_state.subtitleOffset + delta);
+  }
+
+  Future<void> resetSubtitleOffset() async {
+    await setSubtitleOffset(Duration.zero);
+  }
+
+  Future<void> setSubtitleOffset(Duration offset) async {
+    final clampedMs = offset.inMilliseconds.clamp(-30000, 30000).toInt();
+    _setState(
+      _state.copyWith(subtitleOffset: Duration(milliseconds: clampedMs)),
+    );
+    _tick();
+  }
+
   Future<void> _selectDefaultSubtitle() async {
     final auth = _authorization;
     if (auth == null) return;
@@ -870,10 +941,21 @@ class PlaybackSessionController extends ChangeNotifier
     String? qualityMode,
     int? fixedQualityHeight,
     String? audioTrackId,
+    bool? allowUpscale,
+    String? upscaleMode,
   }) async {
     final auth = _authorization;
     if (auth == null) return;
     final preservedAudioTrackId = audioTrackId ?? auth.selectedAudioTrackId;
+    final requestedQualityMode = qualityMode ?? currentQualityMode;
+    final requestedFixedHeight = requestedQualityMode == 'fixed'
+        ? fixedQualityHeight ?? currentFixedQualityHeight
+        : null;
+    final rawUpscaleMode = _normalizedUpscaleMode(
+      upscaleMode ?? currentUpscaleMode,
+    );
+    final requestedAllowUpscale = allowUpscale ?? rawUpscaleMode != 'off';
+    final requestedUpscaleMode = requestedAllowUpscale ? rawUpscaleMode : 'off';
     _setState(
       _state.copyWith(
         loading: true,
@@ -891,14 +973,21 @@ class PlaybackSessionController extends ChangeNotifier
           'streamToken': auth.streamToken,
           'burnIn': burnInTrack != null,
           ...?burnInTrack == null ? null : {'subtitleTrackId': burnInTrack.id},
-          ...?qualityMode == null ? null : {'qualityMode': qualityMode},
-          ...?fixedQualityHeight == null
+          'qualityMode': requestedQualityMode,
+          ...?requestedFixedHeight == null
               ? null
-              : {'fixedQualityHeight': fixedQualityHeight},
+              : {'fixedQualityHeight': requestedFixedHeight},
           ...?preservedAudioTrackId == null
               ? null
               : {'audioTrackId': preservedAudioTrackId},
+          'allowUpscale': requestedAllowUpscale,
+          'upscaleMode': requestedUpscaleMode,
           'forceTranscode': true,
+          'capabilities': _playbackCapabilitiesPayload(
+            upscaleMode: requestedUpscaleMode,
+            bufferProfile:
+                auth.preferences.bufferProfile ?? _tuning.bufferProfile,
+          ),
           'startPositionMs': math.max(0, positionMs),
         },
       ),
@@ -918,6 +1007,12 @@ class PlaybackSessionController extends ChangeNotifier
         : auth.audioTracks;
     final selectedAudioTrackId =
         stringValue(result['selectedAudioTrackId']) ?? preservedAudioTrackId;
+    final nextPreferences = auth.preferences.copyWith(
+      qualityMode: requestedQualityMode,
+      fixedQualityHeight: requestedFixedHeight,
+      allowUpscale: requestedAllowUpscale,
+      upscaleMode: requestedUpscaleMode,
+    );
     final next = auth.copyWith(
       method: stringValue(result['method']) ?? 'transcode',
       streamUrl: stringValue(result['streamUrl']) ?? auth.streamUrl,
@@ -927,8 +1022,15 @@ class PlaybackSessionController extends ChangeNotifier
       renditions: renditions,
       audioTracks: audioTracks,
       selectedAudioTrackId: selectedAudioTrackId,
+      preferences: nextPreferences,
+      hardwareUpscale: boolValue(
+        adaptive['hardwareUpscale'],
+        fallback: auth.hardwareUpscale,
+      ),
     );
     _authorization = next;
+    _sessionAllowUpscale = requestedAllowUpscale;
+    _sessionUpscaleMode = requestedUpscaleMode;
     _timelineOffsetMs = positionMs;
     if (next.transcodeStatusUrl != null) {
       await _waitUntilReady(next.transcodeStatusUrl!);
@@ -981,6 +1083,7 @@ class PlaybackSessionController extends ChangeNotifier
               qualityChanging: false,
               error: null,
               qualityLabel: _qualityLabel,
+              upscaleLabel: _upscaleLabel,
             ),
           );
           _tick();
@@ -998,6 +1101,7 @@ class PlaybackSessionController extends ChangeNotifier
                 qualityChanging: false,
                 error: null,
                 qualityLabel: _qualityLabel,
+                upscaleLabel: _upscaleLabel,
               ),
             );
             _tick();
@@ -1011,6 +1115,8 @@ class PlaybackSessionController extends ChangeNotifier
         qualityMode: mode,
         fixedQualityHeight: fixedHeight,
         audioTrackId: auth.selectedAudioTrackId,
+        allowUpscale: currentAllowUpscale,
+        upscaleMode: currentUpscaleMode,
       );
       _setState(
         _state.copyWith(
@@ -1020,6 +1126,7 @@ class PlaybackSessionController extends ChangeNotifier
           qualityChanging: false,
           error: null,
           qualityLabel: _qualityLabel,
+          upscaleLabel: _upscaleLabel,
         ),
       );
     } on ApiException catch (failure) {
@@ -1071,8 +1178,8 @@ class PlaybackSessionController extends ChangeNotifier
       ),
     );
     try {
-      final mode = _sessionQualityMode ?? auth.preferences.qualityMode;
-      final fixedHeight = mode == 'fixed'
+      var mode = _sessionQualityMode ?? auth.preferences.qualityMode;
+      var fixedHeight = mode == 'fixed'
           ? _sessionFixedHeight ?? auth.preferences.fixedQualityHeight
           : null;
       await _reconfigure(
@@ -1080,6 +1187,8 @@ class PlaybackSessionController extends ChangeNotifier
         qualityMode: mode,
         fixedQualityHeight: fixedHeight,
         audioTrackId: track.id,
+        allowUpscale: currentAllowUpscale,
+        upscaleMode: currentUpscaleMode,
       );
       _setState(
         _state.copyWith(
@@ -1089,6 +1198,8 @@ class PlaybackSessionController extends ChangeNotifier
           buffering: false,
           audioChanging: false,
           error: null,
+          qualityLabel: _qualityLabel,
+          upscaleLabel: _upscaleLabel,
         ),
       );
     } on ApiException catch (failure) {
@@ -1114,6 +1225,71 @@ class PlaybackSessionController extends ChangeNotifier
     }
   }
 
+  Future<void> selectUpscaleMode(String value) async {
+    if (_qualityChanging) return;
+    final auth = _authorization;
+    if (auth == null) return;
+    final normalized = _normalizedUpscaleMode(value);
+    final allowUpscale = normalized != 'off';
+    _qualityChanging = true;
+    _sessionAllowUpscale = allowUpscale;
+    _sessionUpscaleMode = normalized;
+    _setState(
+      _state.copyWith(
+        loading: true,
+        buffering: true,
+        qualityChanging: true,
+        status: 'Skifter opskalering...',
+        error: null,
+      ),
+    );
+    try {
+      final mode = _sessionQualityMode ?? auth.preferences.qualityMode;
+      final fixedHeight = mode == 'fixed'
+          ? _sessionFixedHeight ?? auth.preferences.fixedQualityHeight
+          : null;
+      await _reconfigure(
+        _absolutePositionMs,
+        qualityMode: mode,
+        fixedQualityHeight: fixedHeight,
+        audioTrackId: auth.selectedAudioTrackId,
+        allowUpscale: allowUpscale,
+        upscaleMode: normalized,
+      );
+      _setState(
+        _state.copyWith(
+          status: _upscaleLabel,
+          loading: false,
+          buffering: false,
+          qualityChanging: false,
+          error: null,
+          qualityLabel: _qualityLabel,
+          upscaleLabel: _upscaleLabel,
+        ),
+      );
+    } on ApiException catch (failure) {
+      _setState(
+        _state.copyWith(
+          error: failure.message,
+          loading: false,
+          buffering: false,
+          qualityChanging: false,
+        ),
+      );
+    } catch (_) {
+      _setState(
+        _state.copyWith(
+          error: 'Opskalering kunne ikke skiftes.',
+          loading: false,
+          buffering: false,
+          qualityChanging: false,
+        ),
+      );
+    } finally {
+      _qualityChanging = false;
+    }
+  }
+
   Future<void> _configureQuality(
     VideoPlayerController controller,
     PlaybackAuthorization authorization,
@@ -1125,8 +1301,18 @@ class PlaybackSessionController extends ChangeNotifier
     _videoTracks =
         _videoTracks.where((track) => (track.height ?? 0) > 0).toList()
           ..sort((a, b) => (a.height ?? 0).compareTo(b.height ?? 0));
+    _tvQualityPolicy = TvQualityPolicy(
+      startedAt: DateTime.now(),
+      sourceHeight:
+          authorization.sourceHeight ??
+          (_videoTracks.isEmpty ? null : _videoTracks.last.height) ??
+          1080,
+      allowUpscale: currentUpscaleMode == 'server',
+    );
+    _lastQualityCapAt = null;
     final mode = _sessionQualityMode ?? authorization.preferences.qualityMode;
     if (mode == 'auto') {
+      await _applyAutomaticQualityCap(controller, authorization);
       await controller.selectVideoTrack(null);
       return;
     }
@@ -1146,6 +1332,79 @@ class PlaybackSessionController extends ChangeNotifier
         _videoTracks.first;
   }
 
+  Map<String, dynamic> _playbackCapabilitiesPayload({
+    required String upscaleMode,
+    required String bufferProfile,
+  }) => {
+    'screenHeight': screenHeight,
+    'devicePixelRatio': devicePixelRatio,
+    'supportedCodecs': const <String>['h264', 'hevc'],
+    'supportedContainers': const <String>['mov', 'mp4', 'matroska', 'mpegts'],
+    'supportsHdr': supportsHdr,
+    'supportedAudioCodecs': const <String>['aac', 'ac3', 'eac3'],
+    'upscaleMode': upscaleMode,
+    'bufferProfile': bufferProfile,
+    if (_estimatedDownlinkMbpsForPayload != null)
+      'estimatedDownlinkMbps': _estimatedDownlinkMbpsForPayload,
+  };
+
+  double? get _estimatedDownlinkMbpsForPayload {
+    final value = _estimatedDownlinkMbps;
+    if (value == null || !value.isFinite || value <= 0) return null;
+    return value.clamp(0.1, 1000).toDouble();
+  }
+
+  Future<void> _applyAutomaticQualityCap(
+    VideoPlayerController controller,
+    PlaybackAuthorization authorization,
+  ) async {
+    final policy = _tvQualityPolicy;
+    if (policy == null || currentQualityMode != 'auto') return;
+    final now = DateTime.now();
+    final previous = _lastQualityCapAt;
+    if (previous != null && now.difference(previous) < const Duration(seconds: 5)) {
+      return;
+    }
+    _lastQualityCapAt = now;
+    final telemetry = await _platform.videoTelemetry();
+    final bandwidth = telemetry?.bandwidthEstimate ?? 0;
+    if (bandwidth > 0) {
+      _estimatedDownlinkMbps = bandwidth / 1000000;
+    }
+    policy.observe(now: now, buffering: controller.value.isBuffering);
+    final tracks = authorization.renditions
+        .map(
+          (rendition) => TvQualityTrack(
+            height: rendition.height,
+            bitrate: rendition.bitrate,
+          ),
+        )
+        .toList(growable: false);
+    await _platform.setAutoMaximumHeight(
+      policy.automaticMaximumHeight(
+        now: now,
+        bufferAheadMs: _bufferAheadMs,
+        bandwidthEstimate: bandwidth,
+        tracks: tracks,
+      ),
+    );
+  }
+
+  int? _serverUpscaleTarget(PlaybackAuthorization authorization) {
+    final sourceHeight = authorization.sourceHeight ?? 0;
+    final upscaled = authorization.renditions
+        .where(
+          (rendition) =>
+              rendition.height > 0 &&
+              (rendition.upscaled || rendition.height > sourceHeight),
+        )
+        .map((rendition) => rendition.height)
+        .toList()
+      ..sort();
+    if (upscaled.isNotEmpty) return upscaled.last;
+    return null;
+  }
+
   String get _qualityLabel {
     final controller = _video;
     final auth = _authorization;
@@ -1153,6 +1412,10 @@ class PlaybackSessionController extends ChangeNotifier
     final height = controller.value.size.height.round();
     final mode = _sessionQualityMode ?? auth.preferences.qualityMode;
     if (mode == 'fixed' && _sessionFixedHeight != null) {
+      final actual = _highestRenditionHeight(auth);
+      if (actual != null && actual < _sessionFixedHeight!) {
+        return '${actual}p · Fast tilpasset';
+      }
       return '${_sessionFixedHeight}p · Fast';
     }
     if (mode == 'original' && (auth.sourceHeight ?? 0) > 0) {
@@ -1178,6 +1441,34 @@ class PlaybackSessionController extends ChangeNotifier
     final fixed = _sessionFixedHeight ?? auth?.preferences.fixedQualityHeight;
     return fixed == null ? 'Fast kvalitet' : '${fixed}p';
   }
+
+  int? _highestRenditionHeight(PlaybackAuthorization authorization) {
+    final heights = authorization.renditions
+        .where((rendition) => rendition.height > 0)
+        .map((rendition) => rendition.height)
+        .toList()
+      ..sort();
+    return heights.isEmpty ? null : heights.last;
+  }
+
+  String get _upscaleLabel {
+    final mode = currentUpscaleMode;
+    if (mode == 'off') return 'Opskalering: Fra';
+    if (mode == 'server') {
+      final auth = _authorization;
+      final target = auth == null ? null : _serverUpscaleTarget(auth);
+      return target == null
+          ? 'Opskalering: Server'
+          : 'Opskalering: Server ${target}p';
+    }
+    return 'Opskalering: Server';
+  }
+
+  String _normalizedUpscaleMode(String? value) => switch (value) {
+    'server' => 'server',
+    'device' => 'server',
+    _ => 'off',
+  };
 
   @override
   Future<void> setPlaybackRate(double rate) async {

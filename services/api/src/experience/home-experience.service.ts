@@ -24,7 +24,9 @@ const homeMediaSelect = Prisma.validator<Prisma.MediaItemSelect>()({
   overview: true,
   rating: true,
   posterPath: true,
+  seasonPosterPath: true,
   backdropPath: true,
+  episodeStillPath: true,
   genres: true,
   width: true,
   height: true,
@@ -43,6 +45,7 @@ const rowLabels: Record<string, string> = {
   continue: 'Fortsæt med at se',
   watchlist: 'Min liste',
   latest_episodes: 'Seneste episoder',
+  recently_added: 'Senest tilføjet',
   new_movies: 'Nye film',
   new_series: 'Nye serier',
   genres: 'Genrer',
@@ -125,10 +128,18 @@ export class HomeExperienceService {
         where: { accountId: actor.accountId, type: 'episode' },
         select: homeMediaSelect,
         orderBy: [{ releaseDate: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }, { id: 'desc' }],
-        skip: offset,
-        take: limit + 1,
+        take: Math.max(200, (offset + limit + 1) * 10),
       });
-      return media.filter(playable).map((item) => publicCard(item, 'episode'));
+      return collapseEpisodeSeriesCards(media.filter(playable)).slice(offset, offset + limit + 1);
+    }
+    if (rowId === 'recently_added') {
+      const media = await this.prisma.mediaItem.findMany({
+        where: { accountId: actor.accountId, type: 'episode' },
+        select: homeMediaSelect,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: Math.max(200, (offset + limit + 1) * 10),
+      });
+      return collapseEpisodeSeriesCards(media.filter(playable)).slice(offset, offset + limit + 1);
     }
     if (rowId === 'continue') {
       const history = await this.prisma.playbackHistory.findMany({
@@ -206,10 +217,14 @@ function playable(media: HomeMedia) {
   return media.file?.status === 'ready';
 }
 
-function publicCard(media: HomeMedia, requested?: 'media' | 'movie' | 'series' | 'episode', state: { positionMs?: number; durationMs?: number | null; watched?: boolean; inWatchlist?: boolean } = {}) {
+function publicCard(media: HomeMedia, requested?: 'media' | 'movie' | 'series' | 'episode', state: { positionMs?: number; durationMs?: number | null; watched?: boolean; inWatchlist?: boolean; badgeCount?: number } = {}) {
   const target = canonicalMediaTarget(media, requested ?? 'auto');
   const durationMs = state.durationMs ?? media.file?.durationMs ?? null;
   const positionMs = state.positionMs ?? 0;
+  const posterPath = target.targetType === 'series'
+    ? media.posterPath ?? media.seasonPosterPath
+    : media.posterPath ?? media.seasonPosterPath ?? media.episodeStillPath;
+  const backdropPath = media.backdropPath ?? media.episodeStillPath;
   return {
     mediaId: media.id,
     targetType: target.targetType,
@@ -222,13 +237,14 @@ function publicCard(media: HomeMedia, requested?: 'media' | 'movie' | 'series' |
     releaseYear: media.releaseYear,
     overview: target.targetType === 'series' ? media.seriesOverview ?? media.overview : media.overview,
     rating: media.rating,
-    posterPath: media.posterPath,
-    backdropPath: media.backdropPath,
+    posterPath,
+    backdropPath,
     width: media.file?.width ?? media.width,
     height: media.file?.height ?? media.height,
     positionMs,
     durationMs,
     progressPercent: durationMs && positionMs ? Math.min(100, Math.round(positionMs / durationMs * 100)) : 0,
+    badgeCount: state.badgeCount,
     viewerState: { inWatchlist: Boolean(state.inWatchlist), watched: Boolean(state.watched), playlistIds: [] as string[] },
     href: `/watch/title/${encodeURIComponent(media.id)}`,
     playback: {
@@ -243,13 +259,30 @@ function publicCard(media: HomeMedia, requested?: 'media' | 'movie' | 'series' |
       releaseYear: media.releaseYear,
       category: media.category,
       overview: media.overview,
-      posterPath: media.posterPath,
-      backdropPath: media.backdropPath,
+      posterPath,
+      backdropPath,
       width: media.file?.width ?? media.width,
       height: media.file?.height ?? media.height,
       file: { durationMs },
     },
   };
+}
+
+function collapseEpisodeSeriesCards(media: HomeMedia[]): HomeCard[] {
+  const groups = new Map<string, { card: HomeCard; count: number }>();
+  media.forEach((item) => {
+    const card = publicCard(item, 'series');
+    const existing = groups.get(card.targetKey);
+    if (existing) {
+      existing.count += 1;
+      return;
+    }
+    groups.set(card.targetKey, { card, count: 1 });
+  });
+  return [...groups.values()].map(({ card, count }) => ({
+    ...card,
+    badgeCount: count,
+  }));
 }
 
 function collapseSeries(media: HomeMedia[]): HomeCard[] {
