@@ -704,113 +704,114 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                  _TvPlayerButton(
-                    focusNode: _primaryNodes[0],
-                    label: '10 sek. tilbage',
-                    icon: Icons.replay_10_rounded,
-                    iconOnly: true,
-                    onFocus: () {
-                      _row = 0;
-                      _index = 0;
-                    },
-                    onPressed: state.seekable
-                        ? () => widget.controller.seekBy(
-                            const Duration(seconds: -10),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 10),
-                  _TvPlayerButton(
-                    focusNode: _primaryNodes[1],
-                    label: state.playing ? 'Pause' : 'Afspil',
-                    icon: state.playing
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded,
-                    primary: true,
-                    iconOnly: true,
-                    large: true,
-                    onFocus: () {
-                      _row = 0;
-                      _index = 1;
-                    },
-                    onPressed: widget.controller.togglePlayback,
-                  ),
-                  const SizedBox(width: 10),
-                  _TvPlayerButton(
-                    focusNode: _primaryNodes[2],
-                    label: widget.live ? '10 sek. frem' : '30 sek. frem',
-                    icon: widget.live
-                        ? Icons.forward_10_rounded
-                        : Icons.forward_30_rounded,
-                    iconOnly: true,
-                    onFocus: () {
-                      _row = 0;
-                      _index = 2;
-                    },
-                    onPressed: state.seekable
-                        ? () => widget.controller.seekBy(
-                            Duration(seconds: widget.live ? 10 : 30),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 18),
-                  Container(width: 1, height: 32, color: Colors.white12),
-                  const SizedBox(width: 14),
-                  _TvPlayerButton(
-                    focusNode: _secondaryNodes[0],
-                    label: state.selectedSubtitle?.label ?? 'Undertekster',
-                    icon: Icons.subtitles_rounded,
-                    onFocus: () {
-                      _row = 1;
-                      _index = 0;
-                    },
-                    onPressed: widget.controller is PlaybackSessionController
-                        ? _showSubtitles
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  _TvPlayerButton(
-                    focusNode: _secondaryNodes[1],
-                    label: state.selectedAudioTrack?.label ?? 'Lydspor',
-                    icon: Icons.audiotrack_rounded,
-                    onFocus: () {
-                      _row = 1;
-                      _index = 1;
-                    },
-                    onPressed: widget.controller is PlaybackSessionController &&
-                            (state.authorization?.audioTracks.isNotEmpty ??
-                                false)
-                        ? _showAudio
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  _TvPlayerButton(
-                    focusNode: _secondaryNodes[2],
-                    label: widget.live
-                        ? 'Live-kvalitet'
-                        : state.qualityLabel.isEmpty
-                        ? 'Kvalitet'
-                        : state.qualityLabel,
-                    icon: Icons.tune_rounded,
-                    onFocus: () {
-                      _row = 1;
-                      _index = 2;
-                    },
-                    onPressed: widget.controller is PlaybackSessionController
-                        ? _showQuality
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  _TvPlayerButton(
-                    focusNode: _secondaryNodes[3],
-                    label: '${state.playbackRate.toStringAsFixed(2)}x',
-                    icon: Icons.speed_rounded,
-                    onFocus: () {
-                      _row = 1;
-                      _index = 3;
-                    },
-                    onPressed: widget.live ? null : _cycleSpeed,
-                  ),
+                    _TvPlayerButton(
+                      focusNode: _primaryNodes[0],
+                      label: '10 sek. tilbage',
+                      icon: Icons.replay_10_rounded,
+                      iconOnly: true,
+                      onFocus: () {
+                        _row = 0;
+                        _index = 0;
+                      },
+                      onPressed: state.seekable
+                          ? () => widget.controller.seekBy(
+                              const Duration(seconds: -10),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 10),
+                    _TvPlayerButton(
+                      focusNode: _primaryNodes[1],
+                      label: state.playing ? 'Pause' : 'Afspil',
+                      icon: state.playing
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      primary: true,
+                      iconOnly: true,
+                      large: true,
+                      onFocus: () {
+                        _row = 0;
+                        _index = 1;
+                      },
+                      onPressed: widget.controller.togglePlayback,
+                    ),
+                    const SizedBox(width: 10),
+                    _TvPlayerButton(
+                      focusNode: _primaryNodes[2],
+                      label: widget.live ? '10 sek. frem' : '30 sek. frem',
+                      icon: widget.live
+                          ? Icons.forward_10_rounded
+                          : Icons.forward_30_rounded,
+                      iconOnly: true,
+                      onFocus: () {
+                        _row = 0;
+                        _index = 2;
+                      },
+                      onPressed: state.seekable
+                          ? () => widget.controller.seekBy(
+                              Duration(seconds: widget.live ? 10 : 30),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 18),
+                    Container(width: 1, height: 32, color: Colors.white12),
+                    const SizedBox(width: 14),
+                    _TvPlayerButton(
+                      focusNode: _secondaryNodes[0],
+                      label: state.selectedSubtitle?.label ?? 'Undertekster',
+                      icon: Icons.subtitles_rounded,
+                      onFocus: () {
+                        _row = 1;
+                        _index = 0;
+                      },
+                      onPressed: widget.controller is PlaybackSessionController
+                          ? _showSubtitles
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    _TvPlayerButton(
+                      focusNode: _secondaryNodes[1],
+                      label: state.selectedAudioTrack?.label ?? 'Lydspor',
+                      icon: Icons.audiotrack_rounded,
+                      onFocus: () {
+                        _row = 1;
+                        _index = 1;
+                      },
+                      onPressed:
+                          widget.controller is PlaybackSessionController &&
+                              (state.authorization?.audioTracks.isNotEmpty ??
+                                  false)
+                          ? _showAudio
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    _TvPlayerButton(
+                      focusNode: _secondaryNodes[2],
+                      label: widget.live
+                          ? 'Live-kvalitet'
+                          : state.qualityLabel.isEmpty
+                          ? 'Kvalitet'
+                          : state.qualityLabel,
+                      icon: Icons.tune_rounded,
+                      onFocus: () {
+                        _row = 1;
+                        _index = 2;
+                      },
+                      onPressed: widget.controller is PlaybackSessionController
+                          ? _showQuality
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    _TvPlayerButton(
+                      focusNode: _secondaryNodes[3],
+                      label: '${state.playbackRate.toStringAsFixed(2)}x',
+                      icon: Icons.speed_rounded,
+                      onFocus: () {
+                        _row = 1;
+                        _index = 3;
+                      },
+                      onPressed: widget.live ? null : _cycleSpeed,
+                    ),
                   ],
                 ),
               ),

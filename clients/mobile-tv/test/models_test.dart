@@ -292,12 +292,7 @@ void main() {
       'adaptiveQuality': {
         'hardwareUpscale': false,
         'renditions': [
-          {
-            'height': 1080,
-            'bitrate': 6000000,
-            'upscaled': false,
-            'hdr': false,
-          },
+          {'height': 1080, 'bitrate': 6000000, 'upscaled': false, 'hdr': false},
         ],
       },
       'videoProfile': {

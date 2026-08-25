@@ -906,15 +906,15 @@ class PlaybackSessionController extends ChangeNotifier
     final adaptive = jsonMap(result['adaptiveQuality']);
     final renditions = result.containsKey('adaptiveQuality')
         ? jsonList(adaptive['renditions'])
-            .map(Rendition.fromJson)
-            .where((rendition) => rendition.height > 0)
-            .toList(growable: false)
+              .map(Rendition.fromJson)
+              .where((rendition) => rendition.height > 0)
+              .toList(growable: false)
         : auth.renditions;
     final audioTracks = result.containsKey('audioTracks')
         ? jsonList(result['audioTracks'])
-            .map(PlaybackAudioTrack.fromJson)
-            .where((track) => track.id.isNotEmpty)
-            .toList(growable: false)
+              .map(PlaybackAudioTrack.fromJson)
+              .where((track) => track.id.isNotEmpty)
+              .toList(growable: false)
         : auth.audioTracks;
     final selectedAudioTrackId =
         stringValue(result['selectedAudioTrackId']) ?? preservedAudioTrackId;
@@ -1049,7 +1049,8 @@ class PlaybackSessionController extends ChangeNotifier
     if (_audioChanging) return;
     final auth = _authorization;
     if (auth == null || track.id.isEmpty) return;
-    if ((auth.selectedAudioTrackId ?? auth.selectedAudioTrack?.id) == track.id) {
+    if ((auth.selectedAudioTrackId ?? auth.selectedAudioTrack?.id) ==
+        track.id) {
       _setState(
         _state.copyWith(
           selectedAudioTrack: track,
