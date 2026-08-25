@@ -4,6 +4,11 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.2.14 - 2026-08-25
+
+- Adskiller Fortsæt-med-at-se-heuristikken fra streamens livscyklus, så automatisk set-status ved 90 % ikke længere frigiver reservationen og stopper den aktive afspilning.
+- Frigiver kun streamen ved playerens eksplicitte completion-signal og invaliderer home-feed-cachen ved alle progress-opdateringer.
+
 ## 0.2.13 - 2026-08-24
 
 - Tilføjer Kundeoplevelse 2.0 med ét samlet profilscopet home-feed, personlig hero, otte standardrækker, dynamiske playlisterækker og cursor-baseret inkrementel indlæsning.

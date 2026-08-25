@@ -84,6 +84,21 @@ describe('stream reservation concurrency', () => {
 
     await history.updateProgress(actor, session.id, { positionMs: 95_000, durationMs: 100_000 });
     await expect(history.continueWatching(actor)).resolves.toEqual([]);
+    await expect(prisma.playbackSession.findUnique({ where: { id: session.id } }))
+      .resolves.toMatchObject({ status: 'active' });
+    await expect(prisma.streamReservation.findFirst({ where: { playbackSessionId: session.id } }))
+      .resolves.toMatchObject({ releasedAt: null });
+
+    await history.updateProgress(actor, session.id, {
+      positionMs: 100_000,
+      durationMs: 100_000,
+      completed: true,
+    });
+    await expect(prisma.playbackSession.findUnique({ where: { id: session.id } }))
+      .resolves.toMatchObject({ status: 'user_stopped' });
+    const released = await prisma.streamReservation.findFirst({ where: { playbackSessionId: session.id } });
+    expect(released?.releasedAt).toBeInstanceOf(Date);
+    expect(released?.reason).toBe('completed');
   });
 });
 
