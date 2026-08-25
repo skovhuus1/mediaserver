@@ -15,7 +15,7 @@ const defaults = {
   estimatedDownlinkMbps: 50,
   qualityMode: 'auto' as const,
   fixedQualityHeight: null,
-  allowUpscale: true,
+  upscaleMode: 'server' as const,
   dataSaver: false,
   hdrMode: 'auto' as const,
 };
@@ -37,10 +37,17 @@ describe('adaptive quality plan', () => {
       planMaxHeight: 1440,
       screenHeight: 720,
       devicePixelRatio: 1,
-      allowUpscale: false,
+      upscaleMode: 'device',
     });
     expect(plan.effectiveMaxHeight).toBe(720);
     expect(plan.renditions.at(-1)?.height).toBe(720);
+  });
+
+  it('only permits renditions above source height in server mode', () => {
+    const source = { ...defaults, sourceHeight: 1080, screenHeight: 2160, devicePixelRatio: 1 };
+    expect(buildAdaptiveQualityPlan({ ...source, upscaleMode: 'off' }).effectiveMaxHeight).toBe(1080);
+    expect(buildAdaptiveQualityPlan({ ...source, upscaleMode: 'device' }).effectiveMaxHeight).toBe(1080);
+    expect(buildAdaptiveQualityPlan({ ...source, upscaleMode: 'server' }).effectiveMaxHeight).toBe(2160);
   });
 
   it('caps data saver at 720p and three megabits', () => {

@@ -97,7 +97,7 @@ export class PlaybackService {
       estimatedDownlinkMbps: dto.capabilities.estimatedDownlinkMbps ?? null,
       qualityMode: device.qualityMode as 'auto' | 'fixed' | 'original',
       fixedQualityHeight: device.fixedQualityHeight,
-      allowUpscale: device.allowUpscale,
+      upscaleMode: device.upscaleMode as 'off' | 'device' | 'server',
       dataSaver: device.dataSaver,
       hdrMode: device.hdrMode as 'auto' | 'prefer_hdr' | 'force_sdr',
     });
@@ -248,7 +248,10 @@ export class PlaybackService {
         playbackPreferences: {
           qualityMode: device.qualityMode,
           fixedQualityHeight: device.fixedQualityHeight,
-          allowUpscale: device.allowUpscale,
+          allowUpscale: device.upscaleMode === 'server',
+          upscaleMode: device.upscaleMode,
+          bufferProfile: device.bufferProfile,
+          hardwareUpscale: device.upscaleMode === 'device',
           dataSaver: device.dataSaver,
           playbackRate: device.playbackRate,
           hdrMode: device.hdrMode,
@@ -399,7 +402,7 @@ export class PlaybackService {
       estimatedDownlinkMbps: null,
       qualityMode: session.device.qualityMode as 'auto' | 'fixed' | 'original',
       fixedQualityHeight: session.device.fixedQualityHeight,
-      allowUpscale: session.device.allowUpscale,
+      upscaleMode: session.device.upscaleMode as 'off' | 'device' | 'server',
       dataSaver: session.device.dataSaver,
       hdrMode: session.device.hdrMode as 'auto' | 'prefer_hdr' | 'force_sdr',
     });

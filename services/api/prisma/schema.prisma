@@ -238,6 +238,8 @@ model Device {
   qualityMode      String            @default("auto") @map("quality_mode")
   fixedQualityHeight Int?            @map("fixed_quality_height")
   allowUpscale     Boolean           @default(true) @map("allow_upscale")
+  upscaleMode      String            @default("device") @map("upscale_mode")
+  bufferProfile    String            @default("auto") @map("buffer_profile")
   dataSaver        Boolean           @default(false) @map("data_saver")
   playbackRate     Float             @default(1) @map("playback_rate")
   hdrMode          String            @default("auto") @map("hdr_mode")
