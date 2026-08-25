@@ -5,9 +5,11 @@ import { DiagnosticsService } from './diagnostics.service';
 import { BackupService } from './backup.service';
 import { ServarrController } from './servarr.controller';
 import { ServarrService } from './servarr.service';
+import { OperationalTelemetryController } from './operational-telemetry.controller';
+import { OperationalTelemetryService } from './operational-telemetry.service';
 
 @Module({
-  controllers: [SystemController, ServarrController],
-  providers: [UpdaterService, DiagnosticsService, BackupService, ServarrService],
+  controllers: [SystemController, ServarrController, OperationalTelemetryController],
+  providers: [UpdaterService, DiagnosticsService, BackupService, ServarrService, OperationalTelemetryService],
 })
 export class SystemModule {}

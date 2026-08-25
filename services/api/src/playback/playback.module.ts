@@ -10,10 +10,12 @@ import { SubtitleStreamService } from './subtitle-stream.service';
 import { TranscodeStreamService } from './transcode-stream.service';
 import { OfflineDownloadsController } from './offline-downloads.controller';
 import { OfflineDownloadsService } from './offline-downloads.service';
+import { PlaylistsController } from './playlists.controller';
+import { PlaylistsService } from './playlists.service';
 
 @Module({
   imports: [EntitlementsModule],
-  controllers: [PlaybackController, PlaybackHistoryController, OfflineDownloadsController],
+  controllers: [PlaybackController, PlaybackHistoryController, OfflineDownloadsController, PlaylistsController],
   providers: [
     PlaybackService,
     PlaybackHistoryService,
@@ -22,6 +24,7 @@ import { OfflineDownloadsService } from './offline-downloads.service';
     TranscodeStreamService,
     SubtitleStreamService,
     OfflineDownloadsService,
+    PlaylistsService,
   ],
 })
 export class PlaybackModule {}

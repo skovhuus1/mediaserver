@@ -31,32 +31,87 @@ Android-regler for dynamiske updater-receivere og eksporterede Leanback activiti
 Gradles Linux- og Windows-wrappers samt wrapper-JAR er versionsstyrede, så den samme
 native lint- og release-kæde kan køres reproducerbart lokalt og på GitHub Actions.
 
-### Android TV-player, buffer og undertekster
+### Android TV-player, buffer, lydspor og undertekster
 
-Fra `0.2.13` bruger TV-playeren Media3-sporvalg direkte på den aktive HLS-session.
-Auto og faste kvaliteter opretter derfor ikke en ny playback-session og genstarter
-ikke FFmpeg. Auto starter konservativt, kræver 45 sekunders stabil afspilning,
-30 sekunders buffer og 1,5 gange bitrate i målt båndbredde før opjustering og
-bruger 120 sekunders cooldown efter rebuffer.
+Fra `0.3.0` bruger TV-playeren en dedikeret session-reconfigure for kvalitet og
+VOD-lydspor. Valg af Auto eller en fast rendition sendes til den aktive
+playback-session og gemmes ikke som en generel device preference. Det betyder, at
+kvalitetsvælgeren og lydsporvalg kan reagere direkte på den aktuelle stream uden
+at gå gennem mobilens player-facade.
 
-TV-bufferprofilen holder 30-120 sekunder fremad og 30 sekunder bagud. Adminens
-playbacktelemetri modtager aktuel rendition, bitrate, buffer, båndbredde, dropped
-frames og stalls fra den native player. HLS-forberedelsen viser samtidig antallet
-af klarlagte startsegmenter i stedet for kun en ubestemt FFmpeg-status.
+TV-bufferprofilen holder 30-120 sekunder fremad og 30 sekunder bagud. Playerens
+progressbar viser set position og lys blå buffer-position separat. Android TV
+annoncerer `upscaleMode=device`, så serveren ikke softwareopskalerer over kildens
+opløsning; TV'ets hardware står for panelopskalering uden ekstra FFmpeg-belastning.
 
-Android TV annoncerer `upscaleMode=device`, så serveren aldrig softwareopskalerer
-over kildens opløsning. TV’ets hardware skalerer billedet til panelet uden ekstra
-FFmpeg-belastning. Tekstundertekster vises som standard lavt i safe-zone med hvid
-tekst, sort outline og uden boks; stil, farve, størrelse, placering og timing gemmes
-pr. profil under klientens indstillinger.
+Tekstundertekster vises som standard lavt i safe-zone med hvid tekst, sort outline
+og uden boks. Stil, farve, størrelse, placering og timing gemmes pr. profil under
+klientens indstillinger.
+
+## Kundeoplevelse 2.0
+
+Kundewebben bruger et samlet, profilscopet home-feed på `GET /api/v1/experience/home`.
+Feedet leverer hero, effektiv rækkeopsætning og første cursor-side af hver synlig
+række i ét kald. Første side caches i Redis i 60 sekunder pr. account/profil og
+invalideres ved Min liste, playlister, historik og profilindstillinger.
+
+- Standardrækkefølgen er Anbefalinger, Fortsæt med at se, Min liste, Seneste
+  episoder, Nye film, Nye serier, Genrer og Populært lokalt.
+- Fortsæt med at se markerer fortsat en titel som set ved 90 %, men denne
+  historikheuristik frigiver aldrig den aktive stream. Reservationen afsluttes
+  kun ved et eksplicit `ended`-signal eller når brugeren stopper playeren.
+- `/watch/my-list` viser profilens kanoniske Min liste. Serieafsnit gemmes som én
+  stabil serieidentitet, så samme serie ikke gentages for hvert afsnit.
+- `/watch/playlists` administrerer op til 50 private playlister pr. profil og 500
+  poster pr. playliste. Film, hele serier og enkelte episoder understøttes.
+- Playlister kan fastgøres som dynamiske `playlist:<uuid>`-rækker, omarrangeres
+  med drag-and-drop eller keyboard og bruger `expectedUpdatedAt`, så samtidige
+  ændringer afvises eksplicit frem for at overskrive hinanden.
+- Alle mutationer er account- og profile-scopede, auditloggede og rydder den
+  relevante home-cache. Sletning fjerner playlistens home-reference i samme
+  databasetransaktion.
+- Fælles mediekort og vandrette rails understøtter mus, touch, scroll-snap,
+  piletaster, Home/End, artwork-fallbacks, skeletons og tom-/fejltilstande.
+- Titel-/seriesider og webplayeroverlayet kan administrere Min liste og
+  playlister. Playback-, ABR-, transcoding-, buffer- og subtitle-engine er ikke
+  ændret af denne UI-leverance.
+
+Offentlige kontrakter:
+
+```text
+GET    /api/v1/experience/home
+GET    /api/v1/experience/home/rows/:id?cursor=...
+GET    /api/v1/playback/playlists
+POST   /api/v1/playback/playlists
+GET    /api/v1/playback/playlists/:id
+PATCH  /api/v1/playback/playlists/:id
+DELETE /api/v1/playback/playlists/:id
+PUT    /api/v1/playback/playlists/:id/items/:mediaId
+DELETE /api/v1/playback/playlists/:id/items/:itemId
+PATCH  /api/v1/playback/playlists/:id/items/order
+```
 
 ## Live TV fra M3U
 
+- Live TV-workerens `ffprobe`-katalog eksponerer stabile lyd- og undertekstspor. Webplayeren kan skifte native HLS-spor direkte eller rekonfigurere remux/transcoding på samme lease via `PATCH /api/v1/live-tv/playback/leases/:id/tracks`; undertekster er eksplicit slået fra som standard.
+- Server-renderede Live TV-undertekster understøtter bitmapspor som DVB, DVD og PGS. Ukendte eller tekstbaserede codecs afvises med en konkret fejl frem for at starte en lydløs eller forkert stream.
+
+### Søgning, anbefalinger og driftsovervågning
+
+- `/api/v1/experience/search` søger på titler, konkrete episoder, personer og genrer. Alle resultater er lokale, account-scopede og kræver en læsbar scannet mediefil.
+- Anbefalinger bruger historik, feedback, TMDB-similar-id'er, genrer og topcredits. Afsluttede titler forbliver udelukket efter et anbefalings-reset; reset fjerner kun ældre signalers indflydelse.
+- API'et sampler driftsdata hvert minut og bevarer `system_metric_samples` i 30 dage. `GET /api/v1/system/telemetry?range=24h` understøtter `1h`, `6h`, `24h`, `7d` og `30d`.
+- `GET /api/v1/system/alerts` viser deduplikerede alarmer for ressourcepres, buffering og jobfejl. Administratorer kan kvittere via `PATCH /api/v1/system/alerts/:id/acknowledge`.
+- `GET /api/v1/system/diagnostics/export` genererer en account-scopet JSON-pakke med aktuelle checks, 24 timers metrics og alarmer. Hemmeligheder, M3U-credentials og updater-tokens medtages ikke.
+
 BoltBytes Media Server understøtter en komplet, account-scoped Live TV-kæde med krypterede M3U/XMLTV-kilder, kanalimport, dubletmatching, kildeprioritet, EPG, favoritter, atomisk forbindelsespulje, Direct Play, remux/transcoding, Chromecast-handoff og hurtigt kanalskift.
 
+- Webplayerens klargøringsscene viser kanalidentitet, reel streammetode og en indetermineret status uden opdigtede procenter. Den responsive blå statusflade understøtter reduceret bevægelse og kan altid lukkes, mens forbindelsen reserveres.
+
 - Opret og administrer udbydere, forbindelser, kanalrækkefølge og EPG under `Live TV` i administratorpanelet.
-- Hvis M3U-headeren annoncerer `url-tvg`, `x-tvg-url` eller `tvg-url`, opretter serveren automatisk XMLTV-kilden og sætter et EPG-job i kø. Kanaler vises stadig med M3U-navn, logo og gruppe som ikke-optagelig guidefallback, indtil rigtige XMLTV-programtider er importeret.
+- Hvis M3U-headeren annoncerer `url-tvg`, `x-tvg-url` eller `tvg-url`, opretter serveren automatisk XMLTV-kilden. Standard Xtream-playlister på `get.php` får desuden sikkert udledt deres `xmltv.php`-endpoint. EPG-jobbet starter først efter kanalimporten er committed og fejler konkret ved nul aktuelle programmer eller nul kanalmatch; indtil rigtige XMLTV-programtider er importeret, vises M3U-navn, logo og gruppe som ikke-optagelig guidefallback.
 - Kanalstyringen understøtter op til 50.000 kanaler, server-side pagination, debounced kanal- og gruppesøgning, Shift-markering af intervaller samt atomisk visning/skjul af markeringer, en hel gruppe eller hele kataloget. Kvalitets- og landesuffikser som `DR 1 FHD DK`, `DR 1 FH DK`, `DR 1 HD DK` og `DR 1 DK` samles automatisk under én stabil kanalidentitet. Et manuelt låst navn eller kanalnummer bevares ved senere importer. Skjulte kanaler fjernes server-side fra kundernes guide; aktive streams stoppes, og planlagte eller aktive optagelser annulleres atomisk.
+- Første migration aktiverer kun danske M3U-kanaler og sorterer dem efter Canal Digital Danmarks offentliggjorte liste fra 20. august 2020. Nye importer bruger samme land/gruppe/navne-policy. Administratoren kan derefter trække aktive kanaler eller skrive et ønsket kanalnummer direkte. Nummeret er en global, én-baseret placering: flyttes Showtime eksempelvis til `2`, bliver den kanal 2, og alle efterfølgende aktive kanaler forskydes og renummereres atomisk. Rækkefølgen gemmes account-scoped, auditlogges og bruges af guide samt forrige/næste kanal.
 - Kilde-URL'er krypteres med AES-256-GCM og returneres aldrig til browseren eller Chromecast-modtageren.
 - Store M3U-kilder understøttes op til 256 MiB som standard med streaming bytekontrol, synlig byte-/procentprogress, løbende job-lease renewal og fem minutters timeout; grænsen kan konfigureres for betroede udbydere.
 - M3U-parseren itererer linjer uden en ekstra fuld filkopi. Kanalimporten behandler uafhængige kanalidentiteter med kontrolleret parallelisme, serialiserer dubletter og deaktiverer forsvundne kilder i PostgreSQL-batches på højst 1.000 ID'er.
@@ -124,7 +179,7 @@ Hostmappen monteres read-only som **/media** i API og worker. Biblioteker vælge
 | Adgang | Planversioner, snapshots, overrides, release windows, suspend/revoke og atomiske streamreservationer |
 | Bibliotek | Flere biblioteker, parallel scans, filesystem-watcher, metadata, manuel match, låsning og playback-analyse |
 | Playback | Direct Play, Direct Stream/remux, HLS-transcoding, ABR, 4K/HDR-policy, subtitles, historik og fortsæt-position |
-| Kundeportal | Kompakt personlig forside, anbefalinger, søgning, film-/seriesider, sæsoner, overordnede normaliserede genrefiltre, kompakt Fortsæt med at se-række med profilscopet fjernelse, præferencer og downloads |
+| Kundeportal | Personlig hero og redigerbart home-feed, Min liste, private playlister, fælles hurtighandlinger, anbefalinger, søgning, film-/seriesider, sæsoner, genrer, Fortsæt med at se, præferencer og downloads |
 | Chromecast | Web Sender, signed cast-media-kontrakt og branded receiver-side; produktion kræver registreret Cast App ID |
 | Admin | Operationscenter, diagnostics, CPU/RAM/playback-telemetri, logs, opdatering, backup og integrationer |
 | Backup | Krypteret PostgreSQL-backup, import, download, retention, pre-restore safety backup og gated restore |
@@ -222,9 +277,9 @@ Se [domæne og Nginx Proxy Manager](docs/domain-nginx-proxy-manager.md).
 
 Arbejdet laves på **agent/...** branches. Hver færdig leverance skal have opdateret dokumentation, lokale gates og grønne push- og PR-checks. Først derefter squash-merges den til **main**.
 
-Alle releases bruger ét SemVer-nummer. Sæt næste version med `npm run version:set -- 0.2.1`, opdater `CHANGELOG.md`, og kør `npm run version:check`; CI afviser versionsdrift mellem pakker, lockfil og health-API.
+Server, worker, admin og delte kontrakter bruger ét SemVer-nummer. Sæt næste serverversion med `npm run version:set -- 0.2.14`, opdater `CHANGELOG.md`, og kør `npm run version:check`; CI afviser versionsdrift mellem serverpakker, lockfil, health-API og README. Flutter mobile/TV versionsstyres og udgives separat, så rene serverleverancer aldrig skriver i appmapperne.
 
-Android-releases bygges som separate `mobile`- og `tv`-flavors. TV-produktionsworkflowet udgiver den signerede APK sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk TV-certificering forbliver en særskilt releasegate.
+Android-releases bygges som separate `mobile`- og `tv`-flavors. Produktionsworkflowet udgiver APK/AAB sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk mobil-, TV- og Cast-certificering forbliver en særskilt releasegate.
 
 TV-klienten bruger en blå BoltBytes-shell med synligt logo, kompakte mediekort og én samlet D-pad-model. TV-login har QR som primær handling, serievisningen viser sæsoner og alle afsnit, og Live TV-klienten bruger serverens guide-, favorit-, forbindelsespulje-, heartbeat- og kanalskiftkontrakter. E-mail-login er en eksplicit fallback og kræver ikke, at brugeren kan pege eller swipe på skærmen.
 
@@ -248,8 +303,9 @@ Licens er ikke fastlagt i repositoryet. Tilføj en licensfil, før projektet dis
 - Vis alle og Skjul alle arbejder på hele kontoens katalog direkte i PostgreSQL og er ikke begrænset af den valgte side eller 50.000-kanalsgrænsen for manuel UUID-bulkmarkering.
 - Gruppevisning kan ændres uden at indlæse alle kanal-id'er i API-processens hukommelse. Skjulning frigiver berørte aktive streams, annullerer berørte optagelser og skriver resultatet til auditloggen atomisk.
 - Adminpanelet holder globale handlinger, gruppehandlinger og manuel markering i separate responsive rækker og viser både igangværende status og afsluttet antal.
+
 ### Durable Live TV-vedligeholdelsesjobs
 
-- Globale og gruppebaserede synlighedsændringer oprettes som live-tv.channel-visibility-jobs. Jobbet leases af workeren, deduplikeres pr. scope og handling, kan annulleres og udfører kanalændring, streamfrigivelse, optagelsesannullering og audit atomisk.
-- GET /api/v1/live-tv/admin/jobs returnerer progress, seneste fejl, varighed og et vedvarende resultat. Adminpanelets Opgaver-række opdateres hvert andet sekund og viser antal ændrede kanaler eller M3U-importens nye, ændrede, uændrede og deaktiverede sources.
+- Globale og gruppebaserede synlighedsændringer oprettes som `live-tv.channel-visibility`-jobs. Jobbet leases af workeren, deduplikeres pr. scope og handling, kan annulleres og udfører kanalændring, streamfrigivelse, optagelsesannullering og audit atomisk.
+- `GET /api/v1/live-tv/admin/jobs` returnerer progress, seneste fejl, varighed og et vedvarende resultat. Adminpanelets Opgaver-række opdateres hvert andet sekund og viser antal ændrede kanaler eller M3U-importens nye, ændrede, uændrede og deaktiverede sources.
 - M3U-importen springer identiske kanalmetadata og sourcerækker over. Manglende sources deaktiveres fortsat i afgrænsede batches, og afsluttende importstatistik gemmes både i job-payloaden og auditloggen.

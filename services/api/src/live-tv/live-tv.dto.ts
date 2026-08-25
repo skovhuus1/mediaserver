@@ -68,6 +68,12 @@ export class UpdateLiveTvChannelDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100_000) sortOrder?: number;
 }
 
+export class LiveTvTrackSelectionDto {
+  @IsString() @MaxLength(512) streamToken!: string;
+  @IsOptional() @IsString() @MaxLength(64) audioTrackId?: string | null;
+  @IsOptional() @IsString() @MaxLength(64) subtitleTrackId?: string | null;
+}
+
 export class BulkUpdateLiveTvChannelsDto {
   @IsArray()
   @ArrayMinSize(1)
@@ -82,6 +88,12 @@ export class BulkUpdateLiveTvChannelsDto {
 export class BulkUpdateLiveTvAllChannelsDto {
   @IsIn(['show', 'hide'])
   action!: 'show' | 'hide';
+}
+
+export class ReorderLiveTvChannelDto {
+  @IsOptional() @IsUUID('4') targetChannelId?: string;
+  @IsOptional() @IsIn(['before', 'after']) placement: 'before' | 'after' = 'before';
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5_000) position?: number;
 }
 
 export class ListAdminLiveTvChannelsDto {

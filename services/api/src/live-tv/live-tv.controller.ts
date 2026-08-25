@@ -4,7 +4,7 @@ import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { CurrentUser, Roles } from '../common/auth';
 import {
   BulkUpdateLiveTvAllChannelsDto, BulkUpdateLiveTvChannelGroupDto, BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto,
-  ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, LiveTvAuthorizeDto, LiveTvGuideNeighborDto, LiveTvSwitchDto, LiveTvTokenDto, MergeLiveTvChannelDto,
+  ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, LiveTvAuthorizeDto, LiveTvGuideNeighborDto, LiveTvSwitchDto, LiveTvTokenDto, LiveTvTrackSelectionDto, MergeLiveTvChannelDto, ReorderLiveTvChannelDto,
   UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto, UpdateLiveTvSourceDto,
 } from './live-tv.dto';
 import { LiveTvPlaybackService } from './live-tv-playback.service';
@@ -30,6 +30,7 @@ export class LiveTvController {
   @Patch('admin/channels/bulk') @Roles('admin') bulkUpdateChannels(@CurrentUser() actor: AuthenticatedUser, @Body() dto: BulkUpdateLiveTvChannelsDto) { return this.liveTv.bulkUpdateChannels(actor, dto); }
   @Patch('admin/channels/all/visibility') @Roles('admin') bulkUpdateAllChannels(@CurrentUser() actor: AuthenticatedUser, @Body() dto: BulkUpdateLiveTvAllChannelsDto) { return this.liveTv.bulkUpdateAllChannels(actor, dto); }
   @Patch('admin/channels/groups/visibility') @Roles('admin') bulkUpdateChannelGroup(@CurrentUser() actor: AuthenticatedUser, @Body() dto: BulkUpdateLiveTvChannelGroupDto) { return this.liveTv.bulkUpdateChannelGroup(actor, dto); }
+  @Patch('admin/channels/:id/reorder') @Roles('admin') reorderChannel(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReorderLiveTvChannelDto) { return this.liveTv.reorderChannel(actor, id, dto); }
   @Patch('admin/channels/:id') @Roles('admin') updateChannel(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateLiveTvChannelDto) { return this.liveTv.updateChannel(actor, id, dto); }
   @Post('admin/channels/:id/merge') @Roles('admin') mergeChannel(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: MergeLiveTvChannelDto) { return this.liveTv.mergeChannels(actor, id, dto.sourceChannelId); }
   @Patch('admin/sources/:id') @Roles('admin') updateSource(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateLiveTvSourceDto) { return this.liveTv.updateSource(actor, id, dto); }
@@ -40,6 +41,7 @@ export class LiveTvController {
   @Delete('favorites/:channelId') unfavorite(@CurrentUser() actor: AuthenticatedUser, @Param('channelId') id: string) { return this.liveTv.setFavorite(actor, id, false); }
   @Post('playback/authorize') authorize(@CurrentUser() actor: AuthenticatedUser, @Body() dto: LiveTvAuthorizeDto) { return this.playback.authorize(actor, dto); }
   @Post('playback/leases/:id/switch') switchChannel(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: LiveTvSwitchDto) { return this.playback.switchChannel(actor, id, dto.channelId, dto.streamToken, dto.preferredMethod); }
+  @Patch('playback/leases/:id/tracks') configureTracks(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: LiveTvTrackSelectionDto) { return this.playback.configureTracks(actor, id, dto); }
   @Post('playback/leases/:id/cast-handoff') castHandoff(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: LiveTvTokenDto) { return this.playback.castHandoff(actor, id, dto.streamToken); }
   @Delete('playback/leases/:id/cast-handoff') endCast(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() dto: LiveTvTokenDto) { return this.playback.endCastHandoff(actor, id, dto.streamToken); }
 }

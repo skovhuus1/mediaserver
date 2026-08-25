@@ -106,6 +106,7 @@ model Account {
   playbackSessions     PlaybackSession[]
   playbackHistory      PlaybackHistory[]
   watchlistEntries     WatchlistEntry[]
+  playlists            Playlist[]
   offlineDownloads     OfflineDownload[]
   mediaPlaybackAssets  MediaPlaybackAsset[]
   mediaTimelineMarkers MediaTimelineMarker[]
@@ -170,6 +171,7 @@ model Profile {
   playbackSessions     PlaybackSession[]
   playbackHistory      PlaybackHistory[]
   watchlistEntries     WatchlistEntry[]
+  playlists            Playlist[]
   offlineDownloads     OfflineDownload[]
   auditLogs            AuditLog[]
   liveTvLeases         LiveTvLease[]
@@ -513,6 +515,7 @@ model MediaItem {
   playbackSessions     PlaybackSession[]
   playbackHistory      PlaybackHistory[]
   watchlistEntries     WatchlistEntry[]
+  playlistItems        PlaylistItem[]
   offlineDownloads     OfflineDownload[]
   playbackAsset        MediaPlaybackAsset?
   timelineMarkers      MediaTimelineMarker[]
@@ -753,18 +756,53 @@ model PlaybackHistory {
 }
 
 model WatchlistEntry {
-  id        String    @id @default(uuid())
-  accountId String    @map("account_id")
-  profileId String    @map("profile_id")
-  mediaId   String    @map("media_id")
-  createdAt DateTime  @default(now()) @map("created_at")
-  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  profile   Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  media     MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid())
+  accountId  String    @map("account_id")
+  profileId  String    @map("profile_id")
+  mediaId    String    @map("media_id")
+  targetType String    @default("media") @map("target_type")
+  targetKey  String    @map("target_key")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  account    Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profile    Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  media      MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
 
-  @@unique([profileId, mediaId])
+  @@unique([profileId, targetKey])
   @@index([accountId, profileId, createdAt])
   @@map("watchlist_entries")
+}
+
+model Playlist {
+  id          String         @id @default(uuid())
+  accountId   String         @map("account_id")
+  profileId   String         @map("profile_id")
+  name        String
+  description String?
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  account     Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profile     Profile        @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  items       PlaylistItem[]
+
+  @@index([accountId, profileId, updatedAt])
+  @@map("playlists")
+}
+
+model PlaylistItem {
+  id         String    @id @default(uuid())
+  playlistId String    @map("playlist_id")
+  mediaId    String    @map("media_id")
+  targetType String    @map("target_type")
+  targetKey  String    @map("target_key")
+  position   Int
+  createdAt  DateTime  @default(now()) @map("created_at")
+  playlist   Playlist  @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  media      MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, targetKey])
+  @@index([playlistId, position])
+  @@index([mediaId])
+  @@map("playlist_items")
 }
 
 model OfflineDownload {
@@ -875,7 +913,7 @@ model ProfilePreferences {
   subtitleTimingOffsetMs     Int       @default(0) @map("subtitle_timing_offset_ms")
   autoplayNext               Boolean   @default(true) @map("autoplay_next")
   recommendationsEnabled     Boolean   @default(true) @map("recommendations_enabled")
-  homeRowOrder               Json      @default("[\"recommendations\",\"continue\",\"new_movies\",\"new_series\"]") @map("home_row_order")
+  homeRowOrder               Json      @default("[\"recommendations\",\"continue\",\"watchlist\",\"latest_episodes\",\"new_movies\",\"new_series\",\"genres\",\"popular\"]") @map("home_row_order")
   hiddenHomeRows             Json      @default("[]") @map("hidden_home_rows")
   recommendationResetAt      DateTime? @map("recommendation_reset_at")
   createdAt                  DateTime  @default(now()) @map("created_at")
@@ -1147,6 +1185,9 @@ model LiveTvLease {
   currentBitrate Int?                @map("current_bitrate")
   bufferAheadMs  Int?                @map("buffer_ahead_ms")
   stallCount     Int                 @default(0) @map("stall_count")
+  availableTracks Json               @default("{\"audio\":[],\"subtitles\":[]}") @map("available_tracks")
+  selectedAudioTrackId String?       @map("selected_audio_track_id")
+  selectedSubtitleTrackId String?    @map("selected_subtitle_track_id")
   leaseExpiresAt DateTime            @map("lease_expires_at")
   lastHeartbeatAt DateTime           @default(now()) @map("last_heartbeat_at")
   startedAt      DateTime            @default(now()) @map("started_at")

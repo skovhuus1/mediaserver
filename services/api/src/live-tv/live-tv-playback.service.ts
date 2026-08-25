@@ -4,10 +4,22 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { chooseLiveTvMethod, selectLiveTvSource, type LiveTvMethod, type LiveTvSourceCandidate } from './live-tv-policy';
-import type { LiveTvAuthorizeDto, LiveTvHeartbeatDto } from './live-tv.dto';
+import type { LiveTvAuthorizeDto, LiveTvHeartbeatDto, LiveTvTrackSelectionDto } from './live-tv.dto';
 
 const activeStatuses = ['preparing', 'ready', 'active'] as const;
 type LiveTvLeaseWithChannel = Prisma.LiveTvLeaseGetPayload<{ include: { channel: true } }>;
+type LiveTvTrack = { id: string; kind: 'audio' | 'subtitle'; streamIndex: number; language: string | null; label: string; codec: string; isDefault: boolean; isForced: boolean };
+type LiveTvTrackCatalog = { audio: LiveTvTrack[]; subtitles: LiveTvTrack[] };
+
+function trackCatalog(value: Prisma.JsonValue): LiveTvTrackCatalog {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { audio: [], subtitles: [] };
+  const record = value as Record<string, Prisma.JsonValue>;
+  const tracks = (key: 'audio' | 'subtitles', kind: LiveTvTrack['kind']) => Array.isArray(record[key])
+    ? record[key].filter((item): item is Prisma.JsonObject => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+      .filter((item) => typeof item.id === 'string' && item.kind === kind && typeof item.streamIndex === 'number') as unknown as LiveTvTrack[]
+    : [];
+  return { audio: tracks('audio', 'audio'), subtitles: tracks('subtitles', 'subtitle') };
+}
 
 @Injectable()
 export class LiveTvPlaybackService {
@@ -54,11 +66,47 @@ export class LiveTvPlaybackService {
         channelId, sourceId: allocation.source.sourceId, connectionId: allocation.source.connectionId,
         method: allocation.method, status: allocation.method === 'direct_play' ? 'ready' : 'preparing',
         runtimeState: 'starting', currentBitrate: null, bufferAheadMs: null, lastError: null, jobId: null,
+        availableTracks: { audio: [], subtitles: [] }, selectedAudioTrackId: null, selectedSubtitleTrackId: null,
         leaseExpiresAt: new Date(Date.now() + this.leaseSeconds * 1_000), lastHeartbeatAt: new Date(),
       }, include: { channel: true } });
       return this.queueStreamJob(tx, updated, allocation.method, entitlements.allowVideoTranscode);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return this.response(lease, token);
+  }
+
+  async configureTracks(actor: AuthenticatedUser, leaseId: string, dto: LiveTvTrackSelectionDto) {
+    const entitlements = await this.entitlements(actor);
+    const lease = await this.prisma.$transaction(async (tx) => {
+      await this.lockPool(tx, actor.accountId);
+      const current = await tx.liveTvLease.findFirst({ where: {
+        id: leaseId, accountId: actor.accountId, userId: actor.sub, profileId: entitlements.profileId,
+      }, include: { channel: true } });
+      this.assertToken(current, dto.streamToken);
+      if (!current || !activeStatuses.includes(current.status as typeof activeStatuses[number])) {
+        throw new ConflictException({ code: 'live_tv_lease_finished', message: 'Live TV-sessionen er afsluttet' });
+      }
+      const catalog = trackCatalog(current.availableTracks);
+      const audioTrackId = dto.audioTrackId === undefined ? current.selectedAudioTrackId : dto.audioTrackId || null;
+      const subtitleTrackId = dto.subtitleTrackId === undefined ? current.selectedSubtitleTrackId : dto.subtitleTrackId || null;
+      if (audioTrackId && !catalog.audio.some((track) => track.id === audioTrackId)) {
+        throw new BadRequestException({ code: 'live_tv_audio_track_invalid', message: 'Det valgte lydspor findes ikke længere på kanalen' });
+      }
+      if (subtitleTrackId && !catalog.subtitles.some((track) => track.id === subtitleTrackId)) {
+        throw new BadRequestException({ code: 'live_tv_subtitle_track_invalid', message: 'Det valgte undertekstspor findes ikke længere på kanalen' });
+      }
+      if (subtitleTrackId && !entitlements.allowVideoTranscode) {
+        throw new ForbiddenException({ code: 'live_tv_subtitle_transcode_not_allowed', message: 'Dette Live TV-undertekstspor kræver server-rendering, som planen ikke tillader' });
+      }
+      if (current.jobId) await tx.systemJob.updateMany({ where: { id: current.jobId, status: { in: ['queued', 'running'] } }, data: { status: 'cancelled' } });
+      const method: LiveTvMethod = subtitleTrackId ? 'transcode' : 'direct_stream';
+      const updated = await tx.liveTvLease.update({ where: { id: current.id }, data: {
+        selectedAudioTrackId: audioTrackId, selectedSubtitleTrackId: subtitleTrackId, method,
+        status: 'preparing', runtimeState: 'starting', currentBitrate: null, bufferAheadMs: null, lastError: null, jobId: null,
+        leaseExpiresAt: new Date(Date.now() + this.leaseSeconds * 1_000), lastHeartbeatAt: new Date(),
+      }, include: { channel: true } });
+      return this.queueStreamJob(tx, updated, method, entitlements.allowVideoTranscode);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    return this.response(lease, dto.streamToken);
   }
 
   async heartbeat(leaseId: string, token: string | undefined, dto: LiveTvHeartbeatDto) {
@@ -93,7 +141,8 @@ export class LiveTvPlaybackService {
     const lease = await this.tokenLease(leaseId, token, false);
     return { id: lease.id, status: lease.status, method: lease.method, runtimeState: lease.runtimeState,
       currentBitrate: lease.currentBitrate, bufferAheadMs: lease.bufferAheadMs, stallCount: lease.stallCount,
-      error: lease.lastError, channel: lease.channel };
+      error: lease.lastError, channel: lease.channel,
+      tracks: { ...trackCatalog(lease.availableTracks), selectedAudioTrackId: lease.selectedAudioTrackId, selectedSubtitleTrackId: lease.selectedSubtitleTrackId } };
   }
 
   async castHandoff(actor: AuthenticatedUser, leaseId: string, token: string) {
@@ -216,12 +265,14 @@ export class LiveTvPlaybackService {
     return tx.liveTvLease.update({ where: { id: lease.id }, data: { jobId: job.id }, include: { channel: true } });
   }
 
-  private async response(lease: { id: string; method: string; status: string; leaseExpiresAt: Date; channel: { id: string; name: string; number: number | null; logoUrl: string | null } }, token: string) {
+  private async response(lease: { id: string; method: string; status: string; leaseExpiresAt: Date; availableTracks: Prisma.JsonValue; selectedAudioTrackId: string | null; selectedSubtitleTrackId: string | null; channel: { id: string; name: string; number: number | null; logoUrl: string | null } }, token: string) {
     const base = `${publicBaseUrl()}/api/v1/live-tv/stream/${lease.id}`;
     const query = `token=${encodeURIComponent(token)}`;
     return { accepted: true, leaseId: lease.id, method: lease.method, status: lease.status, channel: lease.channel,
       streamToken: token, streamUrl: `${base}/${lease.method === 'direct_play' ? 'direct' : 'manifest'}?${query}`,
       statusUrl: `${base}/status?${query}`, heartbeatUrl: `${base}/heartbeat?${query}`, releaseUrl: `${base}?${query}`,
+      tracksUrl: `${publicBaseUrl()}/api/v1/live-tv/playback/leases/${lease.id}/tracks`,
+      tracks: { ...trackCatalog(lease.availableTracks), selectedAudioTrackId: lease.selectedAudioTrackId, selectedSubtitleTrackId: lease.selectedSubtitleTrackId },
       contentType: 'application/vnd.apple.mpegurl', leaseExpiresAt: lease.leaseExpiresAt };
   }
 

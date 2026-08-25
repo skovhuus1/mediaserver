@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { detectVideoSignalProfile, type AuthenticatedUser } from '@boltbytes/contracts';
 import { PrismaService } from '../prisma/prisma.service';
+import { canonicalMediaTarget } from '../playback/media-target';
 import {
   buildSeriesSeasons,
   cleanLocalTitle,
@@ -56,12 +57,30 @@ export class ExperienceService {
 
   async search(actor: AuthenticatedUser, rawQuery: string) {
     const query = String(rawQuery ?? '').trim().slice(0, 80);
-    if (query.length < 2) return { query, total: 0, groups: { titles: [], people: [], genres: [] } };
+    if (query.length < 2) return { query, total: 0, groups: { titles: [], episodes: [], people: [], genres: [] } };
     const media = (await this.localCatalog(actor.accountId)).filter(playable);
     const titles = collapseTitles(media).flatMap((item) => {
       const score = scoreSearchMatch(query, [item.title, item.overview, ...item.genres]);
       return score > 0 ? [{ ...item, score, matchReason: titleMatchReason(query, item) }] : [];
     }).sort((left, right) => right.score - left.score || (right.rating ?? 0) - (left.rating ?? 0)).slice(0, 12);
+
+    const episodes = media.filter((item) => item.type === 'episode').flatMap((item) => {
+      const title = cleanLocalTitle(item.title);
+      const seriesTitle = item.seriesDisplayTitle ?? item.seriesTitle ?? 'Serie';
+      const genres = readLocalGenres(item.genres);
+      const score = scoreSearchMatch(query, [title, seriesTitle, item.overview, ...genres]);
+      return score > 0 ? [{
+        mediaId: item.id,
+        title,
+        seriesTitle,
+        seasonNumber: item.seasonNumber,
+        episodeNumber: item.episodeNumber,
+        releaseYear: item.releaseYear,
+        imagePath: item.episodeStillPath ?? item.backdropPath ?? item.posterPath,
+        matchReason: `${seriesTitle}${item.seasonNumber !== null && item.episodeNumber !== null ? ` · S${String(item.seasonNumber).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}` : ''}`,
+        score,
+      }] : [];
+    }).sort((left, right) => right.score - left.score || left.matchReason.localeCompare(right.matchReason, 'da')).slice(0, 12);
 
     const peopleByKey = new Map<string, { person: ReturnType<typeof readLocalCredits>[number]; titleKeys: Set<string> }>();
     const genresByKey = new Map<string, { name: string; titleKeys: Set<string>; imagePath: string | null }>();
@@ -89,7 +108,7 @@ export class ExperienceService {
       const score = scoreSearchMatch(query, [genre.name]);
       return score > 0 ? [{ key: `genre-${key}`, name: genre.name, titleCount: genre.titleKeys.size, imagePath: genre.imagePath, score }] : [];
     }).sort((left, right) => right.score - left.score || right.titleCount - left.titleCount || left.name.localeCompare(right.name, 'da')).slice(0, 8);
-    return { query, total: titles.length + people.length + genres.length, groups: { titles, people, genres } };
+    return { query, total: titles.length + episodes.length + people.length + genres.length, groups: { titles, episodes, people, genres } };
   }
 
   async title(actor: AuthenticatedUser, mediaId: string) {
@@ -103,11 +122,12 @@ export class ExperienceService {
     const isSeries = Boolean(seriesName) && (anchor.type === 'episode' || anchor.type === 'series' || anchor.category === 'series');
     const base = this.titleSummary(anchor, seriesName);
     if (!isSeries || !seriesName) {
-      const [history, related] = await Promise.all([
+      const [history, related, viewerState] = await Promise.all([
         actor.profileId ? this.prisma.playbackHistory.findUnique({ where: { profileId_mediaId: { profileId: actor.profileId, mediaId: anchor.id } }, select: { positionMs: true, completed: true, updatedAt: true } }) : null,
         this.relatedTitles(actor.accountId, anchor, null),
+        this.viewerState(actor, anchor),
       ]);
-      return { mode: 'title', title: base, playback: this.playbackSummary(anchor, history), discovery: this.discovery(anchor, null), related };
+      return { mode: 'title', title: base, playback: this.playbackSummary(anchor, history), viewerState, discovery: this.discovery(anchor, null), related };
     }
 
     const candidates: Prisma.MediaItemWhereInput[] = [];
@@ -149,7 +169,10 @@ export class ExperienceService {
     const artworkRepresentative = playableEpisodes.find((episode) =>
       Boolean(episode.seasonPosterPath ?? episode.posterPath ?? episode.backdropPath),
     ) ?? representative;
-    const related = await this.relatedTitles(actor.accountId, representative, seriesName);
+    const [related, viewerState] = await Promise.all([
+      this.relatedTitles(actor.accountId, representative, seriesName),
+      this.viewerState(actor, representative),
+    ]);
     return {
       mode: 'series',
       title: {
@@ -163,6 +186,7 @@ export class ExperienceService {
         backdropPath: anchor.backdropPath ?? artworkRepresentative.backdropPath,
       },
       series,
+      viewerState,
       discovery: this.discovery(representative, seriesName),
       related,
     };
@@ -221,6 +245,24 @@ export class ExperienceService {
     if (!matching.length) throw notFound('Samlingen indeholder ingen lokale afspillelige titler.');
     const representative = matching[0]!;
     return { kind: 'collection', key, title, subtitle, imagePath: representative.backdropPath ?? representative.posterPath, items: collapseTitles(matching) };
+  }
+
+  private async viewerState(actor: AuthenticatedUser, media: MediaRecord) {
+    if (!actor.profileId) return { inWatchlist: false, watched: false, positionMs: 0, playlistIds: [] as string[] };
+    const target = canonicalMediaTarget(media);
+    const [watchlist, history, playlists] = await Promise.all([
+      this.prisma.watchlistEntry.findUnique({ where: { profileId_targetKey: { profileId: actor.profileId, targetKey: target.targetKey } }, select: { id: true } }),
+      this.prisma.playbackHistory.findUnique({ where: { profileId_mediaId: { profileId: actor.profileId, mediaId: media.id } }, select: { completed: true, positionMs: true } }),
+      this.prisma.playlistItem.findMany({ where: { targetKey: target.targetKey, playlist: { accountId: actor.accountId, profileId: actor.profileId } }, select: { playlistId: true } }),
+    ]);
+    return {
+      targetType: target.targetType,
+      targetKey: target.targetKey,
+      inWatchlist: Boolean(watchlist),
+      watched: Boolean(history?.completed),
+      positionMs: history?.positionMs ?? 0,
+      playlistIds: playlists.map((item) => item.playlistId),
+    };
   }
 
   private localCatalog(accountId: string) {

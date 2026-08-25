@@ -2,24 +2,45 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
-## 0.2.13
+## Unreleased
+
+## 0.3.0 - 2026-08-25
+
+- Færdiggør den separate Android TV-app med faste mobile/TV-entrypoints, TV-shell, D-pad-navigation, offline/login/settings/downloads/notifications og produktionsrelease-gates.
+- Gør VOD-kvalitetsskift autoritativt via aktiv playback-reconfigure og sender valgte renditions uden at gemme device-preference eller genstarte gennem mobilfacaden.
+- Tilføjer VOD-lydsporvalg fra ffprobe til authorize/reconfigure, sender valgt audio stream-index til FFmpeg og understøtter Direct Stream samt fuld transcode.
+- Løfter TV-playeren til en kompakt professionel transportbar med lavere overlay, tydeligt fokus, lys blå buffer-progress og D-pad-styret undertekst, lydspor, kvalitet og hastighed.
+- Holder 90 %-Fortsæt-med-at-se-heuristikken adskilt fra stream-release, så playback kun afsluttes ved faktisk completion eller brugerstop.
+
+## 0.2.14 - 2026-08-25
+
+- Adskiller Fortsæt-med-at-se-heuristikken fra streamens livscyklus, så automatisk set-status ved 90 % ikke længere frigiver reservationen og stopper den aktive afspilning.
+- Frigiver kun streamen ved playerens eksplicitte completion-signal og invaliderer home-feed-cachen ved alle progress-opdateringer.
+
+## 0.2.13 - 2026-08-24
+
+- Tilføjer Kundeoplevelse 2.0 med ét samlet profilscopet home-feed, personlig hero, otte standardrækker, dynamiske playlisterækker og cursor-baseret inkrementel indlæsning.
+- Tilføjer Min liste med kanonisk serieidentitet, så flere afsnit fra samme serie ikke optræder som separate serier.
+- Tilføjer private profilplaylister med film, hele serier og enkelte episoder, 50/500-grænser, drag-and-drop, keyboard-flytning, atomisk versionskontrolleret reorder og valgfri fastgørelse på forsiden.
+- Samler kundekort, rails og hurtighandlinger i én responsiv blå BoltBytes-komponent med playback, info, Min liste, playliste og set-status, som synkroniseres mellem synlige forekomster.
+- Udvider titel-/seriesider og webplayerens visuelle overlay med profilhandlinger uden at ændre Direct Play, remux, transcoding, ABR, buffer eller subtitle-engine.
+- Adskiller serverens SemVer-gate fra Flutter-klienternes releaseversion, så rene API/web-releases ikke skriver i mobil- eller TV-appfiler.
+
+- Udvidet kundesøgning med selvstændige episodehits og rettet anbefalingsscoring for TMDB-genrer, credits, similar-id'er og konkrete forklaringer.
+- Tilføjet account-scopet driftsmonitorering med 30 dages CPU-, RAM-, disk-, playback- og jobhistorik, vedvarende alarmer, kvittering og sikker diagnostikeksport.
+- Tilføjet Live TV-sporopdagelse og valg af lyd/undertekst gennem ffprobe, samme lease ved rekonfiguration, native HLS-spor i webplayeren og server-rendering af understøttede bitmap-undertekster.
+
+- Gør Live TV-kanalnummeret til en atomisk placering i hele den aktive kanalrække. Et nummer kan skrives direkte i adminpanelet, hvorefter den valgte kanal indsættes på pladsen og alle efterfølgende kanaler forskydes og renummereres uden dubletter.
+
+- Retter Live TV-EPG ved at autoopdage standard Xtream XMLTV, fjerne kapløbet mellem kanal- og EPG-import samt afvise tomme eller umatchede XMLTV-resultater med konkret diagnostik.
+
+- Redesignet webplayerens Live TV-klargøring med kanalbranding, responsiv statusvisning, tilgængelig reduced-motion-adfærd og mulighed for at afbryde under reservationen.
+
+- Aktiverer kun danske Live TV-kanaler som standard, anvender Canal Digital Danmarks kanalliste fra 20. august 2020 som stabil basisrækkefølge og tilføjer atomisk drag-and-drop-rækkefølge i administratorpanelet.
 
 - Flytter store Live TV-synlighedsændringer til annullerbare worker-jobs med progress/resultat og gør M3U-import inkrementel, så identiske kanal- og sourcerækker ikke genskrives.
 
-- Rettet global og gruppebaseret Live TV-kanalsynlighed for kataloger over 50.000 kanaler; scope-opdateringer kører direkte i PostgreSQL med kontrolleret transaktionstid, og adminpanelet viser stabilt layout samt afsluttet status. - 2026-08-24
-
-- Flytter Android TV-undertekster ned i broadcast-safe-zone og erstatter den
-  store mørke boks med hvid tekst, sort outline og responsiv størrelse.
-- Tilføjer profilscopet undertekststil, farve, størrelse, placering og
-  synkroniserings-offset med validering og migration.
-- Skifter TV-kvalitet på den eksisterende Media3-session via native HLS-spor i
-  stedet for at frigive sessionen og genstarte FFmpeg.
-- Tilføjer 30-120 sekunders TV-bufferprofil, native bitrate/buffer/frame-
-  telemetri og en hysterese-baseret Auto-policy med 45 sekunders stabilitetsgate.
-- Bruger TV’ets hardware til opskalering og forhindrer serveren i at generere
-  CPU-tunge renditions over kildens opløsning for Android TV.
-- Viser HLS-startbufferens konkrete segmentfremdrift og sender faktisk kvalitet,
-  båndbredde, dropped frames og stalls til playback-heartbeatet.
+- Rettet global og gruppebaseret Live TV-kanalsynlighed for kataloger over 50.000 kanaler; scope-opdateringer kører direkte i PostgreSQL med kontrolleret transaktionstid, og adminpanelet viser stabilt layout samt afsluttet status.
 
 ## 0.2.12 - 2026-08-24
 

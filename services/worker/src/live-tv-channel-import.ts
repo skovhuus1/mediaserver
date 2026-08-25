@@ -1,4 +1,4 @@
-import { LIVE_TV_CANONICAL_KEY_PREFIX, describeLiveTvChannel } from '@boltbytes/contracts';
+import { LIVE_TV_CANONICAL_KEY_PREFIX, describeLiveTvChannel, resolveDanishLiveTvPolicy } from '@boltbytes/contracts';
 import { Prisma, type PrismaClient } from '@prisma/client';
 
 type ImportChannel = {
@@ -26,6 +26,7 @@ export type LiveTvImportEntry = {
   channelNumber: number | null;
   logoUrl: string | null;
   groupName: string | null;
+  countryCode: string | null;
 };
 
 export async function loadLiveTvChannelImportIndex(prisma: PrismaClient, accountId: string): Promise<LiveTvChannelImportIndex> {
@@ -76,11 +77,13 @@ export async function resolveLiveTvImportChannel(
   }
 
   if (!channel) {
+    const policy = resolveDanishLiveTvPolicy(entry);
     channel = await prisma.liveTvChannel.upsert({
       where: { accountId_canonicalKey: { accountId, canonicalKey: descriptor.canonicalKey } },
       create: {
         accountId, canonicalKey: descriptor.canonicalKey, tvgId: entry.tvgId,
-        name: descriptor.displayName, number: entry.channelNumber, logoUrl: entry.logoUrl, groupName: entry.groupName,
+        name: descriptor.displayName, number: policy.lineupNumber ?? entry.channelNumber,
+        logoUrl: entry.logoUrl, groupName: entry.groupName, enabled: policy.isDanish, sortOrder: policy.sortOrder,
       },
       update: {},
     });

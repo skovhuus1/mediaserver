@@ -1,7 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computeAndroidVersionCode } from './android-version-code.mjs';
 
 const version = process.argv[2];
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('Brug: npm run version:set -- <major.minor.patch>');
@@ -30,27 +29,6 @@ const releasePath = resolve(root, 'shared/contracts/src/release.ts');
 const release = await readFile(releasePath, 'utf8');
 await writeFile(releasePath, release.replace(/BB_MEDIA_VERSION = '[^']+'/u, `BB_MEDIA_VERSION = '${version}'`));
 
-const flutterManifestPath = resolve(root, 'clients/mobile-tv/pubspec.yaml');
-const flutterManifest = await readFile(flutterManifestPath, 'utf8');
-const flutterVersionMatch = flutterManifest.match(/^version:\s*([^+\s]+)(?:\+(\d+))?\s*$/mu);
-if (!flutterVersionMatch) throw new Error('clients/mobile-tv/pubspec.yaml mangler et gyldigt version-felt');
-const currentFlutterVersion = flutterVersionMatch[1];
-const currentBuildNumber = Number.parseInt(flutterVersionMatch[2] ?? '0', 10);
-const stableAndroidVersion = /^\d+\.\d+\.\d+$/u.test(version);
-const deterministicBuildNumber = stableAndroidVersion
-  ? computeAndroidVersionCode(version, 1)
-  : Math.max(1, currentBuildNumber + 1);
-const nextBuildNumber = currentFlutterVersion === version
-  ? Math.max(deterministicBuildNumber, currentBuildNumber)
-  : deterministicBuildNumber;
-await writeFile(
-  flutterManifestPath,
-  flutterManifest.replace(
-    /^version:\s*[^\r\n]+$/mu,
-    `version: ${version}+${nextBuildNumber}`,
-  ),
-);
-
 const readmePath = resolve(root, 'README.md');
 const readme = await readFile(readmePath, 'utf8');
 if (!/^Aktuel release: \*\*[^*]+\*\*/mu.test(readme)) throw new Error('README.md mangler Aktuel release-linjen');
@@ -58,4 +36,4 @@ await writeFile(
   readmePath,
   readme.replace(/^Aktuel release: \*\*[^*]+\*\*/mu, `Aktuel release: **${version}**`),
 );
-console.log(`BoltBytes Media Server version sat til ${version}.`);
+console.log(`BoltBytes Media Server version sat til ${version}; Flutter-klienternes releaseversion ændres separat.`);

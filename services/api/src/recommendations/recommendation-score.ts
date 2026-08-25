@@ -2,12 +2,14 @@ export interface RecommendationFeatures {
   category: string;
   genres: string[];
   credits: string[];
+  creditNames: Record<string, string>;
   providerIds: string[];
   rating: number;
 }
 
 export interface RecommendationSignal extends RecommendationFeatures {
   weight: number;
+  title: string;
 }
 
 export function scoreRecommendation(
@@ -32,21 +34,23 @@ export function scoreRecommendation(
       )
     ) {
       local += 60;
-      bestReason ||= 'Lignende en titel, du har set';
+      bestReason ||= `Fordi du så ${signal.title}`;
     }
     const sharedCredits = candidate.credits.filter((credit) =>
       signal.credits.includes(credit),
     ).length;
     if (sharedCredits > 0) {
       local += Math.min(50, sharedCredits * 25);
-      bestReason ||= 'Med skuespillere, du har set';
+      const sharedCredit = candidate.credits.find((credit) => signal.credits.includes(credit));
+      bestReason ||= sharedCredit ? `Med ${candidate.creditNames[sharedCredit] ?? signal.creditNames[sharedCredit] ?? 'en medvirkende, du kender'}` : 'Med skuespillere, du har set';
     }
     const sharedGenres = candidate.genres.filter((genre) =>
       signal.genres.includes(genre),
     ).length;
     if (sharedGenres > 0) {
       local += Math.min(36, sharedGenres * 12);
-      bestReason ||= 'Matcher dine genrer';
+      const sharedGenre = candidate.genres.find((genre) => signal.genres.includes(genre));
+      bestReason ||= sharedGenre ? `Fordi du kan lide ${sharedGenre}` : 'Matcher dine genrer';
     }
     if (candidate.category === signal.category) {
       local += 8;

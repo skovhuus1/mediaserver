@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { encryptSecret, decryptSecret } from '../system/secret-value';
 import type {
   BulkUpdateLiveTvAllChannelsDto, BulkUpdateLiveTvChannelGroupDto, BulkUpdateLiveTvChannelsDto, CreateLiveTvConnectionDto, CreateLiveTvProviderDto,
-  ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto,
+  ListAdminLiveTvChannelsDto, ListLiveTvGuideDto, ReorderLiveTvChannelDto, UpdateLiveTvChannelDto, UpdateLiveTvConnectionDto, UpdateLiveTvProviderDto,
   UpdateLiveTvSourceDto,
 } from './live-tv.dto';
 import {
@@ -19,6 +19,7 @@ import {
   MAX_ADMIN_CHANNEL_PAGE_SIZE,
   visibilityCounts,
 } from './live-tv-channel-catalog';
+import { moveLiveTvChannelId, moveLiveTvChannelIdToPosition } from './live-tv-channel-order';
 import { presentLiveTvGuidePrograms, resolveLiveTvGuideWindow } from './live-tv-guide';
 
 @Injectable()
@@ -261,6 +262,78 @@ export class LiveTvService {
     } });
     await this.audit(actor, 'live_tv.channel.update', channelId, { fields: Object.keys(dto) });
     return { id: channelId, updated: true };
+  }
+
+  async reorderChannel(actor: AuthenticatedUser, channelId: string, dto: ReorderLiveTvChannelDto) {
+    if (dto.position === undefined && !dto.targetChannelId) {
+      throw new BadRequestException({ code: 'live_tv_reorder_target_required', message: 'Angiv et kanalnummer eller en målkanal' });
+    }
+    if (dto.position !== undefined && dto.targetChannelId) {
+      throw new BadRequestException({ code: 'live_tv_reorder_target_ambiguous', message: 'Angiv enten kanalnummer eller målkanal, ikke begge dele' });
+    }
+    if (dto.position === undefined && channelId === dto.targetChannelId) return { id: channelId, reordered: false };
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`live-tv-channel-order:${actor.accountId}`}))`);
+      const channels = await tx.liveTvChannel.findMany({
+        where: { accountId: actor.accountId, enabled: true },
+        select: { id: true, number: true, sortOrder: true },
+        orderBy: [{ sortOrder: 'asc' }, { number: 'asc' }, { name: 'asc' }],
+      });
+      if (channels.length > 5_000) {
+        throw new ConflictException({ code: 'live_tv_channel_order_too_large', message: 'Skjul ikke-danske kanaler før manuel rækkefølge ændres' });
+      }
+      const ids = channels.map((channel) => channel.id);
+      if (!ids.includes(channelId)) {
+        throw new NotFoundException({ code: 'live_tv_reorder_channel_missing', message: 'Kanalen skal være aktiv på denne konto' });
+      }
+      let orderedIds: string[];
+      if (dto.position !== undefined) {
+        orderedIds = moveLiveTvChannelIdToPosition(ids, channelId, dto.position);
+      } else {
+        const targetChannelId = dto.targetChannelId as string;
+        if (!ids.includes(targetChannelId)) {
+          throw new NotFoundException({ code: 'live_tv_reorder_channel_missing', message: 'Begge kanaler skal være aktive på denne konto' });
+        }
+        orderedIds = moveLiveTvChannelId(ids, channelId, targetChannelId, dto.placement);
+      }
+      const previousById = new Map(channels.map((channel, index) => [channel.id, { ...channel, position: index + 1 }]));
+      const shiftedIds = new Set(orderedIds.filter((id, index) => ids[index] !== id));
+      shiftedIds.add(channelId);
+      const changedRows = orderedIds.filter((id, index) => {
+        const previous = previousById.get(id);
+        return previous?.number !== index + 1 || previous.sortOrder !== (index + 1) * 100 || shiftedIds.has(id);
+      });
+      const effectivePosition = orderedIds.indexOf(channelId) + 1;
+      if (changedRows.length === 0) {
+        return { id: channelId, reordered: false, position: effectivePosition };
+      }
+      const values = Prisma.join(orderedIds.map((id, index) => Prisma.sql`
+        (${id}::uuid, ${index + 1}::integer, ${(index + 1) * 100}::integer, ${shiftedIds.has(id)}::boolean)
+      `));
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE live_tv_channels AS channel
+        SET number = ordered.number,
+            sort_order = ordered.sort_order,
+            metadata_locked = channel.metadata_locked OR ordered.metadata_locked,
+            updated_at = NOW()
+        FROM (VALUES ${values}) AS ordered(id, number, sort_order, metadata_locked)
+        WHERE channel.id = ordered.id AND channel.account_id = ${actor.accountId}::uuid
+      `);
+      await tx.auditLog.create({ data: {
+        accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId,
+        action: 'live_tv.channel.reorder', outcome: 'success', code: channelId,
+        details: {
+          targetChannelId: dto.targetChannelId ?? null,
+          placement: dto.targetChannelId ? dto.placement : null,
+          requestedPosition: dto.position ?? null,
+          previousPosition: previousById.get(channelId)?.position ?? null,
+          effectivePosition,
+          shiftedChannelCount: shiftedIds.size,
+          activeChannelCount: orderedIds.length,
+        },
+      } });
+      return { id: channelId, reordered: true, position: effectivePosition, shiftedChannelCount: shiftedIds.size };
+    }, { timeout: 30_000 });
   }
 
   async bulkUpdateChannels(actor: AuthenticatedUser, dto: BulkUpdateLiveTvChannelsDto) {

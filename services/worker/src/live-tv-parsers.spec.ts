@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { describeLiveTvChannel } from '@boltbytes/contracts';
-import { parseM3u, parseM3uDocument, parseXmlTv } from './live-tv-parsers.js';
+import { parseM3u, parseM3uDocument, parseXmlTv, resolveM3uEpgUrl } from './live-tv-parsers.js';
 
 describe('Live TV parsers', () => {
   it('parses a large M3U without requiring a split line array', () => {
@@ -30,7 +30,7 @@ describe('Live TV parsers', () => {
 
   it('extracts XMLTV URLs advertised by the M3U header', () => {
     const result = parseM3uDocument(`#EXTM3U url-tvg="https://epg.example.test/guide.xml, guide-2.xml" x-tvg-url='https://backup.example.test/xmltv.gz'
-#EXTINF:-1 tvg-id="dr1" group-title="Dansk",DR 1 HD DK
+#EXTINF:-1 tvg-id="dr1" tvg-country="DK" group-title="Dansk",DR 1 HD DK
 https://stream.example.test/dr1.m3u8`);
 
     expect(result.epgUrls).toEqual([
@@ -38,7 +38,20 @@ https://stream.example.test/dr1.m3u8`);
       'guide-2.xml',
       'https://backup.example.test/xmltv.gz',
     ]);
-    expect(result.entries[0]).toMatchObject({ name: 'DR 1 HD DK', groupName: 'Dansk', tvgId: 'dr1' });
+    expect(result.entries[0]).toMatchObject({ name: 'DR 1 HD DK', groupName: 'Dansk', countryCode: 'DK', tvgId: 'dr1' });
+  });
+
+  it('derives the standard Xtream XMLTV endpoint without carrying stream-only parameters', () => {
+    expect(resolveM3uEpgUrl([], 'https://iptv.example.test/panel/get.php?username=user%2Btv&password=s3cret&type=m3u_plus&output=ts')).toBe(
+      'https://iptv.example.test/panel/xmltv.php?username=user%2Btv&password=s3cret',
+    );
+  });
+
+  it('prefers an advertised XMLTV URL and never guesses for arbitrary playlists', () => {
+    expect(resolveM3uEpgUrl(['/guide.xml.gz'], 'https://iptv.example.test/panel/get.php?username=user&password=secret')).toBe(
+      'https://iptv.example.test/guide.xml.gz',
+    );
+    expect(resolveM3uEpgUrl([], 'https://iptv.example.test/channels/playlist.m3u?username=user&password=secret')).toBeNull();
   });
 
   it('merges quality and locale suffixes without merging distinct channel names', () => {
