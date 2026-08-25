@@ -214,7 +214,7 @@ export class OfflineDownloadsService {
     const row = await this.owned(actor, id);
     const durationMs = row.media.file?.durationMs ?? 0;
     const positionMs = durationMs > 0 ? Math.min(dto.positionMs, durationMs) : dto.positionMs;
-    const completed = dto.completed === true || (durationMs > 0 && positionMs / durationMs >= 0.9);
+    const completed = dto.completed === true;
     await this.prisma.playbackHistory.upsert({
       where: { profileId_mediaId: { profileId: row.profileId, mediaId: row.mediaId } },
       create: {

@@ -6,18 +6,21 @@ import '../core/api_client.dart';
 import '../core/app_config.dart';
 import '../core/app_update_service.dart';
 import '../core/models.dart';
+import '../shared_core/client_preferences_contract.dart';
 import '../widgets/cast_diagnostics.dart';
 
 class ClientSettingsScreen extends StatefulWidget {
-  const ClientSettingsScreen({required this.api, super.key});
+  const ClientSettingsScreen({required this.api, this.preferences, super.key});
 
   final ApiClient api;
+  final ClientPreferencesContract? preferences;
 
   @override
   State<ClientSettingsScreen> createState() => _ClientSettingsScreenState();
 }
 
 class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
+  late final ClientPreferencesContract preferences;
   bool loading = true;
   bool saving = false;
   String? error;
@@ -29,6 +32,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   @override
   void initState() {
     super.initState();
+    preferences =
+        widget.preferences ?? ClientPreferencesUseCase(api: widget.api);
     unawaited(_load());
   }
 
@@ -38,14 +43,11 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       error = null;
     });
     try {
-      final values = await Future.wait([
-        widget.api.getJson('/profiles/me/preferences'),
-        widget.api.getJson('/devices/me/preferences'),
-      ]);
+      final values = await preferences.load();
       if (!mounted) return;
       setState(() {
-        profile = jsonMap(values[0]);
-        device = jsonMap(values[1]);
+        profile = values.profile.toJson();
+        device = values.device.toJson();
         loading = false;
       });
     } on ApiException catch (failure) {
@@ -60,28 +62,16 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
 
   Future<void> _saveProfile() async {
     await _save(
-      () => widget.api.patchJson('/profiles/me/preferences', {
-        'preferredAudioLanguages': jsonList(profile['preferredAudioLanguages']),
-        'preferredSubtitleLanguages': jsonList(
-          profile['preferredSubtitleLanguages'],
-        ),
-        'subtitleMode': profile['subtitleMode'] ?? 'auto',
-        'autoplayNext': profile['autoplayNext'] != false,
-        'recommendationsEnabled': profile['recommendationsEnabled'] != false,
-      }),
+      () => preferences.saveProfilePreferences(
+        ProfilePreferences.fromJson(profile),
+      ),
     );
   }
 
   Future<void> _saveDevice() async {
     await _save(
-      () => widget.api.patchJson('/devices/me/preferences', {
-        'qualityMode': device['qualityMode'] ?? 'auto',
-        'fixedQualityHeight': device['fixedQualityHeight'],
-        'allowUpscale': device['allowUpscale'] != false,
-        'dataSaver': device['dataSaver'] == true,
-        'playbackRate': device['playbackRate'] ?? 1,
-        'hdrMode': device['hdrMode'] ?? 'auto',
-      }),
+      () =>
+          preferences.saveDevicePreferences(DevicePreferences.fromJson(device)),
     );
   }
 
@@ -116,7 +106,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       message = null;
     });
     try {
-      final value = await AppUpdateService().latest();
+      final value = await preferences.checkForUpdate();
       if (!mounted) return;
       setState(() {
         saving = false;
@@ -185,6 +175,87 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                     onChanged: (value) =>
                         setState(() => profile['subtitleMode'] = value),
                   ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue:
+                        profile['subtitleStyle']?.toString() ?? 'broadcast',
+                    decoration: const InputDecoration(
+                      labelText: 'Undertekststil',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'broadcast',
+                        child: Text('Flow TV · hvid med sort kant'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'line_box',
+                        child: Text('Diskret baggrund'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'solid_box',
+                        child: Text('Tydelig baggrund'),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => profile['subtitleStyle'] = value),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue:
+                        profile['subtitleTextColor']?.toString() ?? '#FFFFFF',
+                    decoration: const InputDecoration(labelText: 'Tekstfarve'),
+                    items: const [
+                      DropdownMenuItem(value: '#FFFFFF', child: Text('Hvid')),
+                      DropdownMenuItem(value: '#FFE66D', child: Text('Gul')),
+                      DropdownMenuItem(
+                        value: '#7FDBFF',
+                        child: Text('Lyseblå'),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => profile['subtitleTextColor'] = value),
+                  ),
+                  _PreferenceSlider(
+                    label: 'Størrelse',
+                    value: (intValue(profile['subtitleSizePercent']) ?? 100)
+                        .toDouble(),
+                    min: 75,
+                    max: 150,
+                    divisions: 15,
+                    valueLabel: (value) => '${value.round()} %',
+                    onChanged: (value) => setState(
+                      () => profile['subtitleSizePercent'] = value.round(),
+                    ),
+                  ),
+                  _PreferenceSlider(
+                    label: 'Placering fra bunden',
+                    value:
+                        (intValue(profile['subtitleBottomOffsetPercent']) ?? 6)
+                            .toDouble(),
+                    min: 4,
+                    max: 20,
+                    divisions: 16,
+                    valueLabel: (value) => '${value.round()} %',
+                    onChanged: (value) => setState(
+                      () => profile['subtitleBottomOffsetPercent'] = value
+                          .round(),
+                    ),
+                  ),
+                  _PreferenceSlider(
+                    label: 'Synkronisering',
+                    value: (intValue(profile['subtitleTimingOffsetMs']) ?? 0)
+                        .toDouble(),
+                    min: -5000,
+                    max: 5000,
+                    divisions: 40,
+                    valueLabel: (value) {
+                      final seconds = value / 1000;
+                      return '${seconds >= 0 ? '+' : ''}${seconds.toStringAsFixed(2)} s';
+                    },
+                    onChanged: (value) => setState(
+                      () => profile['subtitleTimingOffsetMs'] = value.round(),
+                    ),
+                  ),
                   const SizedBox(height: 14),
                   FilledButton.icon(
                     onPressed: saving ? null : _saveProfile,
@@ -237,12 +308,22 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                     onChanged: (value) =>
                         setState(() => device['hdrMode'] = value),
                   ),
-                  SwitchListTile(
-                    title: const Text('Tillad upscaling'),
-                    value: device['allowUpscale'] != false,
-                    onChanged: (value) =>
-                        setState(() => device['allowUpscale'] = value),
-                  ),
+                  if (AppConfig.isTvBuild)
+                    const ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.tv),
+                      title: Text('TV-hardwareopskalering aktiv'),
+                      subtitle: Text(
+                        'TV’et skalerer kildens bedste stabile kvalitet uden FFmpeg-belastning.',
+                      ),
+                    )
+                  else
+                    SwitchListTile(
+                      title: const Text('Tillad upscaling'),
+                      value: device['allowUpscale'] != false,
+                      onChanged: (value) =>
+                          setState(() => device['allowUpscale'] = value),
+                    ),
                   SwitchListTile(
                     title: const Text('Databesparelse'),
                     subtitle: const Text(
@@ -297,8 +378,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                           onPressed: saving
                               ? null
                               : () async {
-                                  final started = await AppUpdateService()
-                                      .downloadAndInstall(release!);
+                                  final started = await preferences
+                                      .installUpdate(release!);
                                   if (mounted && !started) {
                                     setState(
                                       () => message =
@@ -336,6 +417,45 @@ class _Section extends StatelessWidget {
           ...children,
         ],
       ),
+    ),
+  );
+}
+
+class _PreferenceSlider extends StatelessWidget {
+  const _PreferenceSlider({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.divisions,
+    required this.valueLabel,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final int divisions;
+  final String Function(double value) valueLabel;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('$label · ${valueLabel(value)}'),
+        Slider(
+          value: value.clamp(min, max),
+          min: min,
+          max: max,
+          divisions: divisions,
+          label: valueLabel(value),
+          onChanged: onChanged,
+        ),
+      ],
     ),
   );
 }

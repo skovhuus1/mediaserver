@@ -56,6 +56,10 @@ export class PlaybackHistoryService {
       dto.durationMs ?? session.media.file?.durationMs,
       dto.completed,
     );
+    const watchedByProgress = progress.durationMs !== null
+      && progress.durationMs > 0
+      && progress.positionMs / progress.durationMs >= 0.9;
+    const completedForHistory = progress.completed || watchedByProgress;
     const history = await this.prisma.playbackHistory.upsert({
       where: {
         profileId_mediaId: {
@@ -70,12 +74,12 @@ export class PlaybackHistoryService {
         mediaId: session.mediaId,
         playbackSessionId: session.id,
         positionMs: progress.positionMs,
-        completed: progress.completed,
+        completed: completedForHistory,
       },
       update: {
         playbackSessionId: session.id,
         positionMs: progress.positionMs,
-        completed: progress.completed,
+        completed: completedForHistory,
       },
     });
 
@@ -116,12 +120,13 @@ export class PlaybackHistoryService {
       take: 12,
     });
 
-    return entries.map((entry) => {
+    return entries.flatMap((entry) => {
       const durationMs = entry.media.file?.durationMs ?? null;
+      if (durationMs && entry.positionMs / durationMs >= 0.9) return [];
       const file = entry.media.file
         ? (({ probe: _probe, ...publicFile }) => ({ ...publicFile, sizeBytes: entry.media.file!.sizeBytes.toString() }))(entry.media.file)
         : null;
-      return {
+      return [{
         id: entry.media.id,
         title: entry.media.title,
         type: entry.media.type,
@@ -145,7 +150,7 @@ export class PlaybackHistoryService {
           percent: durationMs ? Math.min(100, Math.round((entry.positionMs / durationMs) * 100)) : 0,
           updatedAt: entry.updatedAt,
         },
-      };
+      }];
     });
   }
 

@@ -166,8 +166,7 @@ export function buildSeriesSeasons(episodes: SeriesEpisodeInput[], histories: Se
       || left.title.localeCompare(right.title, 'da'))
     .map((episode) => {
       const history = latestHistory.get(episode.id);
-      const watched = Boolean(history?.completed)
-        || Boolean(episode.durationMs && history && history.positionMs / episode.durationMs >= 0.9);
+      const watched = Boolean(history?.completed);
       const progressPercent = episode.durationMs && history
         ? Math.max(0, Math.min(100, Math.round((history.positionMs / episode.durationMs) * 100)))
         : 0;

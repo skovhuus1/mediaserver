@@ -14,12 +14,20 @@ describe('normalizePlaybackProgress', () => {
     expect(normalizePlaybackProgress(12_000, 10_000).positionMs).toBe(10_000);
   });
 
-  it('marks media complete at the ninety percent threshold', () => {
-    expect(normalizePlaybackProgress(90_000, 100_000).completed).toBe(true);
-    expect(normalizePlaybackProgress(89_999, 100_000).completed).toBe(false);
+  it('does not infer completion or session release from high playback position', () => {
+    expect(normalizePlaybackProgress(90_000, 100_000).completed).toBe(false);
+    expect(normalizePlaybackProgress(99_999, 100_000).completed).toBe(false);
   });
 
   it('honors an explicit completion signal without a duration', () => {
     expect(normalizePlaybackProgress(5_000, null, true).completed).toBe(true);
+  });
+
+  it('honors an explicit completion signal at a known duration', () => {
+    expect(normalizePlaybackProgress(100_000, 100_000, true)).toEqual({
+      positionMs: 100_000,
+      durationMs: 100_000,
+      completed: true,
+    });
   });
 });

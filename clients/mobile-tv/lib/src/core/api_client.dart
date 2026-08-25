@@ -5,15 +5,51 @@ import 'package:http/http.dart' as http;
 import 'app_config.dart';
 import 'session_store.dart';
 
+class ApiProblemDetails {
+  const ApiProblemDetails({this.correlationId, this.issues = const []});
+
+  final String? correlationId;
+  final List<String> issues;
+
+  bool get isEmpty => correlationId == null && issues.isEmpty;
+
+  factory ApiProblemDetails.fromJson(Map<String, dynamic> json) {
+    final nested = _asMap(json['error']);
+    return ApiProblemDetails(
+      correlationId: (json['correlationId'] ?? nested['correlationId'])
+          ?.toString(),
+      issues: _flattenApiDetails(json['details'] ?? nested['details']),
+    );
+  }
+}
+
 class ApiException implements Exception {
-  const ApiException(this.message, {this.code, this.statusCode});
+  const ApiException(
+    this.message, {
+    this.code,
+    this.statusCode,
+    this.problem = const ApiProblemDetails(),
+  });
 
   final String message;
   final String? code;
   final int? statusCode;
+  final ApiProblemDetails problem;
+
+  String? get correlationId => problem.correlationId;
+  List<String> get details => problem.issues;
 
   @override
   String toString() => message;
+}
+
+class ApiTokenSnapshot {
+  const ApiTokenSnapshot({this.accessToken, this.refreshToken});
+
+  final String? accessToken;
+  final String? refreshToken;
+
+  bool get hasRefreshToken => refreshToken?.isNotEmpty ?? false;
 }
 
 class ApiClient {
@@ -38,9 +74,28 @@ class ApiClient {
     _baseUri = Uri.parse(AppConfig.normalizeApiUrl(value));
   }
 
+  Future<ApiTokenSnapshot> readStoredTokenSnapshot() async {
+    final values = await Future.wait<String?>([
+      storage.readAccessToken(),
+      storage.readRefreshToken(),
+    ]);
+    return ApiTokenSnapshot(accessToken: values[0], refreshToken: values[1]);
+  }
+
+  void installTokenSnapshot(ApiTokenSnapshot snapshot) {
+    _accessToken = snapshot.accessToken;
+    _refreshToken = snapshot.refreshToken;
+  }
+
+  Future<void> persistTokenSnapshot(ApiTokenSnapshot snapshot) async {
+    final access = snapshot.accessToken;
+    final refresh = snapshot.refreshToken;
+    if (access == null || refresh == null) return;
+    await storage.writeTokens(access, refresh);
+  }
+
   Future<void> restoreTokens() async {
-    _accessToken = await storage.readAccessToken();
-    _refreshToken = await storage.readRefreshToken();
+    installTokenSnapshot(await readStoredTokenSnapshot());
   }
 
   Uri endpoint(String path) {
@@ -163,7 +218,20 @@ class ApiClient {
   }
 
   Future<void> refresh({String? profileId, String? profilePin}) async {
-    final token = _refreshToken;
+    final refreshed = await refreshTokenSnapshot(
+      ApiTokenSnapshot(accessToken: _accessToken, refreshToken: _refreshToken),
+      profileId: profileId,
+      profilePin: profilePin,
+    );
+    await _commitTokenSnapshot(refreshed);
+  }
+
+  Future<ApiTokenSnapshot> refreshTokenSnapshot(
+    ApiTokenSnapshot current, {
+    String? profileId,
+    String? profilePin,
+  }) async {
+    final token = current.refreshToken;
     if (token == null || token.isEmpty) {
       throw const ApiException(
         'Sessionen er udløbet. Log ind igen.',
@@ -182,7 +250,15 @@ class ApiClient {
         allowRefresh: false,
       ),
     );
-    await _captureTokens(result);
+    final access = result['accessToken']?.toString();
+    final refresh = result['refreshToken']?.toString();
+    if (access == null || refresh == null) {
+      throw const ApiException(
+        'Serveren returnerede en ugyldig session.',
+        code: 'invalid_refresh_response',
+      );
+    }
+    return ApiTokenSnapshot(accessToken: access, refreshToken: refresh);
   }
 
   Future<void> logout() async {
@@ -278,9 +354,14 @@ class ApiClient {
     final access = result['accessToken']?.toString();
     final refresh = result['refreshToken']?.toString();
     if (access == null || refresh == null) return;
-    _accessToken = access;
-    _refreshToken = refresh;
-    await storage.writeTokens(access, refresh);
+    await _commitTokenSnapshot(
+      ApiTokenSnapshot(accessToken: access, refreshToken: refresh),
+    );
+  }
+
+  Future<void> _commitTokenSnapshot(ApiTokenSnapshot snapshot) async {
+    installTokenSnapshot(snapshot);
+    await persistTokenSnapshot(snapshot);
   }
 
   Map<String, dynamic> _normalizeTvApproveUrl(Map<String, dynamic> result) {
@@ -294,6 +375,7 @@ class ApiClient {
   ApiException _apiError(http.Response response) {
     String message = 'Serverfejl (${response.statusCode}).';
     String? code;
+    var problem = const ApiProblemDetails();
     try {
       final json = _asMap(jsonDecode(utf8.decode(response.bodyBytes)));
       final nested = _asMap(json['error']);
@@ -304,6 +386,7 @@ class ApiClient {
         message = rawMessage.toString();
       }
       code = (json['code'] ?? nested['code'])?.toString();
+      problem = ApiProblemDetails.fromJson(json);
     } catch (_) {
       // Keep the status-based fallback for non-JSON proxy errors.
     }
@@ -311,12 +394,45 @@ class ApiClient {
       _redactSensitiveQueryParameters(message),
       code: code,
       statusCode: response.statusCode,
+      problem: problem,
     );
   }
 }
 
 Map<String, dynamic> _asMap(dynamic value) =>
     value is Map<String, dynamic> ? value : <String, dynamic>{};
+
+List<String> _flattenApiDetails(dynamic value, [String? parent]) {
+  if (value == null) return const [];
+  if (value is List) {
+    return value
+        .expand((item) => _flattenApiDetails(item, parent))
+        .toList(growable: false);
+  }
+  if (value is Map) {
+    final json = Map<String, dynamic>.from(value);
+    final field = (json['field'] ?? json['property'] ?? json['path'])
+        ?.toString();
+    final prefix = [
+      parent,
+      field,
+    ].whereType<String>().where((part) => part.isNotEmpty).join('.');
+    final messages = <String>[];
+    final message = json['message'];
+    if (message != null) {
+      messages.add(prefix.isEmpty ? '$message' : '$prefix: $message');
+    }
+    final constraints = json['constraints'];
+    if (constraints is Map) {
+      for (final item in constraints.values) {
+        messages.add(prefix.isEmpty ? '$item' : '$prefix: $item');
+      }
+    }
+    messages.addAll(_flattenApiDetails(json['children'], prefix));
+    return messages;
+  }
+  return [parent == null || parent.isEmpty ? '$value' : '$parent: $value'];
+}
 
 String _redactSensitiveQueryParameters(String value) => value.replaceAllMapped(
   RegExp(

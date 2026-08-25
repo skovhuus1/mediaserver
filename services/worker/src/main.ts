@@ -500,6 +500,20 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     && renditions.every((rendition) => rendition.hdr);
   const subtitleTrackId =
     typeof payload.subtitleTrackId === 'string' ? payload.subtitleTrackId : null;
+  const selectedAudioStreamIndex = finiteInteger(payload.audioStreamIndex);
+  const availableAudioStreamIndexes = audioStreamIndexes(file.probe);
+  const hasAudio = availableAudioStreamIndexes.length > 0 || Boolean(file.audioCodec);
+  if (
+    selectedAudioStreamIndex !== null
+    && !availableAudioStreamIndexes.includes(selectedAudioStreamIndex)
+  ) {
+    throw new Error(
+      'audio_track_invalid: selected audio track is not available in the source file',
+    );
+  }
+  const audioInput = selectedAudioStreamIndex === null
+    ? '0:a:0'
+    : `0:${selectedAudioStreamIndex}`;
   const startPositionMs = Math.max(0, finiteInteger(payload.startPositionMs) ?? 0);
   const seek = resolveAccurateTranscodeSeek(startPositionMs);
   const inputSeekArguments = seek.inputSeekSeconds > 0
@@ -568,7 +582,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
 
   if (streamMode === 'direct_stream') {
     const audioMode = payload.audioMode === 'aac' ? 'aac' : 'copy';
-    const encoder = file.audioCodec ? `copy+audio:${audioMode}` : 'copy';
+    const encoder = hasAudio ? `copy+audio:${audioMode}` : 'copy';
     await publishTranscoderStatus({
       accountId: job.accountId,
       state: 'remuxing',
@@ -584,8 +598,9 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       variantPlaylistPath: resolve(outputPath, 'stream_%v.m3u8'),
       segmentFilename: resolve(outputPath, 'segment_%v_%05d.m4s'),
       videoCodec: file.videoCodec,
-      hasAudio: Boolean(file.audioCodec),
+      hasAudio,
       audioMode,
+      audioStreamIndex: selectedAudioStreamIndex,
     });
     const inputArgumentIndex = directStreamArguments.indexOf('-i');
     if (inputSeekArguments.length && inputArgumentIndex >= 0) {
@@ -639,13 +654,13 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     videoColor.filter,
     `[prepared]split=${renditions.length}${splitOutputs}`,
     ...scaleOutputs,
-    ...(file.audioCodec
-      ? [`[0:a:0]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS,asplit=${renditions.length}${audioOutputs}`]
+    ...(hasAudio
+      ? [`[${audioInput}]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS,asplit=${renditions.length}${audioOutputs}`]
       : []),
   ].join(';');
   const streamMaps = renditions.flatMap((_, index) => [
     '-map', `[v${index}]`,
-    ...(file.audioCodec ? ['-map', `[a${index}]`] : []),
+    ...(hasAudio ? ['-map', `[a${index}]`] : []),
   ]);
   const cpuProfile = resolveCpuTranscodeProfile({
     availableThreads: availableParallelism(),
@@ -670,7 +685,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       `-pix_fmt:v:${index}`, videoColor.outputPixelFormat,
       ...buildSdrColorMetadataArguments(index, videoColor.toneMappedToSdr),
       `-force_key_frames:v:${index}`, 'expr:gte(t,n_forced*4)',
-      ...(file.audioCodec ? [
+      ...(hasAudio ? [
         `-c:a:${index}`, 'aac',
         `-b:a:${index}`, '160k',
         `-ac:a:${index}`, '2',
@@ -678,7 +693,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     ];
   });
   const variantMap = renditions.map((_, index) =>
-    file.audioCodec ? `v:${index},a:${index},name:${index}` : `v:${index},name:${index}`,
+    hasAudio ? `v:${index},a:${index},name:${index}` : `v:${index},name:${index}`,
   ).join(' ');
   const transcodeArguments = (videoEncoder: string) => [
     '-hide_banner',
@@ -776,6 +791,16 @@ function textSubtitleStreamIndexes(probe: Prisma.JsonValue | null): number[] {
   return streams.flatMap((stream) => {
     if (stream.codec_type !== 'subtitle' || typeof stream.codec_name !== 'string') return [];
     if (!codecs.has(stream.codec_name.toLowerCase())) return [];
+    const index = finiteInteger(stream.index);
+    return index === null ? [] : [index];
+  });
+}
+
+function audioStreamIndexes(probe: Prisma.JsonValue | null): number[] {
+  const root = asJsonObject(probe);
+  const streams = Array.isArray(root.streams) ? root.streams.map(asJsonObject) : [];
+  return streams.flatMap((stream) => {
+    if (stream.codec_type !== 'audio') return [];
     const index = finiteInteger(stream.index);
     return index === null ? [] : [index];
   });

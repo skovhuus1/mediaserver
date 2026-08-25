@@ -4,6 +4,14 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-25
+
+- Færdiggør den separate Android TV-app med faste mobile/TV-entrypoints, TV-shell, D-pad-navigation, offline/login/settings/downloads/notifications og produktionsrelease-gates.
+- Gør VOD-kvalitetsskift autoritativt via aktiv playback-reconfigure og sender valgte renditions uden at gemme device-preference eller genstarte gennem mobilfacaden.
+- Tilføjer VOD-lydsporvalg fra ffprobe til authorize/reconfigure, sender valgt audio stream-index til FFmpeg og understøtter Direct Stream samt fuld transcode.
+- Løfter TV-playeren til en kompakt professionel transportbar med lavere overlay, tydeligt fokus, lys blå buffer-progress og D-pad-styret undertekst, lydspor, kvalitet og hastighed.
+- Holder 90 %-Fortsæt-med-at-se-heuristikken adskilt fra stream-release, så playback kun afsluttes ved faktisk completion eller brugerstop.
+
 ## 0.2.14 - 2026-08-25
 
 - Adskiller Fortsæt-med-at-se-heuristikken fra streamens livscyklus, så automatisk set-status ved 90 % ikke længere frigiver reservationen og stopper den aktive afspilning.

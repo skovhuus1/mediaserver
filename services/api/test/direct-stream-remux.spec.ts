@@ -18,6 +18,7 @@ describe('Direct Stream FFmpeg contract', () => {
     expect(option(args, '-hls_fmp4_init_filename')).toBe('init_0.mp4');
     expect(option(args, '-hls_flags')).toBe('split_by_time+temp_file');
     expect(option(args, '-hls_flags')).not.toContain('independent_segments');
+    expect(args).toContain('0:a:0?');
     expect(args).not.toContain('libx264');
     expect(args).not.toContain('libx265');
   });
@@ -35,6 +36,20 @@ describe('Direct Stream FFmpeg contract', () => {
     expect(option(args, '-c:a')).toBe('copy');
     expect(args).not.toContain('-tag:v');
     expect(option(args, '-var_stream_map')).toBe('v:0,a:0,name:0');
+  });
+
+  it('maps the requested audio stream index when switching audio tracks', () => {
+    const args = buildDirectStreamHlsArguments({
+      inputPath: '/media/movie.mkv',
+      variantPlaylistPath: '/transcode/session/stream_%v.m3u8',
+      segmentFilename: '/transcode/session/segment_%v_%05d.m4s',
+      videoCodec: 'h264',
+      hasAudio: true,
+      audioMode: 'copy',
+      audioStreamIndex: 2,
+    });
+    expect(args).toContain('0:2?');
+    expect(args).not.toContain('0:a:0?');
   });
 });
 

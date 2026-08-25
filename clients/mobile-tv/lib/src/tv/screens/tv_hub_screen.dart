@@ -1,0 +1,1825 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../core/api_client.dart';
+import '../../core/brand_theme.dart';
+import '../../core/models.dart';
+import '../../shared_core/library_contract.dart';
+import '../../shared_core/notification_contract.dart';
+import '../../shared_core/ui_tokens/tv_design_tokens.dart';
+import '../../state/app_controller.dart';
+import '../../widgets/brand.dart';
+import '../../widgets/media_card.dart';
+import '../tv_focus_controller.dart';
+import 'tv_library_screen.dart';
+import 'tv_downloads_screen.dart';
+import 'tv_live_guide_screen.dart';
+import 'tv_notification_screen.dart';
+import 'tv_player_screen.dart';
+import 'tv_recordings_screen.dart';
+import 'tv_settings_screen.dart';
+import 'tv_title_screen.dart';
+
+class TvHubScreen extends StatefulWidget {
+  const TvHubScreen({required this.controller, this.library, super.key});
+
+  final AppController controller;
+  final LibraryContract? library;
+
+  @override
+  State<TvHubScreen> createState() => _TvHubScreenState();
+}
+
+class _TvHubScreenState extends State<TvHubScreen> {
+  static const _topTabs = [
+    'Hjem',
+    'Film',
+    'Serier',
+    'Live TV',
+    'Fortsæt',
+    'Genre',
+    'Søg',
+    'Min liste',
+    'Downloads',
+    'Notifikationer',
+    'Indstillinger',
+    'Min profil',
+  ];
+  static const _topIcons = [
+    Icons.home_rounded,
+    Icons.movie_outlined,
+    Icons.tv_rounded,
+    Icons.live_tv_rounded,
+    Icons.playlist_play_rounded,
+    Icons.category_outlined,
+    Icons.search_rounded,
+    Icons.bookmark_border_rounded,
+    Icons.download_for_offline_outlined,
+    Icons.notifications_none_rounded,
+    Icons.settings_outlined,
+    Icons.account_circle_outlined,
+  ];
+
+  static const _searchFieldSection = 10;
+  static const _searchResultsSection = 20;
+
+  final TextEditingController _searchController = TextEditingController();
+  final Map<int, List<FocusNode>> _sectionNodes = {};
+  final Map<int, void Function(int)> _sectionActions = {};
+
+  late final LibraryContract _library;
+  late final NotificationContract _notifications;
+  late final List<FocusNode> _topNodes;
+  late final TvFocusController _focusController;
+
+  LibraryHomePayload _homePayload = LibraryHomePayload.empty;
+  List<_TvHubSection> _sections = const [];
+  List<MediaItem> _searchResultItems = const [];
+  Timer? _searchDebounce;
+  bool _loading = true;
+  bool _searchLoading = false;
+  String? _error;
+  String? _searchError;
+  String _searchQuery = '';
+  int _searchEpoch = 0;
+  int _configuredTopTab = 0;
+  int _unreadCount = 0;
+
+  ApiClient get api => widget.controller.api;
+
+  @override
+  void initState() {
+    super.initState();
+    _library = widget.library ?? LibraryUseCase(api: api);
+    _notifications = NotificationUseCase(api: api);
+    _topNodes = List.generate(
+      _topTabs.length,
+      (index) => FocusNode(debugLabel: 'tv-top-$index'),
+    );
+    _focusController = TvFocusController(
+      topRowNodes: _topNodes,
+      activeTopTab: 0,
+      activeSection: -1,
+      activeItem: 0,
+      verticalNavigation: true,
+    );
+    for (var index = 0; index < _topNodes.length; index++) {
+      final node = _topNodes[index];
+      final tabIndex = index;
+      node.addListener(() {
+        if (node.hasFocus) {
+          _focusController.notifyTopNodeFocus(tabIndex);
+          _ensureFocusVisible(node, alignment: 0.5);
+        }
+      });
+    }
+    _focusController.addListener(_onFocusStateChanged);
+    _searchController.addListener(_onSearchQueryChanged);
+    _rebuildSections();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusController.requestCurrentFocus();
+    });
+    unawaited(_loadHomePayload());
+    unawaited(_loadUnreadCount());
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchEpoch++;
+    _searchController.removeListener(_onSearchQueryChanged);
+    _focusController.removeListener(_onFocusStateChanged);
+    _searchController.dispose();
+    _focusController.dispose();
+    for (final node in _topNodes) {
+      node.dispose();
+    }
+    for (final nodes in _sectionNodes.values) {
+      for (final node in nodes) {
+        node.dispose();
+      }
+    }
+    _sectionNodes.clear();
+    super.dispose();
+  }
+
+  void _onFocusStateChanged() {
+    if (!mounted) return;
+    final topTab = _focusController.state.topTab;
+    if (_configuredTopTab != topTab) {
+      _configuredTopTab = topTab;
+      _rebuildSections();
+    }
+    setState(() {});
+  }
+
+  Future<void> _loadHomePayload() async {
+    if (!_loading && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final payload = await _library.loadHomePayload();
+      if (!mounted) return;
+      _homePayload = payload;
+      _loading = false;
+      _error = null;
+      _rebuildSections();
+      setState(() {});
+    } on Exception catch (failure) {
+      if (!mounted) return;
+      _loading = false;
+      _error = failure is ApiException
+          ? failure.message
+          : 'Biblioteket kunne ikke indlæses.';
+      _rebuildSections();
+      setState(() {});
+    }
+  }
+
+  void _onSearchQueryChanged() {
+    final query = _searchController.text.trim();
+    _searchDebounce?.cancel();
+    _searchQuery = query;
+    final epoch = ++_searchEpoch;
+
+    if (query.length < 2) {
+      _searchLoading = false;
+      _searchError = null;
+      _searchResultItems = const [];
+      if (_configuredTopTab == 1) _rebuildSections();
+      if (mounted) setState(() {});
+      return;
+    }
+
+    _searchLoading = true;
+    _searchError = null;
+    if (_configuredTopTab == 1) _rebuildSections();
+    if (mounted) setState(() {});
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 250),
+      () => unawaited(_runSearch(query, epoch)),
+    );
+  }
+
+  void _submitSearch() {
+    final query = _searchController.text.trim();
+    if (query.length < 2) return;
+    _searchDebounce?.cancel();
+    final epoch = ++_searchEpoch;
+    _searchLoading = true;
+    _searchError = null;
+    _rebuildSections();
+    setState(() {});
+    unawaited(_runSearch(query, epoch));
+  }
+
+  Future<void> _runSearch(String query, int epoch) async {
+    try {
+      final results = await _library.search(query);
+      if (!mounted || epoch != _searchEpoch) return;
+      _searchResultItems = results;
+      _searchLoading = false;
+      _searchError = null;
+      _rebuildSections();
+      setState(() {});
+    } on Exception catch (failure) {
+      if (!mounted || epoch != _searchEpoch) return;
+      _searchResultItems = const [];
+      _searchLoading = false;
+      _searchError = failure is ApiException
+          ? failure.message
+          : 'Søgningen kunne ikke gennemføres.';
+      _rebuildSections();
+      setState(() {});
+    }
+  }
+
+  void _rebuildSections() {
+    _sections = _createSectionsForTab(_configuredTopTab);
+    _sectionActions
+      ..clear()
+      ..addEntries(
+        _sections
+            .where(
+              (section) =>
+                  section.focusItemCount > 0 && section.onActivate != null,
+            )
+            .map((section) => MapEntry(section.id, section.onActivate!)),
+      );
+
+    final desiredCounts = <int, int>{
+      for (final section in _sections)
+        if (section.focusItemCount > 0) section.id: section.focusItemCount,
+    };
+    _syncSectionNodes(desiredCounts);
+    _focusController.replaceSections({
+      for (final entry in _sectionNodes.entries)
+        if (desiredCounts.containsKey(entry.key)) entry.key: entry.value,
+    }, notify: false);
+  }
+
+  void _syncSectionNodes(Map<int, int> desiredCounts) {
+    final staleSections = _sectionNodes.keys
+        .where(
+          (sectionId) =>
+              !desiredCounts.containsKey(sectionId) ||
+              _sectionNodes[sectionId]!.length != desiredCounts[sectionId],
+        )
+        .toList(growable: false);
+    for (final sectionId in staleSections) {
+      final nodes = _sectionNodes.remove(sectionId) ?? const <FocusNode>[];
+      for (final node in nodes) {
+        node.dispose();
+      }
+    }
+
+    for (final entry in desiredCounts.entries) {
+      if (_sectionNodes.containsKey(entry.key)) continue;
+      final sectionId = entry.key;
+      _sectionNodes[sectionId] = List.generate(entry.value, (index) {
+        final node = FocusNode(debugLabel: 'tv-section-$sectionId-item-$index');
+        node.addListener(() {
+          if (node.hasFocus) {
+            _focusController.notifySectionNodeFocus(sectionId, index);
+            _ensureFocusVisible(node);
+          }
+        });
+        return node;
+      });
+    }
+  }
+
+  void _ensureFocusVisible(FocusNode node, {double alignment = 0.35}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = node.context;
+      if (!mounted || context == null || !node.hasFocus) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: alignment,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  List<_TvHubSection> _createSectionsForTab(int topTab) {
+    if (_loading && _homePayload.isEmpty) return const [];
+    final payload = _homePayload;
+    final sections = <_TvHubSection>[];
+
+    if (_error != null) {
+      sections.add(
+        _TvHubSection.actions(
+          id: 5,
+          title: 'Forbindelsen til biblioteket fejlede',
+          message: _error!,
+          actions: [
+            _TvHubAction(
+              label: 'Prøv igen',
+              icon: Icons.refresh,
+              onPressed: () => unawaited(_loadHomePayload()),
+            ),
+          ],
+        ),
+      );
+    }
+
+    void addMedia({
+      required int id,
+      required String title,
+      required List<MediaItem> items,
+      required ValueChanged<MediaItem> activate,
+      required String emptyMessage,
+    }) {
+      sections.add(
+        _TvHubSection.media(
+          id: id,
+          title: title,
+          items: items,
+          emptyMessage: emptyMessage,
+          onActivate: (index) {
+            final item = items.elementAtOrNull(index);
+            if (item != null) activate(item);
+          },
+        ),
+      );
+    }
+
+    switch (topTab) {
+      case 1:
+        final featuredMovie = payload.movieCatalog.items.firstOrNull;
+        if (featuredMovie != null) {
+          sections.add(
+            _TvHubSection.hero(
+              id: 5,
+              media: featuredMovie,
+              eyebrow: 'FILM · UDVALGT',
+              primaryLabel: 'Afspil',
+              secondaryLabel: 'Se alle film',
+              onActivate: (index) => index == 0
+                  ? unawaited(_play(featuredMovie))
+                  : unawaited(_openAllCatalog('movie')),
+            ),
+          );
+        }
+        addMedia(
+          id: 10,
+          title: 'Nyeste film',
+          items: payload.movieCatalog.items,
+          emptyMessage: 'Der er endnu ingen film i biblioteket.',
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        addMedia(
+          id: 20,
+          title: 'Senest udgivne film',
+          items: payload.releasedMovies.items,
+          emptyMessage: 'Ingen nye filmudgivelser.',
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        sections.add(
+          _TvHubSection.genres(
+            id: 30,
+            title: 'Filmgenrer',
+            genres: payload.movieCatalog.categories,
+            mediaType: 'movie',
+            onActivate: (index) {
+              final genre = payload.movieCatalog.categories.elementAtOrNull(
+                index,
+              );
+              if (genre != null) {
+                unawaited(_openGenreCatalog(genre, mediaType: 'movie'));
+              }
+            },
+          ),
+        );
+        return sections;
+      case 2:
+        final featuredSeries = payload.seriesCatalog.items.firstOrNull;
+        if (featuredSeries != null) {
+          sections.add(
+            _TvHubSection.hero(
+              id: 5,
+              media: featuredSeries,
+              eyebrow: 'SERIER · UDVALGT',
+              primaryLabel: 'Åbn serien',
+              secondaryLabel: 'Se alle serier',
+              onActivate: (index) => index == 0
+                  ? unawaited(_openTitle(featuredSeries))
+                  : unawaited(_openAllCatalog('series')),
+            ),
+          );
+        }
+        addMedia(
+          id: 10,
+          title: 'Nyeste serier',
+          items: payload.seriesCatalog.items,
+          emptyMessage: 'Der er endnu ingen serier i biblioteket.',
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        addMedia(
+          id: 20,
+          title: 'Nye episoder',
+          items: payload.latestEpisodes.items,
+          emptyMessage: 'Ingen nye episoder.',
+          activate: (item) => unawaited(_play(item)),
+        );
+        sections.add(
+          _TvHubSection.genres(
+            id: 30,
+            title: 'Seriegenrer',
+            genres: payload.seriesCatalog.categories,
+            mediaType: 'series',
+            onActivate: (index) {
+              final genre = payload.seriesCatalog.categories.elementAtOrNull(
+                index,
+              );
+              if (genre != null) {
+                unawaited(_openGenreCatalog(genre, mediaType: 'series'));
+              }
+            },
+          ),
+        );
+        return sections;
+      case 3:
+        sections.add(
+          _TvHubSection.actions(
+            id: 10,
+            title: 'Live TV',
+            message:
+                'Åbn den komplette programguide med kanaler, favoritter og 12 timers EPG.',
+            actions: [
+              _TvHubAction(
+                label: 'Åbn TV-guiden',
+                icon: Icons.live_tv,
+                onPressed: () => unawaited(_openLiveTv()),
+              ),
+              _TvHubAction(
+                label: 'Optagelser',
+                icon: Icons.video_library_outlined,
+                onPressed: () => unawaited(_openRecordings()),
+              ),
+            ],
+          ),
+        );
+        return sections;
+      case 4:
+        addMedia(
+          id: 10,
+          title: 'Fortsæt med at se',
+          items: payload.continueItems,
+          emptyMessage: 'Du har ikke noget, du er i gang med.',
+          activate: (item) => unawaited(_play(item)),
+        );
+        addMedia(
+          id: 20,
+          title: 'Nye episoder klar',
+          items: payload.latestEpisodes.items,
+          emptyMessage: 'Ingen nye episoder lige nu.',
+          activate: (item) => unawaited(_play(item)),
+        );
+        return sections;
+      case 5:
+        sections.add(
+          _TvHubSection.genres(
+            id: 10,
+            title: 'Filmgenrer',
+            genres: payload.movieCatalog.categories,
+            mediaType: 'movie',
+            onActivate: (index) {
+              final genre = payload.movieCatalog.categories.elementAtOrNull(
+                index,
+              );
+              if (genre != null) {
+                unawaited(_openGenreCatalog(genre, mediaType: 'movie'));
+              }
+            },
+          ),
+        );
+        sections.add(
+          _TvHubSection.genres(
+            id: 20,
+            title: 'Seriegenrer',
+            genres: payload.seriesCatalog.categories,
+            mediaType: 'series',
+            onActivate: (index) {
+              final genre = payload.seriesCatalog.categories.elementAtOrNull(
+                index,
+              );
+              if (genre != null) {
+                unawaited(_openGenreCatalog(genre, mediaType: 'series'));
+              }
+            },
+          ),
+        );
+        return sections;
+      case 7:
+        addMedia(
+          id: 10,
+          title: 'Min liste',
+          items: payload.watchlistItems,
+          emptyMessage: 'Din liste er tom.',
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        return sections;
+      case 6:
+        sections.add(
+          _TvHubSection.search(
+            id: _searchFieldSection,
+            onActivate: (_) =>
+                _sectionNodes[_searchFieldSection]?.firstOrNull?.requestFocus(),
+          ),
+        );
+        if (_searchQuery.length >= 2) {
+          addMedia(
+            id: _searchResultsSection,
+            title: 'Søgeresultater',
+            items: _searchResultItems,
+            emptyMessage: _searchLoading
+                ? 'Søger...'
+                : _searchError ?? 'Ingen titler matcher søgningen.',
+            activate: (item) => item.isSeries
+                ? unawaited(_openTitle(item))
+                : unawaited(_play(item)),
+          );
+        } else {
+          sections.add(
+            _TvHubSection.message(
+              id: 20,
+              title: 'Søg i hele biblioteket',
+              message:
+                  'Skriv mindst 2 tegn for at søge i film, serier og episoder.',
+            ),
+          );
+        }
+        return sections;
+      case 8:
+        sections.add(
+          _TvHubSection.actions(
+            id: 10,
+            title: 'Downloads',
+            message: 'Administrer lokale titler og offline-afspilning.',
+            actions: [
+              _TvHubAction(
+                label: 'Åbn downloads',
+                icon: Icons.download_for_offline_outlined,
+                onPressed: () => unawaited(_openDownloads()),
+              ),
+            ],
+          ),
+        );
+        return sections;
+      case 9:
+        sections.add(
+          _TvHubSection.actions(
+            id: 10,
+            title: 'Notifikationer',
+            message: '$_unreadCount ulæste notifikationer.',
+            actions: [
+              _TvHubAction(
+                label: 'Åbn notifikationer',
+                icon: Icons.notifications_none_rounded,
+                onPressed: () => unawaited(_openNotifications()),
+              ),
+            ],
+          ),
+        );
+        return sections;
+      case 10:
+        sections.add(
+          _TvHubSection.actions(
+            id: 10,
+            title: 'Indstillinger',
+            message: 'Tilpas kvalitet, undertekster og afspilning.',
+            actions: [
+              _TvHubAction(
+                label: 'Åbn indstillinger',
+                icon: Icons.settings_outlined,
+                onPressed: () => unawaited(_openSettings()),
+              ),
+            ],
+          ),
+        );
+        return sections;
+      case 11:
+        sections.add(
+          _TvHubSection.actions(
+            id: 10,
+            title: widget.controller.activeProfile?.name ?? 'Min profil',
+            message:
+                'Administrer den aktive TV-profil og lokale indstillinger.',
+            actions: [
+              _TvHubAction(
+                label: 'Skift profil',
+                icon: Icons.switch_account_outlined,
+                onPressed: widget.controller.showProfiles,
+              ),
+              _TvHubAction(
+                label: 'Indstillinger',
+                icon: Icons.settings_outlined,
+                onPressed: () => unawaited(_openSettings()),
+              ),
+              _TvHubAction(
+                label: 'Downloads',
+                icon: Icons.download_for_offline_outlined,
+                onPressed: () => unawaited(_openDownloads()),
+              ),
+            ],
+          ),
+        );
+        return sections;
+      default:
+        final hero = payload.hero;
+        if (hero != null) {
+          sections.add(
+            _TvHubSection.hero(
+              id: 0,
+              media: hero,
+              onActivate: (index) {
+                if (index == 0) {
+                  unawaited(_play(hero));
+                } else {
+                  unawaited(_openTitle(hero));
+                }
+              },
+            ),
+          );
+        }
+        addMedia(
+          id: 10,
+          title: 'Fortsæt med at se',
+          items: payload.continueItems,
+          emptyMessage: 'Du har ikke noget, du er i gang med.',
+          activate: (item) => unawaited(_play(item)),
+        );
+        var recommendationId = 20;
+        for (final recommendation in payload.recommendations.sections.take(2)) {
+          addMedia(
+            id: recommendationId++,
+            title: recommendation.title,
+            items: recommendation.items,
+            emptyMessage: 'Ingen anbefalinger i denne række.',
+            activate: (item) => item.isSeries
+                ? unawaited(_openTitle(item))
+                : unawaited(_play(item)),
+          );
+        }
+        addMedia(
+          id: 50,
+          title: 'Nyeste film',
+          items: payload.movieCatalog.items,
+          emptyMessage: 'Der er endnu ingen film i biblioteket.',
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        addMedia(
+          id: 60,
+          title: 'Nyeste serier',
+          items: payload.seriesCatalog.items,
+          emptyMessage: 'Der er endnu ingen serier i biblioteket.',
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        addMedia(
+          id: 70,
+          title: 'Min liste',
+          items: payload.watchlistItems,
+          emptyMessage: 'Din liste er tom.',
+          activate: (item) => unawaited(_openTitle(item)),
+        );
+        return sections;
+    }
+  }
+
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final handled = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowLeft => _focusController.moveLeft(),
+      LogicalKeyboardKey.arrowRight => _focusController.moveRight(),
+      LogicalKeyboardKey.arrowDown => _focusController.moveDown(),
+      LogicalKeyboardKey.arrowUp => _focusController.moveUp(),
+      LogicalKeyboardKey.enter || LogicalKeyboardKey.select => _activate(),
+      LogicalKeyboardKey.escape ||
+      LogicalKeyboardKey.goBack ||
+      LogicalKeyboardKey.browserBack => _handleBackAction(),
+      _ => false,
+    };
+    return handled ? KeyEventResult.handled : KeyEventResult.ignored;
+  }
+
+  bool _handleBackAction() {
+    final state = _focusController.state;
+    if (!state.isTopRow) {
+      _focusController.setActive(
+        topTab: state.topTab,
+        sectionIndex: -1,
+        itemIndex: 0,
+      );
+      return true;
+    }
+    if (state.topTab != 0) {
+      _focusController.setActive(topTab: 0, sectionIndex: -1, itemIndex: 0);
+      return true;
+    }
+    return true;
+  }
+
+  bool _activate() {
+    final state = _focusController.state;
+    if (state.isTopRow) {
+      _onSelectTopTab(state.topTab);
+      return true;
+    }
+    final action = _sectionActions[state.sectionIndex];
+    if (action == null || state.itemIndex < 0) return true;
+    action(state.itemIndex);
+    return true;
+  }
+
+  void _onSelectTopTab(int index) {
+    switch (index) {
+      case 3:
+        unawaited(_openLiveTv());
+        return;
+      case 8:
+        unawaited(_openDownloads());
+        return;
+      case 9:
+        unawaited(_openNotifications());
+        return;
+      case 10:
+        unawaited(_openSettings());
+        return;
+      case 11:
+        widget.controller.showProfiles();
+        return;
+    }
+    _focusController.moveRight();
+  }
+
+  Future<void> _refreshIfNeeded() => _loadHomePayload();
+
+  Future<void> _openTitle(MediaItem media) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => TvTitleScreen(api: api, media: media),
+      ),
+    );
+    await _refreshIfNeeded();
+  }
+
+  Future<void> _play(MediaItem media) async {
+    if (media.isSeries) {
+      await _openTitle(media);
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => TvPlayerScreen(
+          api: api,
+          media: media,
+          resumePositionMs: media.progress?.positionMs ?? 0,
+        ),
+      ),
+    );
+    await _refreshIfNeeded();
+  }
+
+  Future<void> _openSettings() async {
+    await Navigator.of(
+      context,
+    ).push<void>(MaterialPageRoute(builder: (_) => TvSettingsScreen(api: api)));
+    await _refreshIfNeeded();
+  }
+
+  Future<void> _openDownloads() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => TvDownloadsScreen(
+          api: api,
+          profileId: widget.controller.activeProfile?.id,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) =>
+            TvNotificationScreen(api: api, notifications: _notifications),
+      ),
+    );
+    await _loadUnreadCount();
+    await _refreshIfNeeded();
+  }
+
+  Future<void> _openLiveTv() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => TvLiveGuideScreen(api: api)),
+    );
+  }
+
+  Future<void> _openRecordings() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => TvRecordingsScreen(api: api)),
+    );
+  }
+
+  Future<void> _loadUnreadCount() async {
+    try {
+      final items = await _notifications.load();
+      if (!mounted) return;
+      setState(() => _unreadCount = _notifications.unreadCount(items));
+    } catch (_) {
+      if (mounted) setState(() => _unreadCount = 0);
+    }
+  }
+
+  Future<void> _openGenreCatalog(
+    String genre, {
+    required String mediaType,
+  }) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => TvLibraryScreen(
+          library: _library,
+          api: api,
+          label: mediaType == 'movie' ? 'Film' : 'Serier',
+          mediaType: mediaType,
+          category: genre,
+          onPlay: _play,
+          onOpen: _openTitle,
+        ),
+      ),
+    );
+    await _refreshIfNeeded();
+  }
+
+  Future<void> _openAllCatalog(String mediaType) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => TvLibraryScreen(
+          library: _library,
+          api: api,
+          label: mediaType == 'movie' ? 'Film' : 'Serier',
+          mediaType: mediaType,
+          onPlay: _play,
+          onOpen: _openTitle,
+        ),
+      ),
+    );
+    await _refreshIfNeeded();
+  }
+
+  Widget _buildSidebar() {
+    final state = _focusController.state;
+    final expanded = state.isTopRow;
+    return AnimatedContainer(
+      duration: TvDesignTokens.focusAnimationDuration,
+      width: expanded
+          ? TvDesignTokens.sidebarExpandedWidth
+          : TvDesignTokens.sidebarCollapsedWidth,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [
+            TvDesignTokens.background.withValues(alpha: 0.99),
+            const Color(0xEE0A0D12).withValues(alpha: 0.96),
+          ],
+        ),
+        boxShadow: expanded
+            ? const [
+                BoxShadow(
+                  color: Color(0xB0000000),
+                  blurRadius: 32,
+                  offset: Offset(14, 0),
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 16, 10, 14),
+            child: AnimatedOpacity(
+              opacity: expanded ? 1 : 0,
+              duration: TvDesignTokens.focusAnimationDuration,
+              child: expanded
+                  ? const SizedBox(
+                      height: 42,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: BrandLockup(),
+                      ),
+                    )
+                  : const SizedBox(
+                      height: 42,
+                      child: Center(
+                        child: Icon(
+                          Icons.bolt_rounded,
+                          color: Color(0xFFF7C35F),
+                          size: 28,
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 16),
+              itemCount: _topTabs.length,
+              separatorBuilder: (_, _) =>
+                  const SizedBox(height: TvDesignTokens.sidebarGap),
+              itemBuilder: (_, index) {
+                final selected = state.topTab == index;
+                final focused = state.isTopRow && selected;
+                return AnimatedScale(
+                  scale: focused ? TvDesignTokens.focusScale : 1,
+                  duration: TvDesignTokens.focusAnimationDuration,
+                  child: InkWell(
+                    key: ValueKey('tv-sidebar-$index'),
+                    focusNode: _topNodes[index],
+                    onTap: () {
+                      _focusController.setActive(
+                        topTab: index,
+                        sectionIndex: -1,
+                        itemIndex: 0,
+                      );
+                      _onSelectTopTab(index);
+                    },
+                    borderRadius: BorderRadius.circular(
+                      TvDesignTokens.chromeRadius,
+                    ),
+                    child: AnimatedContainer(
+                      duration: TvDesignTokens.focusAnimationDuration,
+                      height: TvDesignTokens.sidebarItemHeight,
+                      padding: EdgeInsets.symmetric(
+                        horizontal: expanded ? 8 : 0,
+                      ),
+                      decoration: BoxDecoration(
+                        color: focused
+                            ? const Color(0xE0363023)
+                            : selected
+                            ? const Color(0x334A3A20)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(
+                          TvDesignTokens.chromeRadius,
+                        ),
+                        border: Border.all(
+                          color: focused
+                              ? TvDesignTokens.goldSoft
+                              : Colors.transparent,
+                          width: focused ? TvDesignTokens.focusBorderWidth : 0,
+                        ),
+                      ),
+                      child: expanded
+                          ? Row(
+                              children: [
+                                SizedBox(
+                                  width: 24,
+                                  child: Icon(
+                                    _topIcons[index],
+                                    size: 21,
+                                    color: selected
+                                        ? Colors.white
+                                        : Colors.white.withValues(alpha: 0.72),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _topTabs[index],
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13.5,
+                                      letterSpacing: 0,
+                                      fontWeight: selected
+                                          ? FontWeight.w900
+                                          : FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                if (index == 9 && _unreadCount > 0)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: BoltColors.error,
+                                      borderRadius: BorderRadius.circular(99),
+                                    ),
+                                    child: Text(
+                                      '$_unreadCount',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            )
+                          : Icon(
+                              _topIcons[index],
+                              size: 21,
+                              color: selected
+                                  ? Colors.white
+                                  : Colors.white.withValues(alpha: 0.72),
+                            ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String label) => Padding(
+    padding: const EdgeInsets.fromLTRB(
+      TvDesignTokens.pageHorizontalPadding,
+      12,
+      TvDesignTokens.pageHorizontalPadding,
+      7,
+    ),
+    child: Row(
+      children: [
+        Container(
+          width: 4,
+          height: 18,
+          decoration: BoxDecoration(
+            color: TvDesignTokens.gold,
+            borderRadius: BorderRadius.circular(99),
+          ),
+        ),
+        const SizedBox(width: 9),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: TvDesignTokens.sectionTitleSize,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0,
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Expanded(child: Divider(height: 1, color: Color(0x2230343A))),
+      ],
+    ),
+  );
+
+  Widget _buildHeroSection(_TvHubSection section) {
+    final media = section.media!;
+    final nodes = _sectionNodes[section.id]!;
+    final imageUrl = api.absoluteMediaUrl(
+      media.backdropPath ?? media.posterPath,
+      imageSize: 'w1920',
+    );
+    final metadata = [
+      if (media.releaseYear != null) '${media.releaseYear}',
+      if (media.durationMs != null)
+        '${(media.durationMs! / Duration.millisecondsPerMinute).round()} min.',
+      if (media.is4k) '4K',
+      if (media.isHdr) 'HDR',
+    ].join('  ·  ');
+    return SizedBox(
+      height: TvDesignTokens.heroHeight,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (imageUrl.isNotEmpty)
+            Image.network(
+              imageUrl,
+              fit: BoxFit.cover,
+              alignment: Alignment.centerRight,
+              errorBuilder: (_, _, _) =>
+                  const ColoredBox(color: Color(0xFF17130D)),
+            )
+          else
+            const ColoredBox(color: Color(0xFF17130D)),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Color(0xFF040506),
+                  Color(0xF2040506),
+                  Color(0xA8040506),
+                  Color(0x07040506),
+                ],
+                stops: [0, 0.34, 0.66, 1],
+              ),
+            ),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0x00040506),
+                  Color(0x08040506),
+                  Color(0xFF040506),
+                ],
+                stops: [0, 0.78, 1],
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: TvDesignTokens.heroContentWidth,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(38, 18, 24, 18),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      section.heroEyebrow,
+                      style: const TextStyle(
+                        color: Color(0xFFF7C35F),
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.8,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      media.displayTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 38,
+                        height: 1.02,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0,
+                      ),
+                    ),
+                    if (metadata.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        metadata,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Text(
+                      media.overview ?? media.reason ?? 'Klar til afspilning.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: _TvFocusAction(
+                            focusNode: nodes[0],
+                            icon: Icons.play_arrow_rounded,
+                            label:
+                                section.heroPrimaryLabel ??
+                                (media.progress == null ? 'Afspil' : 'Fortsæt'),
+                            primary: true,
+                            onPressed: () => section.onActivate!(0),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: _TvFocusAction(
+                            focusNode: nodes[1],
+                            icon: Icons.info_outline_rounded,
+                            label: section.heroSecondaryLabel,
+                            onPressed: () => section.onActivate!(1),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMediaSection(_TvHubSection section) {
+    if (section.items.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(section.title),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: TvDesignTokens.pageHorizontalPadding,
+            ),
+            child: Text(
+              section.message ?? 'Ingen titler at vise.',
+              style: const TextStyle(
+                color: Colors.white60,
+                fontSize: TvDesignTokens.bodyTextSize,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    final nodes = _sectionNodes[section.id]!;
+    return Column(
+      key: ValueKey('tv-section-${section.id}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(section.title),
+        SizedBox(
+          height: TvDesignTokens.cardHeight,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(
+              horizontal: TvDesignTokens.pageHorizontalPadding,
+            ),
+            scrollDirection: Axis.horizontal,
+            itemCount: section.items.length,
+            separatorBuilder: (_, _) =>
+                const SizedBox(width: TvDesignTokens.cardGap),
+            itemBuilder: (_, index) {
+              final item = section.items[index];
+              return MediaPosterCard(
+                api: api,
+                media: item,
+                width: TvDesignTokens.cardWidth,
+                isTv: true,
+                focusNode: nodes[index],
+                heroTag: 'tv-hub-${section.id}-${item.id}',
+                onPressed: () => section.onActivate!(index),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGenreSection(_TvHubSection section) {
+    if (section.genres.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(section.title),
+          const Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: TvDesignTokens.pageHorizontalPadding,
+            ),
+            child: Text(
+              'Ingen genrer er tilgængelige endnu.',
+              style: TextStyle(
+                color: Colors.white60,
+                fontSize: TvDesignTokens.bodyTextSize,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    final nodes = _sectionNodes[section.id]!;
+    return Column(
+      key: ValueKey('tv-section-${section.id}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(section.title),
+        SizedBox(
+          height: TvDesignTokens.genreChipHeight,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(
+              horizontal: TvDesignTokens.pageHorizontalPadding,
+            ),
+            scrollDirection: Axis.horizontal,
+            itemCount: section.genres.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (_, index) {
+              final focused = nodes[index].hasFocus;
+              return AnimatedScale(
+                scale: focused ? TvDesignTokens.focusScale : 1,
+                duration: const Duration(milliseconds: 140),
+                child: InkWell(
+                  focusNode: nodes[index],
+                  onTap: () => section.onActivate!(index),
+                  borderRadius: BorderRadius.circular(999),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 140),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      color: focused
+                          ? const Color(0xFF362F22)
+                          : const Color(0xFF090B0E),
+                      border: Border.all(
+                        color: focused
+                            ? const Color(0xFFFFF4D0)
+                            : const Color(0xFF332D21),
+                        width: focused ? TvDesignTokens.focusBorderWidth : 1,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        section.genres[index],
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: focused
+                              ? FontWeight.w900
+                              : FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSearchSection(_TvHubSection section) {
+    final node = _sectionNodes[section.id]!.first;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        TvDesignTokens.pageHorizontalPadding,
+        16,
+        TvDesignTokens.pageHorizontalPadding,
+        8,
+      ),
+      child: TextField(
+        key: const ValueKey('tv-search-input'),
+        focusNode: node,
+        controller: _searchController,
+        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
+        textInputAction: TextInputAction.search,
+        onSubmitted: (_) => _submitSearch(),
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: const Color(0xFF090B0E),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(7),
+            borderSide: const BorderSide(color: Color(0xFF332D21)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(7),
+            borderSide: BorderSide(
+              color: const Color(0xFFFFF4D0),
+              width: TvDesignTokens.focusBorderWidth,
+            ),
+          ),
+          hintText: 'Søg efter film, serier eller episoder',
+          prefixIcon: const Icon(Icons.search_rounded),
+          suffixIcon: _searchLoading
+              ? const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : _searchController.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Ryd søgning',
+                  onPressed: _searchController.clear,
+                  icon: const Icon(Icons.close),
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionsSection(_TvHubSection section) {
+    final nodes = _sectionNodes[section.id]!;
+    return Column(
+      key: ValueKey('tv-section-${section.id}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionHeader(section.title),
+        if (section.message != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              TvDesignTokens.pageHorizontalPadding,
+              0,
+              TvDesignTokens.pageHorizontalPadding,
+              14,
+            ),
+            child: Text(
+              section.message!,
+              style: const TextStyle(
+                color: Colors.white60,
+                fontSize: TvDesignTokens.bodyTextSize,
+              ),
+            ),
+          ),
+        SizedBox(
+          height: 76,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(
+              horizontal: TvDesignTokens.pageHorizontalPadding,
+            ),
+            scrollDirection: Axis.horizontal,
+            itemCount: section.actions.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (_, index) {
+              final action = section.actions[index];
+              return _TvFocusAction(
+                focusNode: nodes[index],
+                icon: action.icon,
+                label: action.label,
+                onPressed: action.onPressed,
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMessageSection(_TvHubSection section) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _buildSectionHeader(section.title),
+      Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: TvDesignTokens.pageHorizontalPadding,
+        ),
+        child: Text(
+          section.message ?? '',
+          style: const TextStyle(
+            color: Colors.white60,
+            fontSize: TvDesignTokens.bodyTextSize,
+          ),
+        ),
+      ),
+    ],
+  );
+
+  Widget _buildSection(_TvHubSection section) => switch (section.kind) {
+    _TvHubSectionKind.hero => _buildHeroSection(section),
+    _TvHubSectionKind.media => _buildMediaSection(section),
+    _TvHubSectionKind.genres => _buildGenreSection(section),
+    _TvHubSectionKind.search => _buildSearchSection(section),
+    _TvHubSectionKind.actions => _buildActionsSection(section),
+    _TvHubSectionKind.message => _buildMessageSection(section),
+  };
+
+  Widget _buildSections() {
+    if (_loading && _homePayload.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_sections.isEmpty) {
+      return const Center(
+        child: Text(
+          'Ingen sektioner at vise.',
+          style: TextStyle(color: Colors.white60),
+        ),
+      );
+    }
+    return ListView(
+      children: [
+        if (_loading) const LinearProgressIndicator(minHeight: 2),
+        for (final section in _sections) _buildSection(section),
+        const SizedBox(height: TvDesignTokens.sectionGap),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (_, _) => _handleBackAction(),
+      child: Scaffold(
+        body: Focus(
+          canRequestFocus: true,
+          onKeyEvent: _handleKey,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              color: TvDesignTokens.background,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  TvDesignTokens.backgroundWarm,
+                  TvDesignTokens.background,
+                ],
+              ),
+            ),
+            child: SafeArea(
+              child: Stack(
+                children: [
+                  const Positioned(
+                    top: -280,
+                    right: -220,
+                    child: _TvAmbientGlow(size: 760, color: Color(0x223B2B10)),
+                  ),
+                  const Positioned(
+                    bottom: -340,
+                    left: 80,
+                    child: _TvAmbientGlow(size: 620, color: Color(0x181D4A5A)),
+                  ),
+                  Positioned.fill(
+                    left: TvDesignTokens.sidebarCollapsedWidth,
+                    child: _buildSections(),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: _buildSidebar(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TvAmbientGlow extends StatelessWidget {
+  const _TvAmbientGlow({required this.size, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    child: Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(colors: [color, const Color(0x00000000)]),
+      ),
+    ),
+  );
+}
+
+enum _TvHubSectionKind { hero, media, genres, search, actions, message }
+
+class _TvHubSection {
+  const _TvHubSection._({
+    required this.id,
+    required this.kind,
+    required this.title,
+    this.message,
+    this.media,
+    this.items = const [],
+    this.genres = const [],
+    this.actions = const [],
+    this.onActivate,
+    this.heroEyebrow = 'UDVALGT TIL DIG',
+    this.heroPrimaryLabel,
+    this.heroSecondaryLabel = 'Mere info',
+  });
+
+  factory _TvHubSection.hero({
+    required int id,
+    required MediaItem media,
+    required void Function(int) onActivate,
+    String eyebrow = 'UDVALGT TIL DIG',
+    String? primaryLabel,
+    String secondaryLabel = 'Mere info',
+  }) => _TvHubSection._(
+    id: id,
+    kind: _TvHubSectionKind.hero,
+    title: media.displayTitle,
+    media: media,
+    onActivate: onActivate,
+    heroEyebrow: eyebrow,
+    heroPrimaryLabel: primaryLabel,
+    heroSecondaryLabel: secondaryLabel,
+  );
+
+  factory _TvHubSection.media({
+    required int id,
+    required String title,
+    required List<MediaItem> items,
+    required String emptyMessage,
+    required void Function(int) onActivate,
+  }) => _TvHubSection._(
+    id: id,
+    kind: _TvHubSectionKind.media,
+    title: title,
+    message: emptyMessage,
+    items: items.take(TvDesignTokens.maxSectionItems).toList(growable: false),
+    onActivate: onActivate,
+  );
+
+  factory _TvHubSection.genres({
+    required int id,
+    required String title,
+    required List<String> genres,
+    required String mediaType,
+    required void Function(int) onActivate,
+  }) => _TvHubSection._(
+    id: id,
+    kind: _TvHubSectionKind.genres,
+    title: title,
+    genres: genres.take(TvDesignTokens.maxGenreItems).toList(growable: false),
+    onActivate: onActivate,
+  );
+
+  factory _TvHubSection.search({
+    required int id,
+    required void Function(int) onActivate,
+  }) => _TvHubSection._(
+    id: id,
+    kind: _TvHubSectionKind.search,
+    title: 'Søg',
+    onActivate: onActivate,
+  );
+
+  factory _TvHubSection.actions({
+    required int id,
+    required String title,
+    required String message,
+    required List<_TvHubAction> actions,
+  }) => _TvHubSection._(
+    id: id,
+    kind: _TvHubSectionKind.actions,
+    title: title,
+    message: message,
+    actions: actions,
+    onActivate: (index) => actions.elementAtOrNull(index)?.onPressed(),
+  );
+
+  factory _TvHubSection.message({
+    required int id,
+    required String title,
+    required String message,
+  }) => _TvHubSection._(
+    id: id,
+    kind: _TvHubSectionKind.message,
+    title: title,
+    message: message,
+  );
+
+  final int id;
+  final _TvHubSectionKind kind;
+  final String title;
+  final String? message;
+  final MediaItem? media;
+  final List<MediaItem> items;
+  final List<String> genres;
+  final List<_TvHubAction> actions;
+  final void Function(int)? onActivate;
+  final String heroEyebrow;
+  final String? heroPrimaryLabel;
+  final String heroSecondaryLabel;
+
+  int get focusItemCount => switch (kind) {
+    _TvHubSectionKind.hero => 2,
+    _TvHubSectionKind.media => items.length,
+    _TvHubSectionKind.genres => genres.length,
+    _TvHubSectionKind.search => 1,
+    _TvHubSectionKind.actions => actions.length,
+    _TvHubSectionKind.message => 0,
+  };
+}
+
+class _TvHubAction {
+  const _TvHubAction({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+}
+
+class _TvFocusAction extends StatelessWidget {
+  const _TvFocusAction({
+    required this.focusNode,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.primary = false,
+  });
+
+  final FocusNode focusNode;
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) {
+    final focused = focusNode.hasFocus;
+    final primaryBg = const LinearGradient(
+      colors: [TvDesignTokens.goldSoft, TvDesignTokens.gold],
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+    );
+    final style =
+        (primary
+                ? FilledButton.styleFrom(
+                    backgroundColor: TvDesignTokens.goldSoft,
+                    foregroundColor: const Color(0xFF090806),
+                    elevation: 0,
+                  )
+                : OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: TvDesignTokens.surfaceRaised,
+                  ))
+            .copyWith(
+              minimumSize: const WidgetStatePropertyAll(
+                Size(132, TvDesignTokens.actionButtonHeight),
+              ),
+              side: WidgetStatePropertyAll(
+                BorderSide(
+                  color: focused
+                      ? TvDesignTokens.goldSoft
+                      : primary
+                      ? Colors.transparent
+                      : Colors.white38,
+                  width: focused ? TvDesignTokens.focusBorderWidth : 1,
+                ),
+              ),
+              textStyle: WidgetStatePropertyAll(
+                TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: focused ? FontWeight.w900 : FontWeight.w700,
+                  letterSpacing: 0,
+                ),
+              ),
+              shape: WidgetStatePropertyAll(
+                RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(
+                    TvDesignTokens.chromeRadius,
+                  ),
+                ),
+              ),
+              padding: const WidgetStatePropertyAll(
+                EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+              ),
+            );
+    final button = primary
+        ? FilledButton.icon(
+            focusNode: focusNode,
+            onPressed: onPressed,
+            style: style,
+            icon: Icon(icon),
+            label: Text(label),
+          )
+        : OutlinedButton.icon(
+            focusNode: focusNode,
+            onPressed: onPressed,
+            style: style,
+            icon: Icon(icon),
+            label: Text(label),
+          );
+    return AnimatedScale(
+      scale: focused ? TvDesignTokens.focusScale : 1,
+      duration: const Duration(milliseconds: 140),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
+          gradient: focused && primary ? primaryBg : null,
+          boxShadow: focused
+              ? const [
+                  BoxShadow(
+                    color: Color(0x44F7C35F),
+                    blurRadius: 20,
+                    spreadRadius: 0.4,
+                    offset: Offset(0, 8),
+                  ),
+                ]
+              : const [],
+        ),
+        child: button,
+      ),
+    );
+  }
+}

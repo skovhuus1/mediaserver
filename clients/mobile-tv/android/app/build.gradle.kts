@@ -60,6 +60,7 @@ android {
         }
         create("tv") {
             dimension = "device"
+            applicationIdSuffix = ".tv"
             resValue("string", "app_name", "BoltBytes Media TV")
             resValue("string", "device_variant", "tv")
         }

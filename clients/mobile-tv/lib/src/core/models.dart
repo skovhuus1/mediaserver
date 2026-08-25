@@ -1,6 +1,8 @@
 Map<String, dynamic> jsonMap(dynamic value) =>
     value is Map<String, dynamic> ? value : <String, dynamic>{};
 
+const _modelUnset = Object();
+
 List<dynamic> jsonList(dynamic value) => value is List ? value : const [];
 
 String? stringValue(dynamic value) {
@@ -205,6 +207,11 @@ class MediaItem {
     this.width,
     this.height,
     this.hdr,
+    this.rating,
+    this.bitrate,
+    this.container,
+    this.videoCodec,
+    this.audioCodec,
     this.durationMs,
     this.progress,
     this.reason,
@@ -225,6 +232,11 @@ class MediaItem {
   final int? width;
   final int? height;
   final String? hdr;
+  final double? rating;
+  final int? bitrate;
+  final String? container;
+  final String? videoCodec;
+  final String? audioCodec;
   final int? durationMs;
   final PlaybackProgress? progress;
   final String? reason;
@@ -266,6 +278,13 @@ class MediaItem {
       width: intValue(json['width']),
       height: intValue(json['height']),
       hdr: stringValue(json['hdr']),
+      rating: doubleValue(json['rating']),
+      bitrate: intValue(json['bitrate'] ?? file['bitrate']),
+      container: stringValue(json['container'] ?? file['container']),
+      videoCodec: stringValue(
+        json['videoCodec'] ?? json['codec'] ?? file['videoCodec'],
+      ),
+      audioCodec: stringValue(json['audioCodec'] ?? file['audioCodec']),
       durationMs: intValue(json['durationMs'] ?? file['durationMs']),
       progress: json['progress'] == null
           ? null
@@ -372,6 +391,35 @@ class SeasonItem {
   }
 }
 
+class TitlePerson {
+  const TitlePerson({
+    required this.key,
+    required this.name,
+    this.role,
+    this.department,
+    this.profilePath,
+  });
+
+  final String key;
+  final String name;
+  final String? role;
+  final String? department;
+  final String? profilePath;
+
+  String get subtitle => role ?? department ?? 'Medvirkende';
+
+  factory TitlePerson.fromJson(dynamic value) {
+    final json = jsonMap(value);
+    return TitlePerson(
+      key: stringValue(json['key']) ?? '',
+      name: stringValue(json['name']) ?? 'Ukendt',
+      role: stringValue(json['role']),
+      department: stringValue(json['department']),
+      profilePath: stringValue(json['profilePath']),
+    );
+  }
+}
+
 class TitleExperience {
   const TitleExperience({
     required this.mode,
@@ -381,6 +429,8 @@ class TitleExperience {
     required this.selectedSeasonNumber,
     this.resumeEpisode,
     this.nextEpisode,
+    this.people = const [],
+    this.related = const [],
   });
 
   final String mode;
@@ -390,11 +440,14 @@ class TitleExperience {
   final int? selectedSeasonNumber;
   final EpisodeItem? resumeEpisode;
   final EpisodeItem? nextEpisode;
+  final List<TitlePerson> people;
+  final List<MediaItem> related;
 
   factory TitleExperience.fromJson(dynamic value) {
     final json = jsonMap(value);
     final titleJson = jsonMap(json['title']);
     final series = jsonMap(json['series']);
+    final discovery = jsonMap(json['discovery']);
     EpisodeItem? parseEpisode(dynamic raw) =>
         raw == null ? null : EpisodeItem.fromJson(raw);
     return TitleExperience(
@@ -409,6 +462,14 @@ class TitleExperience {
       selectedSeasonNumber: intValue(series['selectedSeasonNumber']),
       resumeEpisode: parseEpisode(series['resumeEpisode']),
       nextEpisode: parseEpisode(series['nextEpisode']),
+      people: jsonList(discovery['people'])
+          .map(TitlePerson.fromJson)
+          .where((person) => person.key.isNotEmpty && person.name.isNotEmpty)
+          .toList(growable: false),
+      related: jsonList(json['related'])
+          .map(MediaItem.fromJson)
+          .where((media) => media.id.isNotEmpty)
+          .toList(growable: false),
     );
   }
 }
@@ -625,22 +686,74 @@ class Rendition {
   }
 }
 
+class PlaybackAudioTrack {
+  const PlaybackAudioTrack({
+    required this.id,
+    required this.streamIndex,
+    required this.label,
+    required this.language,
+    this.codec,
+    this.channels,
+    this.isDefault = false,
+    this.selected = false,
+  });
+
+  final String id;
+  final int streamIndex;
+  final String label;
+  final String language;
+  final String? codec;
+  final int? channels;
+  final bool isDefault;
+  final bool selected;
+
+  factory PlaybackAudioTrack.fromJson(dynamic value) {
+    final json = jsonMap(value);
+    return PlaybackAudioTrack(
+      id: stringValue(json['id']) ?? '',
+      streamIndex: intValue(json['streamIndex']) ?? 0,
+      label: stringValue(json['label']) ?? 'Lydspor',
+      language: stringValue(json['language']) ?? '',
+      codec: stringValue(json['codec']),
+      channels: intValue(json['channels']),
+      isDefault: boolValue(json['default']),
+      selected: boolValue(json['selected']),
+    );
+  }
+}
+
 class PlaybackPreferences {
   const PlaybackPreferences({
     required this.qualityMode,
     this.fixedQualityHeight,
     required this.playbackRate,
+    required this.preferredAudioLanguages,
     required this.preferredSubtitleLanguages,
     required this.subtitleMode,
     required this.autoplayNext,
+    this.subtitleStyle = 'broadcast',
+    this.subtitleTextColor = '#FFFFFF',
+    this.subtitleSizePercent = 100,
+    this.subtitleBottomOffsetPercent = 6,
+    this.subtitleTimingOffsetMs = 0,
+    this.bufferProfile,
+    this.upscaleMode,
   });
 
   final String qualityMode;
   final int? fixedQualityHeight;
   final double playbackRate;
+  final List<String> preferredAudioLanguages;
   final List<String> preferredSubtitleLanguages;
   final String subtitleMode;
   final bool autoplayNext;
+  final String subtitleStyle;
+  final String subtitleTextColor;
+  final int subtitleSizePercent;
+  final int subtitleBottomOffsetPercent;
+  final int subtitleTimingOffsetMs;
+  final String? bufferProfile;
+  final String? upscaleMode;
 
   factory PlaybackPreferences.fromJson(dynamic value) {
     final json = jsonMap(value);
@@ -648,11 +761,22 @@ class PlaybackPreferences {
       qualityMode: stringValue(json['qualityMode']) ?? 'auto',
       fixedQualityHeight: intValue(json['fixedQualityHeight']),
       playbackRate: doubleValue(json['playbackRate']) ?? 1,
+      preferredAudioLanguages: jsonList(
+        json['preferredAudioLanguages'],
+      ).map(stringValue).whereType<String>().toList(growable: false),
       preferredSubtitleLanguages: jsonList(
         json['preferredSubtitleLanguages'],
       ).map(stringValue).whereType<String>().toList(growable: false),
       subtitleMode: stringValue(json['subtitleMode']) ?? 'auto',
       autoplayNext: boolValue(json['autoplayNext'], fallback: true),
+      subtitleStyle: stringValue(json['subtitleStyle']) ?? 'broadcast',
+      subtitleTextColor: stringValue(json['subtitleTextColor']) ?? '#FFFFFF',
+      subtitleSizePercent: intValue(json['subtitleSizePercent']) ?? 100,
+      subtitleBottomOffsetPercent:
+          intValue(json['subtitleBottomOffsetPercent']) ?? 6,
+      subtitleTimingOffsetMs: intValue(json['subtitleTimingOffsetMs']) ?? 0,
+      bufferProfile: stringValue(json['bufferProfile']),
+      upscaleMode: stringValue(json['upscaleMode']),
     );
   }
 }
@@ -665,11 +789,14 @@ class PlaybackAuthorization {
     required this.streamUrl,
     required this.contentType,
     required this.subtitleTracks,
+    required this.audioTracks,
     required this.renditions,
     required this.preferences,
     this.transcodeStatusUrl,
+    this.selectedAudioTrackId,
     this.sourceBitrate,
     this.sourceHeight,
+    this.hardwareUpscale = false,
   });
 
   final String sessionId;
@@ -679,19 +806,34 @@ class PlaybackAuthorization {
   final String contentType;
   final String? transcodeStatusUrl;
   final List<SubtitleTrack> subtitleTracks;
+  final List<PlaybackAudioTrack> audioTracks;
+  final String? selectedAudioTrackId;
   final List<Rendition> renditions;
   final PlaybackPreferences preferences;
   final int? sourceBitrate;
   final int? sourceHeight;
+  final bool hardwareUpscale;
 
   bool get isDirectPlay => method == 'direct_play';
   bool get isHls => contentType.toLowerCase().contains('mpegurl');
+  PlaybackAudioTrack? get selectedAudioTrack {
+    for (final track in audioTracks) {
+      if (track.id == selectedAudioTrackId) return track;
+    }
+    for (final track in audioTracks) {
+      if (track.selected) return track;
+    }
+    return null;
+  }
 
   PlaybackAuthorization copyWith({
     String? method,
     String? streamUrl,
     String? contentType,
     String? transcodeStatusUrl,
+    List<Rendition>? renditions,
+    List<PlaybackAudioTrack>? audioTracks,
+    Object? selectedAudioTrackId = _modelUnset,
   }) => PlaybackAuthorization(
     sessionId: sessionId,
     streamToken: streamToken,
@@ -700,10 +842,15 @@ class PlaybackAuthorization {
     contentType: contentType ?? this.contentType,
     transcodeStatusUrl: transcodeStatusUrl ?? this.transcodeStatusUrl,
     subtitleTracks: subtitleTracks,
-    renditions: renditions,
+    audioTracks: audioTracks ?? this.audioTracks,
+    selectedAudioTrackId: identical(selectedAudioTrackId, _modelUnset)
+        ? this.selectedAudioTrackId
+        : selectedAudioTrackId as String?,
+    renditions: renditions ?? this.renditions,
     preferences: preferences,
     sourceBitrate: sourceBitrate,
     sourceHeight: sourceHeight,
+    hardwareUpscale: hardwareUpscale,
   );
 
   factory PlaybackAuthorization.fromJson(dynamic value) {
@@ -722,6 +869,11 @@ class PlaybackAuthorization {
           .map(SubtitleTrack.fromJson)
           .where((track) => track.id.isNotEmpty)
           .toList(growable: false),
+      audioTracks: jsonList(json['audioTracks'])
+          .map(PlaybackAudioTrack.fromJson)
+          .where((track) => track.id.isNotEmpty)
+          .toList(growable: false),
+      selectedAudioTrackId: stringValue(json['selectedAudioTrackId']),
       renditions: jsonList(adaptive['renditions'])
           .map(Rendition.fromJson)
           .where((rendition) => rendition.height > 0)
@@ -729,6 +881,7 @@ class PlaybackAuthorization {
       preferences: PlaybackPreferences.fromJson(json['playbackPreferences']),
       sourceBitrate: intValue(source['bitrate']),
       sourceHeight: intValue(source['height']),
+      hardwareUpscale: boolValue(adaptive['hardwareUpscale']),
     );
   }
 }

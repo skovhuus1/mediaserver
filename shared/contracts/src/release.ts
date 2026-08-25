@@ -1,1 +1,1 @@
-export const BB_MEDIA_VERSION = '0.2.14';
+export const BB_MEDIA_VERSION = '0.3.0';

@@ -65,6 +65,7 @@ void main() {
         },
       ],
       'adaptiveQuality': {
+        'hardwareUpscale': true,
         'renditions': [
           {'height': 720, 'bitrate': 3000000, 'upscaled': false, 'hdr': false},
           {'height': 1080, 'bitrate': 6000000, 'upscaled': true, 'hdr': false},
@@ -76,6 +77,11 @@ void main() {
         'preferredSubtitleLanguages': ['da', 'en'],
         'subtitleMode': 'auto',
         'autoplayNext': true,
+        'subtitleStyle': 'broadcast',
+        'subtitleTextColor': '#FFE66D',
+        'subtitleSizePercent': 110,
+        'subtitleBottomOffsetPercent': 7,
+        'subtitleTimingOffsetMs': -250,
       },
       'videoProfile': {
         'source': {'height': 720, 'bitrate': 3500000},
@@ -86,6 +92,9 @@ void main() {
     expect(authorization.renditions, hasLength(2));
     expect(authorization.subtitleTracks.single.isText, isTrue);
     expect(authorization.preferences.preferredSubtitleLanguages.first, 'da');
+    expect(authorization.hardwareUpscale, isTrue);
+    expect(authorization.preferences.subtitleTextColor, '#FFE66D');
+    expect(authorization.preferences.subtitleTimingOffsetMs, -250);
   });
 
   test('automatic subtitles only select a forced preferred track', () {
@@ -110,6 +119,7 @@ void main() {
     const automatic = PlaybackPreferences(
       qualityMode: 'auto',
       playbackRate: 1,
+      preferredAudioLanguages: ['da', 'en'],
       preferredSubtitleLanguages: ['da', 'en'],
       subtitleMode: 'auto',
       autoplayNext: true,
@@ -117,6 +127,7 @@ void main() {
     const always = PlaybackPreferences(
       qualityMode: 'auto',
       playbackRate: 1,
+      preferredAudioLanguages: ['da', 'en'],
       preferredSubtitleLanguages: ['da', 'en'],
       subtitleMode: 'always',
       autoplayNext: true,
@@ -124,6 +135,7 @@ void main() {
     const off = PlaybackPreferences(
       qualityMode: 'auto',
       playbackRate: 1,
+      preferredAudioLanguages: ['da', 'en'],
       preferredSubtitleLanguages: ['da', 'en'],
       subtitleMode: 'off',
       autoplayNext: true,
@@ -237,5 +249,59 @@ void main() {
       'S01E01 · Pilot',
     );
     expect(experience.resumeEpisode?.positionMs, 300000);
+  });
+
+  test('playback authorization parses audio tracks and selected audio', () {
+    final authorization = PlaybackAuthorization.fromJson({
+      'sessionId': 'session-1',
+      'streamToken': 'stream-token',
+      'method': 'transcode',
+      'streamUrl': '/stream.m3u8',
+      'contentType': 'application/x-mpegURL',
+      'selectedAudioTrackId': 'audio-2',
+      'audioTracks': [
+        {
+          'id': 'audio-1',
+          'streamIndex': 1,
+          'label': 'Dansk · AAC · Stereo',
+          'language': 'da',
+          'codec': 'AAC',
+          'channels': 2,
+          'default': true,
+          'selected': false,
+        },
+        {
+          'id': 'audio-2',
+          'streamIndex': 2,
+          'label': 'Engelsk · DTS · 5.1',
+          'language': 'en',
+          'codec': 'DTS',
+          'channels': 6,
+          'default': false,
+          'selected': true,
+        },
+      ],
+      'playbackPreferences': {
+        'qualityMode': 'auto',
+        'playbackRate': 1,
+        'preferredAudioLanguages': ['en'],
+        'preferredSubtitleLanguages': ['da'],
+        'subtitleMode': 'auto',
+        'autoplayNext': true,
+      },
+      'adaptiveQuality': {
+        'hardwareUpscale': false,
+        'renditions': [
+          {'height': 1080, 'bitrate': 6000000, 'upscaled': false, 'hdr': false},
+        ],
+      },
+      'videoProfile': {
+        'source': {'height': 1080, 'bitrate': 6000000},
+      },
+    });
+
+    expect(authorization.audioTracks, hasLength(2));
+    expect(authorization.selectedAudioTrack?.id, 'audio-2');
+    expect(authorization.preferences.preferredAudioLanguages, ['en']);
   });
 }

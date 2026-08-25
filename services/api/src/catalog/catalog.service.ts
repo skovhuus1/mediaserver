@@ -257,6 +257,7 @@ export class CatalogService {
           'seriesTitle',
           'seriesOverview',
           'posterPath',
+          'seasonPosterPath',
           'backdropPath',
           'metadataProvider',
           'category',
@@ -282,6 +283,7 @@ export class CatalogService {
         seriesOverview: row.seriesOverview,
         seriesMetadataProviderId: row.seriesMetadataProviderId,
         posterPath: row.posterPath,
+        seasonPosterPath: row.seasonPosterPath,
         backdropPath: row.backdropPath,
         metadataProvider: row.metadataProvider,
         releaseYear: row._min.releaseYear,
@@ -310,7 +312,9 @@ export class CatalogService {
           category: episodes.find((episode) => episode.category)?.category ?? null,
           overview: episodes.find((episode) => episode.seriesOverview)?.seriesOverview ?? null,
           metadataProvider: episodes.find((episode) => episode.metadataProvider)?.metadataProvider ?? null,
-          posterPath: episodes.find((episode) => episode.posterPath)?.posterPath ?? null,
+          posterPath: episodes.find((episode) => episode.posterPath)?.posterPath
+            ?? episodes.find((episode) => episode.seasonPosterPath)?.seasonPosterPath
+            ?? null,
           backdropPath: episodes.find((episode) => episode.backdropPath)?.backdropPath ?? null,
           releaseYear: releaseYears.length ? Math.min(...releaseYears) : null,
           releaseDate: releaseDates.length
@@ -1312,11 +1316,19 @@ export class CatalogService {
 
   private serializeMedia<T extends { file?: { sizeBytes: bigint; probe?: unknown } | null }>(item: T) {
     const signal = detectVideoSignalProfile(item.file?.probe);
+    const artwork = item as T & {
+      type?: string | null;
+      posterPath?: string | null;
+      seasonPosterPath?: string | null;
+    };
     const file = item.file
       ? (({ probe: _probe, ...publicFile }) => ({ ...publicFile, sizeBytes: item.file!.sizeBytes.toString() }))(item.file)
       : null;
     return {
       ...item,
+      posterPath: artwork.type === 'episode'
+        ? artwork.posterPath ?? artwork.seasonPosterPath ?? null
+        : artwork.posterPath,
       hdr: signal.hdr,
       file,
     };

@@ -227,4 +227,251 @@ describe('playback session reconfiguration', () => {
     });
     expect(transcodeStream.enqueue).not.toHaveBeenCalled();
   });
+
+  it('uses requested fixed quality instead of stale device quality during reconfigure', async () => {
+    const streamToken = 'd'.repeat(48);
+    const session = {
+      id: 'session-4',
+      logicalSessionId: 'logical-4',
+      accountId: 'account-1',
+      userId: 'user-1',
+      profileId: 'profile-1',
+      mediaId: 'media-1',
+      deviceId: 'device-1',
+      method: 'direct_stream',
+      streamTokenHash: createHash('sha256').update(streamToken).digest('hex'),
+      status: 'active',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      media: {
+        width: 3840,
+        height: 2160,
+        bitrate: 18_000_000,
+        file: {
+          durationMs: 3_600_000,
+          probe: { streams: [{ index: 0, codec_type: 'video', codec_name: 'hevc' }] },
+        },
+      },
+      device: {
+        type: 'android_tv',
+        qualityMode: 'original',
+        fixedQualityHeight: null,
+        allowUpscale: true,
+        dataSaver: false,
+        hdrMode: 'auto',
+      },
+    };
+    const prisma = {
+      playbackSession: {
+        findFirst: vi.fn().mockResolvedValue(session),
+        update: vi.fn().mockResolvedValue(session),
+      },
+      systemJob: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-4' }) },
+      $transaction: vi.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
+    };
+    const transcodeStream = { enqueue: vi.fn().mockResolvedValue(hlsGeneration) };
+    const service = Object.assign(Object.create(PlaybackService.prototype), {
+      prisma,
+      entitlements: {
+        evaluate: vi.fn().mockResolvedValue({
+          allowed: true,
+          code: 'allowed',
+          reasons: [],
+          effective: {
+            allowVideoTranscode: true,
+            maxVideoResolution: 2160,
+            maxVideoBitrate: 20_000,
+          },
+        }),
+      },
+      transcodeStream,
+    }) as PlaybackService;
+
+    const result = await service.reconfigure({
+      sub: 'user-1', accountId: 'account-1', profileId: 'profile-1', deviceId: 'device-1', roles: [],
+    }, 'session-4', {
+      streamToken,
+      burnIn: false,
+      forceTranscode: true,
+      qualityMode: 'fixed',
+      fixedQualityHeight: 720,
+    });
+
+    expect(result.adaptiveQuality).toMatchObject({ effectiveMaxHeight: 720 });
+    expect(transcodeStream.enqueue).toHaveBeenCalledWith(
+      'session-4',
+      'account-1',
+      expect.objectContaining({
+        adaptiveQuality: expect.objectContaining({ effectiveMaxHeight: 720 }),
+      }),
+    );
+  });
+
+  it('passes selected audio stream index to the transcode job', async () => {
+    const streamToken = 'e'.repeat(48);
+    const session = {
+      id: 'session-5',
+      logicalSessionId: 'logical-5',
+      accountId: 'account-1',
+      userId: 'user-1',
+      profileId: 'profile-1',
+      mediaId: 'media-1',
+      deviceId: 'device-1',
+      method: 'direct_stream',
+      streamTokenHash: createHash('sha256').update(streamToken).digest('hex'),
+      status: 'active',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      media: {
+        width: 1920,
+        height: 1080,
+        bitrate: 8_000_000,
+        file: {
+          durationMs: 3_600_000,
+          probe: {
+            streams: [
+              { index: 0, codec_type: 'video', codec_name: 'h264' },
+              {
+                index: 1,
+                codec_type: 'audio',
+                codec_name: 'aac',
+                channels: 2,
+                tags: { language: 'dan', title: 'Dansk' },
+                disposition: { default: 1 },
+              },
+              {
+                index: 2,
+                codec_type: 'audio',
+                codec_name: 'dts',
+                channels: 6,
+                tags: { language: 'eng', title: 'English 5.1' },
+                disposition: { default: 0 },
+              },
+            ],
+          },
+        },
+      },
+      device: {
+        type: 'android_tv',
+        qualityMode: 'auto',
+        fixedQualityHeight: null,
+        allowUpscale: true,
+        dataSaver: false,
+        hdrMode: 'auto',
+      },
+    };
+    const prisma = {
+      playbackSession: {
+        findFirst: vi.fn().mockResolvedValue(session),
+        update: vi.fn().mockResolvedValue(session),
+      },
+      systemJob: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: 'audit-5' }) },
+      $transaction: vi.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
+    };
+    const transcodeStream = { enqueue: vi.fn().mockResolvedValue(hlsGeneration) };
+    const service = Object.assign(Object.create(PlaybackService.prototype), {
+      prisma,
+      entitlements: {
+        evaluate: vi.fn().mockResolvedValue({
+          allowed: true,
+          code: 'allowed',
+          reasons: [],
+          effective: {
+            allowVideoTranscode: true,
+            maxVideoResolution: 2160,
+            maxVideoBitrate: 20_000,
+          },
+        }),
+      },
+      transcodeStream,
+    }) as PlaybackService;
+
+    const result = await service.reconfigure({
+      sub: 'user-1', accountId: 'account-1', profileId: 'profile-1', deviceId: 'device-1', roles: [],
+    }, 'session-5', {
+      streamToken,
+      burnIn: false,
+      forceTranscode: true,
+      audioTrackId: 'audio-2',
+    });
+
+    expect(result.selectedAudioTrackId).toBe('audio-2');
+    expect(result.audioTracks.find((track) => track.id === 'audio-2')?.selected).toBe(true);
+    expect(transcodeStream.enqueue).toHaveBeenCalledWith(
+      'session-5',
+      'account-1',
+      expect.objectContaining({
+        audioTrackId: 'audio-2',
+        audioStreamIndex: 2,
+      }),
+    );
+  });
+
+  it('rejects unknown audio tracks before queueing transcode work', async () => {
+    const streamToken = 'f'.repeat(48);
+    const session = {
+      id: 'session-6',
+      logicalSessionId: 'logical-6',
+      accountId: 'account-1',
+      userId: 'user-1',
+      profileId: 'profile-1',
+      mediaId: 'media-1',
+      deviceId: 'device-1',
+      method: 'direct_stream',
+      streamTokenHash: createHash('sha256').update(streamToken).digest('hex'),
+      status: 'active',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      media: {
+        width: 1920,
+        height: 1080,
+        bitrate: 8_000_000,
+        file: {
+          durationMs: 3_600_000,
+          probe: {
+            streams: [
+              { index: 0, codec_type: 'video', codec_name: 'h264' },
+              { index: 1, codec_type: 'audio', codec_name: 'aac' },
+            ],
+          },
+        },
+      },
+      device: {
+        type: 'android_tv',
+        qualityMode: 'auto',
+        fixedQualityHeight: null,
+        allowUpscale: true,
+        dataSaver: false,
+        hdrMode: 'auto',
+      },
+    };
+    const transcodeStream = { enqueue: vi.fn() };
+    const service = Object.assign(Object.create(PlaybackService.prototype), {
+      prisma: { playbackSession: { findFirst: vi.fn().mockResolvedValue(session) } },
+      entitlements: {
+        evaluate: vi.fn().mockResolvedValue({
+          allowed: true,
+          code: 'allowed',
+          reasons: [],
+          effective: {
+            allowVideoTranscode: true,
+            maxVideoResolution: 2160,
+            maxVideoBitrate: 20_000,
+          },
+        }),
+      },
+      transcodeStream,
+    }) as PlaybackService;
+
+    await expect(service.reconfigure({
+      sub: 'user-1', accountId: 'account-1', profileId: 'profile-1', deviceId: 'device-1', roles: [],
+    }, 'session-6', {
+      streamToken,
+      burnIn: false,
+      forceTranscode: true,
+      audioTrackId: 'audio-99',
+    })).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'audio_track_invalid' }),
+    });
+    expect(transcodeStream.enqueue).not.toHaveBeenCalled();
+  });
 });

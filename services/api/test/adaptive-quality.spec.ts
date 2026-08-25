@@ -43,6 +43,33 @@ describe('adaptive quality plan', () => {
     expect(plan.renditions.at(-1)?.height).toBe(720);
   });
 
+  it('never creates server-upscaled renditions for device upscaling', () => {
+    const plan = buildAdaptiveQualityPlan({
+      ...defaults,
+      sourceHeight: 1080,
+      screenHeight: 2160,
+      devicePixelRatio: 1,
+      allowUpscale: true,
+      upscaleMode: 'device',
+    });
+
+    expect(plan.effectiveMaxHeight).toBe(1080);
+    expect(plan.renditions.every((rendition) => !rendition.upscaled)).toBe(true);
+  });
+
+  it('never creates upscaled renditions when upscaling is off', () => {
+    const plan = buildAdaptiveQualityPlan({
+      ...defaults,
+      sourceHeight: 720,
+      screenHeight: 2160,
+      devicePixelRatio: 1,
+      upscaleMode: 'off',
+    });
+
+    expect(plan.effectiveMaxHeight).toBe(720);
+    expect(plan.renditions.every((rendition) => !rendition.upscaled)).toBe(true);
+  });
+
   it('caps data saver at 720p and three megabits', () => {
     const plan = buildAdaptiveQualityPlan({ ...defaults, dataSaver: true });
     expect(plan.effectiveMaxHeight).toBe(720);

@@ -7,6 +7,7 @@ import '../app.dart';
 import '../core/api_client.dart';
 import '../core/brand_theme.dart';
 import '../core/models.dart';
+import '../shared_core/library_contract.dart';
 import '../state/app_controller.dart';
 import '../widgets/brand.dart';
 import '../widgets/media_card.dart';
@@ -32,20 +33,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String? _error;
   List<MediaItem> _movies = const [];
   List<MediaItem> _series = const [];
-  _CatalogPayload _movieCatalog = _CatalogPayload.empty;
-  _CatalogPayload _seriesCatalog = _CatalogPayload.empty;
-  _CatalogPayload _releasedMovies = _CatalogPayload.empty;
-  _CatalogPayload _releasedSeries = _CatalogPayload.empty;
-  _CatalogPayload _latestEpisodes = _CatalogPayload.empty;
+  LibraryCatalogPayload _movieCatalog = LibraryCatalogPayload.empty;
+  LibraryCatalogPayload _seriesCatalog = LibraryCatalogPayload.empty;
+  LibraryCatalogPayload _releasedMovies = LibraryCatalogPayload.empty;
+  LibraryCatalogPayload _releasedSeries = LibraryCatalogPayload.empty;
+  LibraryCatalogPayload _latestEpisodes = LibraryCatalogPayload.empty;
   List<MediaItem> _continue = const [];
   List<MediaItem> _watchlist = const [];
   RecommendationFeed _recommendations = const RecommendationFeed(sections: []);
+  late final LibraryContract _library;
 
   ApiClient get api => widget.controller.api;
 
   @override
   void initState() {
     super.initState();
+    _library = LibraryUseCase(api: api);
     unawaited(_load());
   }
 
@@ -57,38 +60,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
       });
     }
     try {
-      final responses = await Future.wait([
-        api.getJson('/media/catalog?type=movie&pageSize=100&sort=newest'),
-        api.getJson('/media/catalog?type=series&pageSize=100&sort=newest'),
-        api.getJson('/media/catalog?type=movie&pageSize=36&sort=released'),
-        api.getJson('/media/catalog?type=series&pageSize=36&sort=released'),
-        api.getJson('/media/catalog?type=episode&pageSize=36&sort=released'),
-        api.getJson('/playback/history/continue'),
-        api.getJson('/playback/watchlist'),
-        api
-            .getJson('/media/recommendations')
-            .catchError((_) => <String, dynamic>{}),
-      ]);
+      final payload = await _library.loadHomePayload();
       if (!mounted) return;
-      final movieCatalog = _CatalogPayload.fromJson(responses[0]);
-      final seriesCatalog = _CatalogPayload.fromJson(responses[1]);
       setState(() {
-        _movieCatalog = movieCatalog;
-        _seriesCatalog = seriesCatalog;
-        _releasedMovies = _CatalogPayload.fromJson(responses[2]);
-        _releasedSeries = _CatalogPayload.fromJson(responses[3]);
-        _latestEpisodes = _CatalogPayload.fromJson(responses[4]);
-        _movies = movieCatalog.items;
-        _series = seriesCatalog.items;
-        _continue = jsonList(responses[5])
-            .map(MediaItem.fromJson)
-            .where((item) => item.id.isNotEmpty)
-            .toList(growable: false);
-        _watchlist = jsonList(responses[6])
-            .map(MediaItem.fromJson)
-            .where((item) => item.id.isNotEmpty)
-            .toList(growable: false);
-        _recommendations = RecommendationFeed.fromJson(responses[7]);
+        _movieCatalog = payload.movieCatalog;
+        _seriesCatalog = payload.seriesCatalog;
+        _releasedMovies = payload.releasedMovies;
+        _releasedSeries = payload.releasedSeries;
+        _latestEpisodes = payload.latestEpisodes;
+        _movies = payload.movieCatalog.items;
+        _series = payload.seriesCatalog.items;
+        _continue = payload.continueItems;
+        _watchlist = payload.watchlistItems;
+        _recommendations = payload.recommendations;
         _loading = false;
       });
     } on ApiException catch (failure) {
@@ -325,17 +309,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return switch (_tab) {
       1 => _CatalogHub(
         api: api,
+        library: _library,
         mediaType: 'movie',
         label: 'Film',
         newest: _movieCatalog,
         released: _releasedMovies,
-        latestEpisodes: _CatalogPayload.empty,
+        latestEpisodes: LibraryCatalogPayload.empty,
         onOpen: _openTitle,
         onPlay: _play,
         tv: tv,
       ),
       2 => _CatalogHub(
         api: api,
+        library: _library,
         mediaType: 'series',
         label: 'Serier',
         newest: _seriesCatalog,
@@ -372,48 +358,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
         tv: tv,
       ),
     };
-  }
-}
-
-class _CatalogPayload {
-  const _CatalogPayload({
-    required this.items,
-    required this.categories,
-    required this.page,
-    required this.total,
-    required this.totalPages,
-  });
-
-  static const empty = _CatalogPayload(
-    items: [],
-    categories: [],
-    page: 1,
-    total: 0,
-    totalPages: 1,
-  );
-
-  final List<MediaItem> items;
-  final List<String> categories;
-  final int page;
-  final int total;
-  final int totalPages;
-
-  factory _CatalogPayload.fromJson(dynamic raw) {
-    final json = jsonMap(raw);
-    final facets = jsonMap(json['facets']);
-    final items = jsonList(json.isEmpty ? raw : json['items'])
-        .map(MediaItem.fromJson)
-        .where((item) => item.id.isNotEmpty)
-        .toList(growable: false);
-    return _CatalogPayload(
-      items: items,
-      categories: jsonList(
-        facets['categories'],
-      ).map(stringValue).whereType<String>().toList(growable: false),
-      page: intValue(json['page']) ?? 1,
-      total: intValue(json['total']) ?? items.length,
-      totalPages: intValue(json['totalPages']) ?? 1,
-    );
   }
 }
 
@@ -2012,6 +1956,7 @@ class _MediaRail extends StatelessWidget {
 class _CatalogHub extends StatefulWidget {
   const _CatalogHub({
     required this.api,
+    required this.library,
     required this.mediaType,
     required this.label,
     required this.newest,
@@ -2023,11 +1968,12 @@ class _CatalogHub extends StatefulWidget {
   });
 
   final ApiClient api;
+  final LibraryContract library;
   final String mediaType;
   final String label;
-  final _CatalogPayload newest;
-  final _CatalogPayload released;
-  final _CatalogPayload latestEpisodes;
+  final LibraryCatalogPayload newest;
+  final LibraryCatalogPayload released;
+  final LibraryCatalogPayload latestEpisodes;
   final ValueChanged<MediaItem> onOpen;
   final ValueChanged<MediaItem> onPlay;
   final bool tv;
@@ -2074,16 +2020,10 @@ class _CatalogHubState extends State<_CatalogHub> {
     });
     try {
       final nextPage = _page + 1;
-      final query = Uri(
-        queryParameters: {
-          'type': widget.mediaType,
-          'page': '$nextPage',
-          'pageSize': '100',
-          'sort': 'newest',
-        },
-      ).query;
-      final payload = _CatalogPayload.fromJson(
-        await widget.api.getJson('/media/catalog?$query'),
+      final payload = await widget.library.loadCatalogPage(
+        widget.mediaType,
+        page: nextPage,
+        sort: 'newest',
       );
       if (!mounted) return;
       setState(() {
@@ -2112,6 +2052,7 @@ class _CatalogHubState extends State<_CatalogHub> {
       MaterialPageRoute(
         builder: (_) => _CatalogBrowserScreen(
           api: widget.api,
+          library: widget.library,
           mediaType: widget.mediaType,
           label: widget.label,
           category: category,
@@ -2528,6 +2469,7 @@ class _CatalogGenreButtonState extends State<_CatalogGenreButton> {
 class _CatalogBrowserScreen extends StatefulWidget {
   const _CatalogBrowserScreen({
     required this.api,
+    required this.library,
     required this.mediaType,
     required this.label,
     required this.category,
@@ -2536,6 +2478,7 @@ class _CatalogBrowserScreen extends StatefulWidget {
   });
 
   final ApiClient api;
+  final LibraryContract library;
   final String mediaType;
   final String label;
   final String category;
@@ -2567,17 +2510,11 @@ class _CatalogBrowserScreenState extends State<_CatalogBrowserScreen> {
       _error = null;
     });
     try {
-      final query = Uri(
-        queryParameters: {
-          'type': widget.mediaType,
-          'category': widget.category,
-          'page': '${_page + 1}',
-          'pageSize': '100',
-          'sort': 'title',
-        },
-      ).query;
-      final payload = _CatalogPayload.fromJson(
-        await widget.api.getJson('/media/catalog?$query'),
+      final payload = await widget.library.loadCatalogPage(
+        widget.mediaType,
+        page: _page + 1,
+        sort: 'title',
+        category: widget.category,
       );
       if (!mounted) return;
       setState(() {

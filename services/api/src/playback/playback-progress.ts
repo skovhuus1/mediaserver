@@ -8,8 +8,7 @@ export function normalizePlaybackProgress(
     Math.max(0, Math.round(positionMs)),
     normalizedDuration ?? 2_147_483_647,
   );
-  const completed = explicitlyCompleted
-    || (normalizedDuration !== null && normalizedPosition / normalizedDuration >= 0.9);
+  const completed = explicitlyCompleted === true;
 
   return {
     positionMs: normalizedPosition,

@@ -53,6 +53,33 @@ export class UpdateProfilePreferencesDto {
   subtitleMode?: 'auto' | 'always' | 'forced' | 'off';
 
   @IsOptional()
+  @IsIn(['broadcast', 'line_box', 'solid_box'])
+  subtitleStyle?: 'broadcast' | 'line_box' | 'solid_box';
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^#[0-9A-Fa-f]{6}$/)
+  subtitleTextColor?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(75)
+  @Max(150)
+  subtitleSizePercent?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(4)
+  @Max(20)
+  subtitleBottomOffsetPercent?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(-10_000)
+  @Max(10_000)
+  subtitleTimingOffsetMs?: number;
+
+  @IsOptional()
   @IsBoolean()
   autoplayNext?: boolean;
 
@@ -102,6 +129,14 @@ export class UpdateDevicePreferencesDto {
   @IsOptional()
   @IsBoolean()
   allowUpscale?: boolean;
+
+  @IsOptional()
+  @IsIn(['off', 'device', 'server'])
+  upscaleMode?: 'off' | 'device' | 'server';
+
+  @IsOptional()
+  @IsIn(['low_latency', 'auto', 'stable'])
+  bufferProfile?: 'low_latency' | 'auto' | 'stable';
 
   @IsOptional()
   @IsBoolean()

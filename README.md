@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.14**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.3.0**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -30,6 +30,23 @@ Ethernet-TV uden Wi-Fi-krav, eksplicit no-backup af tokens/offline-nøgler og de
 Android-regler for dynamiske updater-receivere og eksporterede Leanback activities.
 Gradles Linux- og Windows-wrappers samt wrapper-JAR er versionsstyrede, så den samme
 native lint- og release-kæde kan køres reproducerbart lokalt og på GitHub Actions.
+
+### Android TV-player, buffer, lydspor og undertekster
+
+Fra `0.3.0` bruger TV-playeren en dedikeret session-reconfigure for kvalitet og
+VOD-lydspor. Valg af Auto eller en fast rendition sendes til den aktive
+playback-session og gemmes ikke som en generel device preference. Det betyder, at
+kvalitetsvælgeren og lydsporvalg kan reagere direkte på den aktuelle stream uden
+at gå gennem mobilens player-facade.
+
+TV-bufferprofilen holder 30-120 sekunder fremad og 30 sekunder bagud. Playerens
+progressbar viser set position og lys blå buffer-position separat. Android TV
+annoncerer `upscaleMode=device`, så serveren ikke softwareopskalerer over kildens
+opløsning; TV'ets hardware står for panelopskalering uden ekstra FFmpeg-belastning.
+
+Tekstundertekster vises som standard lavt i safe-zone med hvid tekst, sort outline
+og uden boks. Stil, farve, størrelse, placering og timing gemmes pr. profil under
+klientens indstillinger.
 
 ## Kundeoplevelse 2.0
 

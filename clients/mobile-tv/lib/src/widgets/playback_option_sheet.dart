@@ -33,13 +33,13 @@ Future<T?> showPlaybackOptionSheet<T>({
   if (tv) {
     return showDialog<T>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.68),
+      barrierColor: Colors.black.withValues(alpha: 0.72),
       builder: (_) => Dialog(
         alignment: Alignment.centerRight,
-        insetPadding: const EdgeInsets.fromLTRB(32, 32, 54, 32),
+        insetPadding: const EdgeInsets.fromLTRB(32, 28, 56, 28),
         backgroundColor: Colors.transparent,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520, maxHeight: 760),
+          constraints: const BoxConstraints(maxWidth: 388, maxHeight: 620),
           child: content,
         ),
       ),
@@ -71,15 +71,21 @@ class _PlaybackOptionSheet<T> extends StatelessWidget {
     final selectedIndex = options.indexWhere((option) => option.selected);
     final autofocusIndex = selectedIndex < 0 ? 0 : selectedIndex;
     return Material(
-      color: const Color(0xFF0B1726),
-      borderRadius: BorderRadius.circular(tv ? 24 : 18),
+      color: tv ? const Color(0xF2090A0C) : const Color(0xFF0B1726),
+      borderRadius: BorderRadius.circular(tv ? 12 : 18),
       clipBehavior: Clip.antiAlias,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(tv ? 24 : 18),
-          border: Border.all(color: const Color(0x334DD9FF)),
+          borderRadius: BorderRadius.circular(tv ? 12 : 18),
+          border: Border.all(
+            color: tv ? const Color(0x88403322) : const Color(0x334DD9FF),
+          ),
           boxShadow: const [
-            BoxShadow(color: Color(0x66000000), blurRadius: 34),
+            BoxShadow(
+              color: Color(0xB8000000),
+              blurRadius: 30,
+              offset: Offset(0, 14),
+            ),
           ],
         ),
         child: FocusTraversalGroup(
@@ -90,10 +96,10 @@ class _PlaybackOptionSheet<T> extends StatelessWidget {
               SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(
-                    tv ? 28 : 20,
-                    tv ? 28 : 12,
-                    tv ? 28 : 20,
-                    18,
+                    tv ? 18 : 20,
+                    tv ? 17 : 12,
+                    tv ? 18 : 20,
+                    tv ? 12 : 18,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -101,16 +107,18 @@ class _PlaybackOptionSheet<T> extends StatelessWidget {
                       Text(
                         title,
                         style: TextStyle(
-                          fontSize: tv ? 28 : 22,
+                          fontSize: tv ? 23 : 22,
                           fontWeight: FontWeight.w900,
+                          letterSpacing: -0.2,
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         description,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white60,
-                          height: 1.35,
+                          height: 1.28,
+                          fontSize: tv ? 12.5 : null,
                         ),
                       ),
                     ],
@@ -119,10 +127,10 @@ class _PlaybackOptionSheet<T> extends StatelessWidget {
               ),
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(
-                  tv ? 16 : 10,
+                  tv ? 9 : 10,
                   0,
-                  tv ? 16 : 10,
-                  tv ? 20 : 12,
+                  tv ? 9 : 10,
+                  tv ? 9 : 12,
                 ),
                 sliver: SliverList.builder(
                   itemCount: options.length,
@@ -166,25 +174,25 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
   Widget build(BuildContext context) {
     final option = widget.option;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 6),
       child: AnimatedScale(
         duration: const Duration(milliseconds: 110),
-        scale: _focused && widget.tv ? 1.025 : 1,
+        scale: _focused && widget.tv ? 1.018 : 1,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 110),
           decoration: BoxDecoration(
             color: _focused
-                ? const Color(0xFF123A55)
+                ? const Color(0xFFFFF4D0)
                 : option.selected
-                ? const Color(0xFF102A3D)
-                : const Color(0xFF101D2C),
-            borderRadius: BorderRadius.circular(14),
+                ? const Color(0xFF221D14)
+                : const Color(0xFF0A0C0F),
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: _focused
-                  ? const Color(0xFF4DD9FF)
+                  ? Colors.white
                   : option.selected
-                  ? const Color(0x665DDBFF)
-                  : const Color(0x1FFFFFFF),
+                  ? const Color(0x99F7C35F)
+                  : const Color(0x333B3325),
               width: _focused ? 2 : 1,
             ),
           ),
@@ -198,7 +206,7 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
               child: InkWell(
                 key: ValueKey('playback-option-${option.value}'),
                 autofocus: widget.autofocus,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(8),
                 onFocusChange: (focused) {
                   setState(() => _focused = focused);
                   if (!focused) return;
@@ -214,13 +222,19 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
                 onTap: () => Navigator.of(context).pop(option.value),
                 child: Padding(
                   padding: EdgeInsets.symmetric(
-                    horizontal: widget.tv ? 20 : 16,
-                    vertical: widget.tv ? 15 : 12,
+                    horizontal: widget.tv ? 13 : 16,
+                    vertical: widget.tv ? 9 : 12,
                   ),
                   child: Row(
                     children: [
-                      Icon(option.icon, color: const Color(0xFF76E4FF)),
-                      const SizedBox(width: 16),
+                      Icon(
+                        option.icon,
+                        size: widget.tv ? 20 : null,
+                        color: _focused
+                            ? const Color(0xFF090806)
+                            : const Color(0xFFF7C35F),
+                      ),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -228,15 +242,23 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
                             Text(
                               option.title,
                               style: TextStyle(
-                                fontSize: widget.tv ? 18 : 16,
+                                fontSize: widget.tv ? 15.5 : 16,
                                 fontWeight: FontWeight.w800,
+                                color: _focused
+                                    ? const Color(0xFF090806)
+                                    : Colors.white,
                               ),
                             ),
                             if (option.subtitle case final subtitle?) ...[
-                              const SizedBox(height: 3),
+                              const SizedBox(height: 2),
                               Text(
                                 subtitle,
-                                style: const TextStyle(color: Colors.white60),
+                                style: TextStyle(
+                                  color: _focused
+                                      ? const Color(0xAA090806)
+                                      : Colors.white60,
+                                  fontSize: widget.tv ? 12 : null,
+                                ),
                               ),
                             ],
                           ],
@@ -245,7 +267,7 @@ class _PlaybackOptionTileState<T> extends State<_PlaybackOptionTile<T>> {
                       if (option.selected)
                         const Icon(
                           Icons.check_circle,
-                          color: Color(0xFF4DD9FF),
+                          color: Color(0xFFF7C35F),
                         ),
                     ],
                   ),

@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:boltbytes_media/src/core/api_client.dart';
 import 'package:boltbytes_media/src/core/models.dart';
 import 'package:boltbytes_media/src/core/session_store.dart';
-import 'package:boltbytes_media/src/screens/title_screen.dart';
+import 'package:boltbytes_media/src/tv/screens/tv_title_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -62,7 +62,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: ThemeData.dark(useMaterial3: true),
-        home: TitleScreen(api: api, media: media),
+        home: TvTitleScreen(api: api, media: media),
       ),
     );
     await tester.pumpAndSettle();
@@ -116,7 +116,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: ThemeData.dark(useMaterial3: true),
-        home: TitleScreen(api: api, media: media),
+        home: TvTitleScreen(api: api, media: media),
       ),
     );
     await tester.pumpAndSettle();
@@ -125,7 +125,7 @@ void main() {
     await tester.tap(find.text('Sæson 1 · 1'));
     await tester.pumpAndSettle();
 
-    expect(requestedSeasons, contains('1'));
+    expect(requestedSeasons, [null]);
     expect(find.textContaining('S01E01'), findsOneWidget);
     expect(find.textContaining('S03E01'), findsNothing);
     expect(tester.takeException(), isNull);
