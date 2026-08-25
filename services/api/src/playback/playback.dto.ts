@@ -39,6 +39,14 @@ export class PlaybackCapabilitiesDto {
   @IsOptional()
   @IsBoolean()
   supportsHdr = false;
+
+  @IsOptional()
+  @IsIn(['off', 'device', 'server'])
+  upscaleMode?: 'off' | 'device' | 'server';
+
+  @IsOptional()
+  @IsIn(['low_latency', 'auto', 'stable'])
+  bufferProfile?: 'low_latency' | 'auto' | 'stable';
 }
 
 export class AuthorizePlaybackDto {

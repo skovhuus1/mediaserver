@@ -104,6 +104,14 @@ export class UpdateDevicePreferencesDto {
   allowUpscale?: boolean;
 
   @IsOptional()
+  @IsIn(['off', 'device', 'server'])
+  upscaleMode?: 'off' | 'device' | 'server';
+
+  @IsOptional()
+  @IsIn(['low_latency', 'auto', 'stable'])
+  bufferProfile?: 'low_latency' | 'auto' | 'stable';
+
+  @IsOptional()
   @IsBoolean()
   dataSaver?: boolean;
 

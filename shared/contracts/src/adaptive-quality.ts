@@ -1,5 +1,6 @@
 export type QualityMode = 'auto' | 'fixed' | 'original';
 export type HdrMode = 'auto' | 'prefer_hdr' | 'force_sdr';
+export type UpscaleMode = 'off' | 'device' | 'server';
 
 export type AdaptiveQualityInput = {
   sourceWidth: number | null;
@@ -15,7 +16,8 @@ export type AdaptiveQualityInput = {
   estimatedDownlinkMbps?: number | null;
   qualityMode: QualityMode;
   fixedQualityHeight?: number | null;
-  allowUpscale: boolean;
+  upscaleMode?: UpscaleMode;
+  allowUpscale?: boolean;
   dataSaver: boolean;
   hdrMode: HdrMode;
 };
@@ -64,7 +66,11 @@ export function buildAdaptiveQualityPlan(
     input.qualityMode === 'original'
       ? sourceHeight
       : physicalScreenHeight ?? Number.POSITIVE_INFINITY;
-  const upscaleCap = input.allowUpscale ? Number.POSITIVE_INFINITY : sourceHeight;
+  const upscaleMode = input.upscaleMode
+    ?? (input.allowUpscale ? 'server' : 'off');
+  const upscaleCap = upscaleMode === 'server'
+    ? Number.POSITIVE_INFINITY
+    : sourceHeight;
   const dataCap = input.dataSaver ? 720 : Number.POSITIVE_INFINITY;
   const effectiveMaxHeight = Math.max(
     360,

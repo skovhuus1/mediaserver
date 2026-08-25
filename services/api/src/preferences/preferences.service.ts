@@ -36,7 +36,9 @@ const PROFILE_DEFAULTS = {
 const DEVICE_DEFAULTS = {
   qualityMode: 'auto',
   fixedQualityHeight: null,
-  allowUpscale: true,
+  allowUpscale: false,
+  upscaleMode: 'device',
+  bufferProfile: 'auto',
   dataSaver: false,
   playbackRate: 1,
   hdrMode: 'auto',
@@ -201,7 +203,9 @@ export class PreferencesService {
         qualityMode: device.qualityMode ?? DEVICE_DEFAULTS.qualityMode,
         fixedQualityHeight:
           device.fixedQualityHeight ?? DEVICE_DEFAULTS.fixedQualityHeight,
-        allowUpscale: device.allowUpscale ?? DEVICE_DEFAULTS.allowUpscale,
+        allowUpscale: device.upscaleMode === 'server',
+        upscaleMode: device.upscaleMode ?? DEVICE_DEFAULTS.upscaleMode,
+        bufferProfile: device.bufferProfile ?? DEVICE_DEFAULTS.bufferProfile,
         dataSaver: device.dataSaver ?? DEVICE_DEFAULTS.dataSaver,
         playbackRate: device.playbackRate ?? DEVICE_DEFAULTS.playbackRate,
         hdrMode: device.hdrMode ?? DEVICE_DEFAULTS.hdrMode,
@@ -216,6 +220,10 @@ export class PreferencesService {
     const device = await this.requireDevice(actor);
     const qualityMode = input.qualityMode ?? device.qualityMode;
     const fixedHeight = input.fixedQualityHeight ?? device.fixedQualityHeight;
+    const upscaleMode = input.upscaleMode
+      ?? (input.allowUpscale === undefined
+        ? undefined
+        : input.allowUpscale ? 'server' : 'off');
     if (qualityMode === 'fixed' && !fixedHeight) {
       throw new BadRequestException({
         code: 'fixed_quality_height_required',
@@ -233,8 +241,11 @@ export class PreferencesService {
           ...(input.fixedQualityHeight !== undefined
             ? { fixedQualityHeight: input.fixedQualityHeight }
             : {}),
-          ...(input.allowUpscale !== undefined
-            ? { allowUpscale: input.allowUpscale }
+          ...(upscaleMode !== undefined
+            ? { upscaleMode, allowUpscale: upscaleMode === 'server' }
+            : {}),
+          ...(input.bufferProfile !== undefined
+            ? { bufferProfile: input.bufferProfile }
             : {}),
           ...(input.dataSaver !== undefined
             ? { dataSaver: input.dataSaver }
