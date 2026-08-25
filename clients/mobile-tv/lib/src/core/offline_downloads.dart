@@ -235,6 +235,19 @@ class OfflineDownloadsManager extends ChangeNotifier {
     }
   }
 
+  static Future<bool> hasAny(String profileId) async {
+    final raw = await _secure.read(key: _storageKey);
+    if (raw == null) return false;
+    try {
+      final root = jsonMap(jsonDecode(raw));
+      return jsonList(root['records'])
+          .map(OfflineDownloadRecord.fromJson)
+          .any((record) => record.profileId == profileId);
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> configure(ApiClient api, {bool online = true}) async {
     _api = api;
     await _load();

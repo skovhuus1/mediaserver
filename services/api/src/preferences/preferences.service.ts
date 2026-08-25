@@ -26,6 +26,11 @@ const PROFILE_DEFAULTS = {
   preferredAudioLanguages: ['da', 'en'],
   preferredSubtitleLanguages: ['da', 'en'],
   subtitleMode: 'auto',
+  subtitleStyle: 'broadcast',
+  subtitleTextColor: '#FFFFFF',
+  subtitleSizePercent: 100,
+  subtitleBottomOffsetPercent: 6,
+  subtitleTimingOffsetMs: 0,
   autoplayNext: true,
   recommendationsEnabled: true,
   homeRowOrder: [...HOME_ROW_IDS],
@@ -36,6 +41,8 @@ const DEVICE_DEFAULTS = {
   qualityMode: 'auto',
   fixedQualityHeight: null,
   allowUpscale: true,
+  upscaleMode: 'device',
+  bufferProfile: 'auto',
   dataSaver: false,
   playbackRate: 1,
   hdrMode: 'auto',
@@ -77,6 +84,11 @@ export class PreferencesService {
                 PROFILE_DEFAULTS.preferredSubtitleLanguages,
               ),
               subtitleMode: preferences.subtitleMode,
+              subtitleStyle: preferences.subtitleStyle,
+              subtitleTextColor: preferences.subtitleTextColor,
+              subtitleSizePercent: preferences.subtitleSizePercent,
+              subtitleBottomOffsetPercent: preferences.subtitleBottomOffsetPercent,
+              subtitleTimingOffsetMs: preferences.subtitleTimingOffsetMs,
               autoplayNext: preferences.autoplayNext,
               recommendationsEnabled: preferences.recommendationsEnabled,
               homeRowOrder: homeLayout.order,
@@ -142,6 +154,16 @@ export class PreferencesService {
             input.preferredSubtitleLanguages ??
             [...PROFILE_DEFAULTS.preferredSubtitleLanguages],
           subtitleMode: input.subtitleMode ?? PROFILE_DEFAULTS.subtitleMode,
+          subtitleStyle: input.subtitleStyle ?? PROFILE_DEFAULTS.subtitleStyle,
+          subtitleTextColor:
+            input.subtitleTextColor?.toUpperCase() ?? PROFILE_DEFAULTS.subtitleTextColor,
+          subtitleSizePercent:
+            input.subtitleSizePercent ?? PROFILE_DEFAULTS.subtitleSizePercent,
+          subtitleBottomOffsetPercent:
+            input.subtitleBottomOffsetPercent ??
+            PROFILE_DEFAULTS.subtitleBottomOffsetPercent,
+          subtitleTimingOffsetMs:
+            input.subtitleTimingOffsetMs ?? PROFILE_DEFAULTS.subtitleTimingOffsetMs,
           autoplayNext: input.autoplayNext ?? PROFILE_DEFAULTS.autoplayNext,
           recommendationsEnabled:
             input.recommendationsEnabled ??
@@ -158,6 +180,21 @@ export class PreferencesService {
             : {}),
           ...(input.subtitleMode !== undefined
             ? { subtitleMode: input.subtitleMode }
+            : {}),
+          ...(input.subtitleStyle !== undefined
+            ? { subtitleStyle: input.subtitleStyle }
+            : {}),
+          ...(input.subtitleTextColor !== undefined
+            ? { subtitleTextColor: input.subtitleTextColor.toUpperCase() }
+            : {}),
+          ...(input.subtitleSizePercent !== undefined
+            ? { subtitleSizePercent: input.subtitleSizePercent }
+            : {}),
+          ...(input.subtitleBottomOffsetPercent !== undefined
+            ? { subtitleBottomOffsetPercent: input.subtitleBottomOffsetPercent }
+            : {}),
+          ...(input.subtitleTimingOffsetMs !== undefined
+            ? { subtitleTimingOffsetMs: input.subtitleTimingOffsetMs }
             : {}),
           ...(input.autoplayNext !== undefined
             ? { autoplayNext: input.autoplayNext }
@@ -200,6 +237,8 @@ export class PreferencesService {
         fixedQualityHeight:
           device.fixedQualityHeight ?? DEVICE_DEFAULTS.fixedQualityHeight,
         allowUpscale: device.allowUpscale ?? DEVICE_DEFAULTS.allowUpscale,
+        upscaleMode: device.upscaleMode ?? DEVICE_DEFAULTS.upscaleMode,
+        bufferProfile: device.bufferProfile ?? DEVICE_DEFAULTS.bufferProfile,
         dataSaver: device.dataSaver ?? DEVICE_DEFAULTS.dataSaver,
         playbackRate: device.playbackRate ?? DEVICE_DEFAULTS.playbackRate,
         hdrMode: device.hdrMode ?? DEVICE_DEFAULTS.hdrMode,
@@ -233,6 +272,12 @@ export class PreferencesService {
             : {}),
           ...(input.allowUpscale !== undefined
             ? { allowUpscale: input.allowUpscale }
+            : {}),
+          ...(input.upscaleMode !== undefined
+            ? { upscaleMode: input.upscaleMode }
+            : {}),
+          ...(input.bufferProfile !== undefined
+            ? { bufferProfile: input.bufferProfile }
             : {}),
           ...(input.dataSaver !== undefined
             ? { dataSaver: input.dataSaver }

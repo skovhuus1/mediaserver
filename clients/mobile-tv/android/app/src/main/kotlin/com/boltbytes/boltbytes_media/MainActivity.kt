@@ -43,6 +43,16 @@ class MainActivity : FlutterActivity() {
         super.onUserLeaveHint()
     }
 
+    override fun onResume() {
+        super.onResume()
+        playbackBridge?.reapplyKeepScreenOn()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) playbackBridge?.reapplyKeepScreenOn()
+    }
+
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
         newConfig: android.content.res.Configuration,

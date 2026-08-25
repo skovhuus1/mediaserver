@@ -71,6 +71,9 @@ describe('HLS stream generations', () => {
       await expect(service.status('session-1', 'token', generation)).resolves.toEqual({
         state: 'queued',
         message: 'Waiting for an HLS worker',
+        readySegments: 0,
+        requiredSegments: 3,
+        producerLeadMs: 0,
       });
     } finally {
       await rm(root, { recursive: true, force: true });

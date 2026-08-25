@@ -24,6 +24,174 @@ const cpuTranscodeProfile = resolveCpuTranscodeProfile({
     ?? (/^(?:true|1|yes)$/i.test(process.env.BB_MEDIA_GPU_ENABLED?.trim() ?? '') ? 2160 : 1080),
 });
 
+type PlaybackQualityMode = 'auto' | 'fixed' | 'original';
+
+type PlaybackAudioTrack = {
+  id: string;
+  streamIndex: number;
+  label: string;
+  language: string;
+  codec: string | null;
+  channels: number | null;
+  default: boolean;
+  selected: boolean;
+};
+
+function asJsonObject(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function finiteInteger(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+  }
+  return null;
+}
+
+function stringArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const values = value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return values.length ? values : [...fallback];
+}
+
+function normalizeLanguage(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const normalized = value.trim().toLowerCase().split(/[-_]/)[0] ?? '';
+  return {
+    dan: 'da',
+    danish: 'da',
+    da: 'da',
+    eng: 'en',
+    english: 'en',
+    en: 'en',
+    nor: 'no',
+    nob: 'no',
+    nno: 'no',
+    norwegian: 'no',
+    swe: 'sv',
+    swedish: 'sv',
+    sv: 'sv',
+    ger: 'de',
+    deu: 'de',
+    german: 'de',
+    de: 'de',
+    spa: 'es',
+    spanish: 'es',
+    es: 'es',
+    fre: 'fr',
+    fra: 'fr',
+    french: 'fr',
+    fr: 'fr',
+  }[normalized] ?? normalized;
+}
+
+function languageLabel(language: string): string {
+  return {
+    da: 'Dansk',
+    en: 'Engelsk',
+    no: 'Norsk',
+    sv: 'Svensk',
+    de: 'Tysk',
+    es: 'Spansk',
+    fr: 'Fransk',
+  }[language] ?? (language ? language.toUpperCase() : 'Ukendt sprog');
+}
+
+function audioChannelLabel(channels: number | null): string | null {
+  if (channels === null || channels <= 0) return null;
+  if (channels === 1) return 'Mono';
+  if (channels === 2) return 'Stereo';
+  if (channels === 6) return '5.1';
+  if (channels === 8) return '7.1';
+  return `${channels} kanaler`;
+}
+
+function playbackAudioTracks(probe: unknown, preferredLanguages: string[]): PlaybackAudioTrack[] {
+  const root = asJsonObject(probe);
+  const streams = Array.isArray(root.streams) ? root.streams.map(asJsonObject) : [];
+  const tracks = streams.flatMap((stream, audioOrdinal): PlaybackAudioTrack[] => {
+    if (stream.codec_type !== 'audio') return [];
+    const streamIndex = finiteInteger(stream.index);
+    if (streamIndex === null) return [];
+    const tags = asJsonObject(stream.tags);
+    const disposition = asJsonObject(stream.disposition);
+    const language = normalizeLanguage(tags.language);
+    const codec = typeof stream.codec_name === 'string' ? stream.codec_name.toUpperCase() : null;
+    const channels = finiteInteger(stream.channels);
+    const defaultTrack = disposition.default === 1 || disposition.default === true;
+    const title = typeof tags.title === 'string' && tags.title.trim() !== ''
+      ? tags.title.trim()
+      : null;
+    const details = [
+      languageLabel(language),
+      codec,
+      audioChannelLabel(channels),
+    ].filter((value): value is string => Boolean(value));
+    const baseLabel = title ?? `Lydspor ${audioOrdinal + 1}`;
+    return [{
+      id: `audio-${streamIndex}`,
+      streamIndex,
+      label: details.length ? `${baseLabel} · ${details.join(' · ')}` : baseLabel,
+      language,
+      codec,
+      channels,
+      default: defaultTrack,
+      selected: false,
+    }];
+  });
+  if (!tracks.length) return tracks;
+  const preferred = preferredLanguages
+    .map(normalizeLanguage)
+    .filter(Boolean);
+  const selected =
+    tracks.find((track) => preferred.includes(track.language))
+    ?? tracks.find((track) => track.default)
+    ?? tracks[0]!;
+  return tracks.map((track) => ({
+    ...track,
+    selected: track.id === selected.id,
+  }));
+}
+
+function selectPlaybackAudioTrack(
+  tracks: PlaybackAudioTrack[],
+  audioTrackId: string | undefined,
+): PlaybackAudioTrack | null {
+  if (!tracks.length) {
+    if (!audioTrackId) return null;
+    throw new UnprocessableEntityException({
+      code: 'audio_track_invalid',
+      message: 'The selected audio track is not available for this title',
+    });
+  }
+  if (!audioTrackId) return tracks.find((track) => track.selected) ?? tracks[0]!;
+  const selected = tracks.find((track) => track.id === audioTrackId);
+  if (!selected) {
+    throw new UnprocessableEntityException({
+      code: 'audio_track_invalid',
+      message: 'The selected audio track is not available for this title',
+    });
+  }
+  return selected;
+}
+
+function audioTracksWithSelection(
+  tracks: PlaybackAudioTrack[],
+  selected: PlaybackAudioTrack | null,
+): PlaybackAudioTrack[] {
+  return tracks.map((track) => ({
+    ...track,
+    selected: selected !== null && track.id === selected.id,
+  }));
+}
+
 @Injectable()
 export class PlaybackService {
   private readonly environment = readEnvironment();
@@ -83,6 +251,18 @@ export class PlaybackService {
       });
     }
     const sourceVideo = detectVideoSignalProfile(media.file.probe);
+    const preferredAudioLanguages = stringArray(
+      profilePreferences?.preferredAudioLanguages,
+      ['da', 'en'],
+    );
+    const audioTracks = playbackAudioTracks(
+      media.file.probe,
+      preferredAudioLanguages,
+    );
+    const selectedAudioTrack = selectPlaybackAudioTrack(audioTracks, undefined);
+    const upscaleMode = (
+      device.allowUpscale ? device.upscaleMode : 'off'
+    ) as 'off' | 'device' | 'server';
     const adaptiveQuality = buildAdaptiveQualityPlan({
       sourceWidth: media.width,
       sourceHeight: media.height,
@@ -97,7 +277,8 @@ export class PlaybackService {
       estimatedDownlinkMbps: dto.capabilities.estimatedDownlinkMbps ?? null,
       qualityMode: device.qualityMode as 'auto' | 'fixed' | 'original',
       fixedQualityHeight: device.fixedQualityHeight,
-      allowUpscale: device.allowUpscale,
+      allowUpscale: upscaleMode !== 'off',
+      upscaleMode,
       dataSaver: device.dataSaver,
       hdrMode: device.hdrMode as 'auto' | 'prefer_hdr' | 'force_sdr',
     });
@@ -197,6 +378,12 @@ export class PlaybackService {
             ),
             adaptiveQuality: deliveryQuality,
             hdrMode: device.hdrMode,
+            ...(selectedAudioTrack
+              ? {
+                  audioTrackId: selectedAudioTrack.id,
+                  audioStreamIndex: selectedAudioTrack.streamIndex,
+                }
+              : {}),
             startPositionMs,
           });
         } catch (error) {
@@ -242,6 +429,8 @@ export class PlaybackService {
         streamUrl,
         contentType: decision.method === 'direct_play' ? this.directContentType(media.container) : 'application/x-mpegURL',
         subtitleTracks,
+        audioTracks: audioTracksWithSelection(audioTracks, selectedAudioTrack),
+        selectedAudioTrackId: selectedAudioTrack?.id ?? null,
         ...(embeddedSubtitles
           ? { subtitlePreparationStatusUrl: `/api/v1/playback/sessions/${session.id}/subtitle-status?token=${token}` }
           : {}),
@@ -249,15 +438,26 @@ export class PlaybackService {
           qualityMode: device.qualityMode,
           fixedQualityHeight: device.fixedQualityHeight,
           allowUpscale: device.allowUpscale,
+          upscaleMode,
+          bufferProfile: device.bufferProfile,
           dataSaver: device.dataSaver,
           playbackRate: device.playbackRate,
           hdrMode: device.hdrMode,
-          preferredAudioLanguages: profilePreferences?.preferredAudioLanguages ?? ['da', 'en'],
+          preferredAudioLanguages,
           preferredSubtitleLanguages: profilePreferences?.preferredSubtitleLanguages ?? ['da', 'en'],
           subtitleMode: profilePreferences?.subtitleMode ?? 'auto',
           autoplayNext: profilePreferences?.autoplayNext ?? true,
+          subtitleStyle: profilePreferences?.subtitleStyle ?? 'broadcast',
+          subtitleTextColor: profilePreferences?.subtitleTextColor ?? '#FFFFFF',
+          subtitleSizePercent: profilePreferences?.subtitleSizePercent ?? 100,
+          subtitleBottomOffsetPercent:
+            profilePreferences?.subtitleBottomOffsetPercent ?? 6,
+          subtitleTimingOffsetMs: profilePreferences?.subtitleTimingOffsetMs ?? 0,
         },
-        adaptiveQuality: deliveryQuality,
+        adaptiveQuality: {
+          ...deliveryQuality,
+          hardwareUpscale: upscaleMode === 'device',
+        },
         videoProfile: {
           source: {
             width: media.width,
@@ -361,6 +561,25 @@ export class PlaybackService {
     }
 
     const sourceVideo = detectVideoSignalProfile(session.media.file.probe);
+    const requestedQualityMode = (
+      dto.qualityMode ?? session.device.qualityMode
+    ) as PlaybackQualityMode;
+    const requestedFixedQualityHeight =
+      dto.fixedQualityHeight ?? session.device.fixedQualityHeight;
+    if (
+      requestedQualityMode === 'fixed'
+      && (requestedFixedQualityHeight === null || requestedFixedQualityHeight === undefined)
+    ) {
+      throw new UnprocessableEntityException({
+        code: 'fixed_quality_height_required',
+        message: 'A fixed quality height is required when qualityMode is fixed',
+      });
+    }
+    const audioTracks = playbackAudioTracks(session.media.file.probe, []);
+    const selectedAudioTrack = selectPlaybackAudioTrack(
+      audioTracks,
+      dto.audioTrackId,
+    );
     const startPositionMs = Math.max(
       0,
       Math.min(
@@ -397,9 +616,12 @@ export class PlaybackService {
       screenHeight: null,
       devicePixelRatio: null,
       estimatedDownlinkMbps: null,
-      qualityMode: session.device.qualityMode as 'auto' | 'fixed' | 'original',
-      fixedQualityHeight: session.device.fixedQualityHeight,
+      qualityMode: requestedQualityMode,
+      fixedQualityHeight: requestedQualityMode === 'fixed'
+        ? requestedFixedQualityHeight
+        : null,
       allowUpscale: session.device.allowUpscale,
+      upscaleMode: /tv/i.test(session.device.type) ? 'device' : 'server',
       dataSaver: session.device.dataSaver,
       hdrMode: session.device.hdrMode as 'auto' | 'prefer_hdr' | 'force_sdr',
     });
@@ -430,6 +652,12 @@ export class PlaybackService {
       adaptiveQuality,
       hdrMode: session.device.hdrMode,
       subtitleTrackId: dto.burnIn ? dto.subtitleTrackId ?? null : null,
+      ...(selectedAudioTrack
+        ? {
+            audioTrackId: selectedAudioTrack.id,
+            audioStreamIndex: selectedAudioTrack.streamIndex,
+          }
+        : {}),
       startPositionMs,
     });
     await this.prisma.auditLog.create({
@@ -447,6 +675,10 @@ export class PlaybackService {
           burnIn: dto.burnIn,
           forceTranscode: dto.forceTranscode === true,
           subtitleTrackId: dto.subtitleTrackId ?? null,
+          audioTrackId: selectedAudioTrack?.id ?? null,
+          audioStreamIndex: selectedAudioTrack?.streamIndex ?? null,
+          qualityMode: requestedQualityMode,
+          fixedQualityHeight: requestedFixedQualityHeight,
           startPositionMs,
           hlsGeneration,
         },
@@ -460,7 +692,10 @@ export class PlaybackService {
       logicalSessionId: session.logicalSessionId,
       method: streamMode,
       streamUrl: `/api/v1/playback/sessions/${session.id}/hls/master.m3u8?${hlsQuery}`,
+      contentType: 'application/x-mpegURL',
       transcodeStatusUrl: `/api/v1/playback/sessions/${session.id}/transcode-status?${hlsQuery}`,
+      audioTracks: audioTracksWithSelection(audioTracks, selectedAudioTrack),
+      selectedAudioTrackId: selectedAudioTrack?.id ?? null,
       adaptiveQuality,
     };
   }

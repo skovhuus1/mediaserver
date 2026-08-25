@@ -1,12 +1,12 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/api_client.dart';
 import '../core/offline_downloads.dart';
+import '../shared_core/offline_library_contract.dart';
+import '../shared_core/playback/offline_playback_controller.dart';
 
 class OfflineDownloadsScreen extends StatefulWidget {
   const OfflineDownloadsScreen({
@@ -14,6 +14,7 @@ class OfflineDownloadsScreen extends StatefulWidget {
     required this.profileId,
     this.offline = false,
     this.onReconnect,
+    this.library,
     super.key,
   });
 
@@ -21,25 +22,29 @@ class OfflineDownloadsScreen extends StatefulWidget {
   final String? profileId;
   final bool offline;
   final Future<void> Function()? onReconnect;
+  final OfflineLibraryContract? library;
 
   @override
   State<OfflineDownloadsScreen> createState() => _OfflineDownloadsScreenState();
 }
 
 class _OfflineDownloadsScreenState extends State<OfflineDownloadsScreen> {
-  final manager = OfflineDownloadsManager.instance;
+  late final OfflineLibraryContract library;
 
   @override
   void initState() {
     super.initState();
-    unawaited(manager.configure(widget.api, online: !widget.offline));
+    library =
+        widget.library ??
+        OfflineLibraryUseCase(api: widget.api, online: !widget.offline);
+    unawaited(library.initialize());
   }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: manager,
+    animation: library.changes,
     builder: (context, _) {
-      final records = manager.forProfile(widget.profileId);
+      final records = library.recordsForProfile(widget.profileId);
       return Scaffold(
         appBar: AppBar(
           title: Text(widget.offline ? 'Offlinebibliotek' : 'Downloads'),
@@ -52,9 +57,9 @@ class _OfflineDownloadsScreenState extends State<OfflineDownloadsScreen> {
               ),
             IconButton(
               tooltip: 'Opdatér',
-              onPressed: manager.syncing
+              onPressed: library.syncing
                   ? null
-                  : () => unawaited(manager.sync(online: !widget.offline)),
+                  : () => unawaited(library.sync()),
               icon: const Icon(Icons.refresh),
             ),
           ],
@@ -80,12 +85,12 @@ class _OfflineDownloadsScreenState extends State<OfflineDownloadsScreen> {
                           MaterialPageRoute<void>(
                             builder: (_) => OfflinePlayerScreen(
                               record: records[index],
-                              manager: manager,
+                              library: library,
                             ),
                           ),
                         )
                       : null,
-                  onDelete: () => unawaited(manager.remove(records[index])),
+                  onDelete: () => unawaited(library.remove(records[index])),
                 ),
               ),
       );
@@ -187,119 +192,55 @@ class _DownloadCard extends StatelessWidget {
 class OfflinePlayerScreen extends StatefulWidget {
   const OfflinePlayerScreen({
     required this.record,
-    required this.manager,
+    required this.library,
     super.key,
   });
 
   final OfflineDownloadRecord record;
-  final OfflineDownloadsManager manager;
+  final OfflineLibraryContract library;
 
   @override
   State<OfflinePlayerScreen> createState() => _OfflinePlayerScreenState();
 }
 
 class _OfflinePlayerScreenState extends State<OfflinePlayerScreen> {
-  VideoPlayerController? controller;
-  String? error;
-  int lastSavedSecond = -1;
+  late final OfflinePlaybackController controller;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_initialize());
-  }
-
-  Future<void> _initialize() async {
-    final path = widget.record.localPath;
-    if (path == null ||
-        !File(path).existsSync() ||
-        !widget.record.licenseValid) {
-      setState(
-        () => error = 'Offlinefilen eller licensen er ikke længere gyldig.',
-      );
-      return;
-    }
-    final response =
-        await const MethodChannel(
-          'boltbytes.media/offline_downloads',
-        ).invokeMapMethod<String, dynamic>('serve', {
-          'id': widget.record.id,
-          'localPath': path,
-          'licenseExpiresAtMs':
-              widget.record.licenseExpiresAt.millisecondsSinceEpoch,
-        });
-    final streamUrl = response?['url']?.toString();
-    if (streamUrl == null || streamUrl.isEmpty) {
-      setState(() => error = 'Den krypterede offlinefil kunne ikke åbnes.');
-      return;
-    }
-    final next = VideoPlayerController.networkUrl(
-      Uri.parse(streamUrl),
-      videoPlayerOptions: VideoPlayerOptions(allowBackgroundPlayback: true),
+    controller = OfflinePlaybackController(
+      library: widget.library,
+      record: widget.record,
     );
-    controller = next;
-    await next.initialize();
-    if (widget.record.positionMs > 0 &&
-        widget.record.positionMs < next.value.duration.inMilliseconds) {
-      await next.seekTo(Duration(milliseconds: widget.record.positionMs));
-    }
-    next.addListener(_changed);
-    await next.play();
-    if (mounted) setState(() {});
+    controller.addListener(_changed);
+    unawaited(controller.initialize());
   }
 
   void _changed() {
-    final video = controller;
-    if (video == null || !mounted) return;
-    final second = video.value.position.inSeconds;
-    if (second > 0 && second % 10 == 0 && second != lastSavedSecond) {
-      lastSavedSecond = second;
-      unawaited(
-        widget.manager.saveProgress(
-          widget.record,
-          video.value.position.inMilliseconds,
-          completed:
-              video.value.duration > Duration.zero &&
-              video.value.position >= video.value.duration * 0.9,
-        ),
-      );
-    }
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    final video = controller;
-    if (video != null) {
-      video.removeListener(_changed);
-      unawaited(
-        widget.manager.saveProgress(
-          widget.record,
-          video.value.position.inMilliseconds,
-        ),
-      );
-      unawaited(video.dispose());
-    }
-    unawaited(
-      const MethodChannel(
-        'boltbytes.media/offline_downloads',
-      ).invokeMethod<void>('stopServe'),
-    );
+    controller.removeListener(_changed);
+    controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final video = controller;
+    final video = controller.video;
+    final state = controller.state;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         title: Text(widget.record.displayTitle),
       ),
-      body: error != null
-          ? Center(child: Text(error!))
-          : video == null || !video.value.isInitialized
+      body: state.error != null
+          ? Center(child: Text(state.error!))
+          : video == null || !state.initialized
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
@@ -317,29 +258,25 @@ class _OfflinePlayerScreenState extends State<OfflinePlayerScreen> {
                     child: Row(
                       children: [
                         IconButton(
-                          onPressed: () => video.value.isPlaying
-                              ? video.pause()
-                              : video.play(),
+                          onPressed: controller.togglePlayback,
                           icon: Icon(
-                            video.value.isPlaying
-                                ? Icons.pause
-                                : Icons.play_arrow,
+                            state.playing ? Icons.pause : Icons.play_arrow,
                           ),
                         ),
                         Expanded(
                           child: Slider(
-                            value: video.value.position.inMilliseconds
-                                .clamp(0, video.value.duration.inMilliseconds)
+                            value: state.position.inMilliseconds
+                                .clamp(0, state.duration.inMilliseconds)
                                 .toDouble(),
-                            max: video.value.duration.inMilliseconds
+                            max: state.duration.inMilliseconds
                                 .clamp(1, 2_147_483_647)
                                 .toDouble(),
-                            onChanged: (value) => video.seekTo(
+                            onChanged: (value) => controller.seekTo(
                               Duration(milliseconds: value.round()),
                             ),
                           ),
                         ),
-                        Text(_clock(video.value.position)),
+                        Text(_clock(state.position)),
                       ],
                     ),
                   ),

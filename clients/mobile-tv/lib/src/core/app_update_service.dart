@@ -22,13 +22,16 @@ class AppRelease {
 }
 
 class AppUpdateService {
-  AppUpdateService({http.Client? client}) : _client = client ?? http.Client();
+  AppUpdateService({http.Client? client, AppRuntimeConfig? runtimeConfig})
+    : _client = client ?? http.Client(),
+      _runtimeConfig = runtimeConfig ?? AppConfig.runtimeConfig;
 
   static const _channel = MethodChannel('boltbytes.media/update');
   static const _releases =
       'https://api.github.com/repos/skovhuus1/mediaserver/releases?per_page=20';
 
   final http.Client _client;
+  final AppRuntimeConfig _runtimeConfig;
 
   Future<AppRelease?> latest() async {
     final response = await _client.get(
@@ -47,10 +50,11 @@ class AppUpdateService {
     for (final value in releases.whereType<Map<String, dynamic>>()) {
       if (value['draft'] == true || value['prerelease'] == true) continue;
       final tag = value['tag_name']?.toString() ?? '';
-      if (!tag.startsWith('android-v')) continue;
+      final prefix = _runtimeConfig.isTv ? 'android-tv-v' : 'android-mobile-v';
+      if (!tag.startsWith(prefix)) continue;
       final assets = value['assets'];
       if (assets is! List) continue;
-      final expected = AppConfig.isTvBuild
+      final expected = _runtimeConfig.isTv
           ? 'boltbytes-media-tv-release.apk'
           : 'boltbytes-media-mobile-release.apk';
       final asset = assets
@@ -60,7 +64,7 @@ class AppUpdateService {
       final downloadUrl = asset?['browser_download_url']?.toString();
       if (downloadUrl == null || downloadUrl.isEmpty) continue;
       return AppRelease(
-        version: tag.substring('android-v'.length),
+        version: tag.substring(prefix.length),
         downloadUrl: downloadUrl,
         pageUrl: value['html_url']?.toString() ?? downloadUrl,
         publishedAt: DateTime.tryParse(value['published_at']?.toString() ?? ''),

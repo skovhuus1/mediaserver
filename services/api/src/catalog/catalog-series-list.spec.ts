@@ -13,7 +13,8 @@ describe('series catalog aggregation', () => {
           seriesDisplayTitle: 'Testserien',
           seriesTitle: 'Testserien',
           seriesOverview: 'En samlet serie.',
-          posterPath: '/poster.jpg',
+          posterPath: null,
+          seasonPosterPath: '/season-poster.jpg',
           backdropPath: '/backdrop.jpg',
           metadataProvider: 'tvdb',
           category: 'Drama',
@@ -35,6 +36,7 @@ describe('series catalog aggregation', () => {
     expect(result.items).toEqual([expect.objectContaining({
       id: 'episode-1',
       title: 'Testserien',
+      posterPath: '/season-poster.jpg',
       episodeCount: 24,
     })]);
     expect(prisma.mediaItem.groupBy).toHaveBeenCalledWith(expect.objectContaining({

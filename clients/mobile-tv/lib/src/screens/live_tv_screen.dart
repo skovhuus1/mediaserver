@@ -6,18 +6,23 @@ import 'package:video_player/video_player.dart';
 
 import '../core/api_client.dart';
 import '../core/brand_theme.dart';
-import '../core/models.dart';
+import '../shared_core/live_tv_contract.dart';
+
+export '../shared_core/live_tv_contract.dart'
+    show LiveTvChannel, LiveTvGroup, LiveTvGuide, LiveTvProgram, LiveTvSession;
 
 class LiveTvView extends StatefulWidget {
-  const LiveTvView({required this.api, super.key});
+  const LiveTvView({required this.api, this.liveTv, super.key});
 
   final ApiClient api;
+  final LiveTvContract? liveTv;
 
   @override
   State<LiveTvView> createState() => _LiveTvViewState();
 }
 
 class _LiveTvViewState extends State<LiveTvView> {
+  late final LiveTvContract liveTv;
   LiveTvGuide? guide;
   LiveTvChannel? selected;
   String selectedGroup = '';
@@ -30,6 +35,7 @@ class _LiveTvViewState extends State<LiveTvView> {
   @override
   void initState() {
     super.initState();
+    liveTv = widget.liveTv ?? LiveTvUseCase(api: widget.api);
     unawaited(_load());
     refreshTimer = Timer.periodic(
       const Duration(minutes: 1),
@@ -50,20 +56,11 @@ class _LiveTvViewState extends State<LiveTvView> {
         error = null;
       });
     }
-    final now = DateTime.now().toUtc();
-    final query = <String, String>{
-      'from': now.subtract(const Duration(minutes: 30)).toIso8601String(),
-      'to': now.add(const Duration(hours: 12)).toIso8601String(),
-      'page': '$page',
-      'pageSize': '75',
-      if (selectedGroup.isNotEmpty) 'group': selectedGroup,
-      if (favoritesOnly) 'favorites': 'true',
-    };
     try {
-      final result = LiveTvGuide.fromJson(
-        await widget.api.getJson(
-          '/live-tv/guide?${Uri(queryParameters: query).query}',
-        ),
+      final result = await liveTv.loadGuide(
+        page: page,
+        group: selectedGroup,
+        favoritesOnly: favoritesOnly,
       );
       if (!mounted) return;
       setState(() {
@@ -93,11 +90,7 @@ class _LiveTvViewState extends State<LiveTvView> {
 
   Future<void> _toggleFavorite(LiveTvChannel channel) async {
     try {
-      if (channel.favorite) {
-        await widget.api.deleteJson('/live-tv/favorites/${channel.id}');
-      } else {
-        await widget.api.putJson('/live-tv/favorites/${channel.id}');
-      }
+      await liveTv.setFavorite(channel.id, favorite: !channel.favorite);
       if (!mounted) return;
       setState(() => channel.favorite = !channel.favorite);
     } on ApiException catch (failure) {
@@ -108,7 +101,11 @@ class _LiveTvViewState extends State<LiveTvView> {
   Future<void> _watch(LiveTvChannel channel) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (_) => LiveTvPlayerScreen(api: widget.api, channel: channel),
+        builder: (_) => LiveTvPlayerScreen(
+          api: widget.api,
+          channel: channel,
+          liveTv: liveTv,
+        ),
       ),
     );
   }
@@ -291,17 +288,20 @@ class LiveTvPlayerScreen extends StatefulWidget {
   const LiveTvPlayerScreen({
     required this.api,
     required this.channel,
+    this.liveTv,
     super.key,
   });
 
   final ApiClient api;
   final LiveTvChannel channel;
+  final LiveTvContract? liveTv;
 
   @override
   State<LiveTvPlayerScreen> createState() => _LiveTvPlayerScreenState();
 }
 
 class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen> {
+  late final LiveTvContract liveTv;
   VideoPlayerController? video;
   LiveTvSession? session;
   late LiveTvChannel channel;
@@ -314,6 +314,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    liveTv = widget.liveTv ?? LiveTvUseCase(api: widget.api);
     channel = widget.channel;
     unawaited(_authorize());
   }
@@ -327,12 +328,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen> {
       released = false;
     });
     try {
-      final next = LiveTvSession.fromJson(
-        await widget.api.postJson('/live-tv/playback/authorize', {
-          'channelId': channel.id,
-          'preferredMethod': 'auto',
-        }),
-      );
+      final next = await liveTv.authorize(channel.id);
       if (!mounted) return;
       session = next;
       await _prepare(next);
@@ -349,14 +345,11 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen> {
       if (!mounted || session?.leaseId != current.leaseId) return;
       setState(() => status = 'Klargør ${channel.name}...');
       await Future<void>.delayed(const Duration(seconds: 1));
-      final result = jsonMap(await widget.api.getJson(current.statusUrl));
-      final nextStatus = stringValue(result['status']) ?? 'preparing';
-      if (nextStatus == 'failed') {
-        throw ApiException(
-          stringValue(result['error']) ?? 'Live TV-streamen fejlede.',
-        );
+      final result = await liveTv.pollStatus(current);
+      if (result.failed) {
+        throw ApiException(result.message ?? 'Live TV-streamen fejlede.');
       }
-      ready = nextStatus == 'ready' || nextStatus == 'active';
+      ready = result.ready;
     }
     if (!ready) {
       throw const ApiException(
@@ -403,15 +396,14 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen> {
     final current = session;
     if (current == null || released) return;
     try {
-      await widget.api.patchJson(current.heartbeatUrl, {
-        'runtimeState': video?.value.isBuffering == true
+      await liveTv.heartbeat(
+        current,
+        runtimeState: video?.value.isBuffering == true
             ? 'buffering'
             : video?.value.isPlaying == true
             ? 'playing'
             : 'paused',
-        'bufferAheadMs': 0,
-        'stallCount': 0,
-      });
+      );
     } catch (_) {}
   }
 
@@ -420,23 +412,17 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen> {
     if (current == null) return;
     try {
       setState(() => status = 'Skifter kanal...');
-      final neighbor = LiveTvChannel.fromJson(
-        await widget.api.getJson(
-          '/live-tv/guide/channels/${channel.id}/neighbor?direction=$direction',
-        ),
-      );
-      final next = LiveTvSession.fromJson(
-        await widget.api
-            .postJson('/live-tv/playback/leases/${current.leaseId}/switch', {
-              'channelId': neighbor.id,
-              'streamToken': current.streamToken,
-              'preferredMethod': 'auto',
-            }),
+      final result = await liveTv.switchChannel(
+        current,
+        channel,
+        direction == 'previous'
+            ? LiveTvDirection.previous
+            : LiveTvDirection.next,
       );
       if (!mounted) return;
-      channel = neighbor;
-      session = next;
-      await _prepare(next);
+      channel = result.channel;
+      session = result.session;
+      await _prepare(result.session);
     } on ApiException catch (failure) {
       if (mounted) setState(() => error = failure.message);
     }
@@ -448,7 +434,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen> {
     if (current == null || released) return;
     released = true;
     try {
-      await widget.api.deleteJson(current.releaseUrl);
+      await liveTv.release(current);
     } catch (_) {}
   }
 
@@ -980,175 +966,6 @@ class _LiveTvEmpty extends StatelessWidget {
       ],
     ),
   );
-}
-
-class LiveTvGuide {
-  const LiveTvGuide({
-    required this.availableTotal,
-    required this.total,
-    required this.page,
-    required this.totalPages,
-    required this.groups,
-    required this.channels,
-  });
-
-  final int availableTotal;
-  final int total;
-  final int page;
-  final int totalPages;
-  final List<LiveTvGroup> groups;
-  final List<LiveTvChannel> channels;
-
-  factory LiveTvGuide.fromJson(dynamic value) {
-    final json = jsonMap(value);
-    return LiveTvGuide(
-      availableTotal: intValue(json['availableTotal']) ?? 0,
-      total: intValue(json['total']) ?? 0,
-      page: intValue(json['page']) ?? 1,
-      totalPages: intValue(json['totalPages']) ?? 1,
-      groups: jsonList(
-        json['groups'],
-      ).map(LiveTvGroup.fromJson).toList(growable: false),
-      channels: jsonList(json['channels'])
-          .map(LiveTvChannel.fromJson)
-          .where((channel) => channel.id.isNotEmpty)
-          .toList(growable: false),
-    );
-  }
-}
-
-class LiveTvGroup {
-  const LiveTvGroup({required this.name, required this.count});
-  final String name;
-  final int count;
-
-  factory LiveTvGroup.fromJson(dynamic value) {
-    final json = jsonMap(value);
-    return LiveTvGroup(
-      name: stringValue(json['name']) ?? '',
-      count: intValue(json['count']) ?? 0,
-    );
-  }
-}
-
-class LiveTvChannel {
-  LiveTvChannel({
-    required this.id,
-    required this.name,
-    required this.number,
-    required this.logoUrl,
-    required this.groupName,
-    required this.favorite,
-    required this.programs,
-  });
-
-  static final empty = LiveTvChannel(
-    id: '',
-    name: '',
-    number: null,
-    logoUrl: null,
-    groupName: null,
-    favorite: false,
-    programs: const [],
-  );
-
-  final String id;
-  final String name;
-  final int? number;
-  final String? logoUrl;
-  final String? groupName;
-  bool favorite;
-  final List<LiveTvProgram> programs;
-
-  LiveTvProgram? get currentProgram =>
-      programs.where((program) => program.isCurrent).firstOrNull;
-
-  factory LiveTvChannel.fromJson(dynamic value) {
-    final json = jsonMap(value);
-    return LiveTvChannel(
-      id: stringValue(json['id']) ?? '',
-      name: stringValue(json['name']) ?? 'Ukendt kanal',
-      number: intValue(json['number']),
-      logoUrl: stringValue(json['logoUrl']),
-      groupName: stringValue(json['groupName']),
-      favorite: boolValue(json['favorite']),
-      programs: jsonList(
-        json['programs'],
-      ).map(LiveTvProgram.fromJson).toList(growable: false),
-    );
-  }
-}
-
-class LiveTvProgram {
-  const LiveTvProgram({
-    required this.id,
-    required this.startsAt,
-    required this.endsAt,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final String id;
-  final DateTime startsAt;
-  final DateTime endsAt;
-  final String title;
-  final String? subtitle;
-
-  bool get isCurrent {
-    final now = DateTime.now();
-    return !startsAt.isAfter(now) && endsAt.isAfter(now);
-  }
-
-  factory LiveTvProgram.fromJson(dynamic value) {
-    final json = jsonMap(value);
-    return LiveTvProgram(
-      id: stringValue(json['id']) ?? '',
-      startsAt:
-          DateTime.tryParse(stringValue(json['startsAt']) ?? '') ??
-          DateTime.fromMillisecondsSinceEpoch(0),
-      endsAt:
-          DateTime.tryParse(stringValue(json['endsAt']) ?? '') ??
-          DateTime.fromMillisecondsSinceEpoch(0),
-      title: stringValue(json['title']) ?? 'Programinformation',
-      subtitle: stringValue(json['subtitle']),
-    );
-  }
-}
-
-class LiveTvSession {
-  const LiveTvSession({
-    required this.leaseId,
-    required this.method,
-    required this.status,
-    required this.streamToken,
-    required this.streamUrl,
-    required this.statusUrl,
-    required this.heartbeatUrl,
-    required this.releaseUrl,
-  });
-
-  final String leaseId;
-  final String method;
-  final String status;
-  final String streamToken;
-  final String streamUrl;
-  final String statusUrl;
-  final String heartbeatUrl;
-  final String releaseUrl;
-
-  factory LiveTvSession.fromJson(dynamic value) {
-    final json = jsonMap(value);
-    return LiveTvSession(
-      leaseId: stringValue(json['leaseId']) ?? '',
-      method: stringValue(json['method']) ?? 'auto',
-      status: stringValue(json['status']) ?? 'preparing',
-      streamToken: stringValue(json['streamToken']) ?? '',
-      streamUrl: stringValue(json['streamUrl']) ?? '',
-      statusUrl: stringValue(json['statusUrl']) ?? '',
-      heartbeatUrl: stringValue(json['heartbeatUrl']) ?? '',
-      releaseUrl: stringValue(json['releaseUrl']) ?? '',
-    );
-  }
 }
 
 String _clock(DateTime value) =>

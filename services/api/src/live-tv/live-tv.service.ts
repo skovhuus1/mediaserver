@@ -11,7 +11,6 @@ import type {
 } from './live-tv.dto';
 import {
   changedChannelIds,
-  LIVE_TV_VISIBILITY_TRANSACTION_OPTIONS,
   uniqueChannelIds,
 } from './live-tv-channel-visibility';
 import {
@@ -152,10 +151,38 @@ export class LiveTvService {
 
   async jobs(actor: AuthenticatedUser) {
     const jobs = await this.prisma.systemJob.findMany({
-      where: { accountId: actor.accountId, type: { in: ['live-tv.import', 'live-tv.epg', 'live-tv.stream'] } },
+      where: { accountId: actor.accountId, type: { in: ['live-tv.import', 'live-tv.epg', 'live-tv.channel-visibility', 'live-tv.stream', 'live-tv.record'] } },
+      include: { attempts: { orderBy: { number: 'desc' }, take: 1 } },
       orderBy: { createdAt: 'desc' }, take: 30,
     });
-    return jobs.map((job) => ({ id: job.id, type: job.type, status: job.status, payload: job.payload, attemptCount: job.attemptCount, createdAt: job.createdAt, updatedAt: job.updatedAt }));
+    return jobs.map((job) => {
+      const attempt = job.attempts[0] ?? null;
+      return {
+        id: job.id, type: job.type, status: job.status, payload: job.payload,
+        attemptCount: job.attemptCount, createdAt: job.createdAt, updatedAt: job.updatedAt,
+        error: attempt?.error ?? null,
+        durationMs: attempt ? (attempt.endedAt ?? new Date()).getTime() - attempt.startedAt.getTime() : null,
+      };
+    });
+  }
+
+  async cancelJob(actor: AuthenticatedUser, jobId: string) {
+    const job = await this.prisma.systemJob.findFirst({
+      where: { id: jobId, accountId: actor.accountId, type: 'live-tv.channel-visibility' },
+    });
+    if (!job) throw new NotFoundException({ code: 'live_tv_job_missing', message: 'Live TV-opgaven blev ikke fundet' });
+    if (!['queued', 'running'].includes(job.status)) {
+      throw new ConflictException({ code: 'live_tv_job_not_cancellable', message: 'Opgaven er allerede afsluttet' });
+    }
+    const cancelled = await this.prisma.systemJob.updateMany({
+      where: { id: job.id, accountId: actor.accountId, status: { in: ['queued', 'running'] } },
+      data: { status: 'cancelled', leaseExpiresAt: new Date() },
+    });
+    if (cancelled.count !== 1) {
+      throw new ConflictException({ code: 'live_tv_job_not_cancellable', message: 'Opgaven skiftede status og kunne ikke annulleres' });
+    }
+    await this.audit(actor, 'live_tv.channel_visibility.cancel', job.id);
+    return { id: job.id, status: 'cancelled' };
   }
 
   async adminChannels(actor: AuthenticatedUser, query: ListAdminLiveTvChannelsDto) {
@@ -328,114 +355,19 @@ export class LiveTvService {
   }
 
   async bulkUpdateAllChannels(actor: AuthenticatedUser, dto: BulkUpdateLiveTvAllChannelsDto) {
-    const result = await this.bulkUpdateChannelScope(
-      actor,
-      dto.action,
-      {},
-      'live_tv.channel.all_visibility',
-      { scope: 'all' },
-    );
-    return { ...result, scope: 'all' };
+    return this.queueChannelVisibility(actor, { scope: 'all', action: dto.action });
   }
 
   async bulkUpdateChannelGroup(actor: AuthenticatedUser, dto: BulkUpdateLiveTvChannelGroupDto) {
     const groupName = dto.groupName.trim();
     if (!groupName) throw new BadRequestException({ code: 'live_tv_group_required', message: 'Vælg en kanalgruppe' });
-    const result = await this.bulkUpdateChannelScope(
-      actor,
-      dto.action,
-      { groupName: { equals: groupName, mode: 'insensitive' } },
-      'live_tv.channel.group_visibility',
-      { scope: 'group', groupName },
-    );
-    if (result.matchedCount === 0) {
+    const exists = await this.prisma.liveTvChannel.count({
+      where: { accountId: actor.accountId, groupName: { equals: groupName, mode: 'insensitive' } },
+    });
+    if (exists === 0) {
       throw new NotFoundException({ code: 'live_tv_group_missing', message: 'Kanalgruppen blev ikke fundet' });
     }
-    return { ...result, groupName };
-  }
-
-  private async bulkUpdateChannelScope(
-    actor: AuthenticatedUser,
-    action: 'show' | 'hide',
-    scope: Prisma.LiveTvChannelWhereInput,
-    auditAction: string,
-    auditScope: Record<string, string>,
-  ) {
-    const enabled = action === 'show';
-    const now = new Date();
-    const channelWhere: Prisma.LiveTvChannelWhereInput = { ...scope, accountId: actor.accountId };
-
-    return this.prisma.$transaction(async (tx) => {
-      const matchedCount = await tx.liveTvChannel.count({ where: channelWhere });
-      const changedCount = (await tx.liveTvChannel.updateMany({
-        where: { ...channelWhere, enabled: !enabled },
-        data: { enabled },
-      })).count;
-      let releasedStreams = 0;
-      let cancelledRecordings = 0;
-
-      if (!enabled && changedCount > 0) {
-        const [activeLeases, activeRecordings] = await Promise.all([
-          tx.liveTvLease.findMany({
-            where: {
-              accountId: actor.accountId,
-              status: { in: ['preparing', 'ready', 'active'] },
-              leaseExpiresAt: { gt: now },
-            },
-            select: { id: true, jobId: true, channelId: true },
-          }),
-          tx.liveTvRecording.findMany({
-            where: {
-              accountId: actor.accountId,
-              status: { in: ['scheduled', 'queued', 'recording'] },
-            },
-            select: { id: true, jobId: true, channelId: true },
-          }),
-        ]);
-        const activeChannelIds = [...new Set([...activeLeases, ...activeRecordings].map((item) => item.channelId))];
-        const affectedChannelIds = activeChannelIds.length > 0
-          ? new Set((await tx.liveTvChannel.findMany({
-              where: { ...channelWhere, id: { in: activeChannelIds } },
-              select: { id: true },
-            })).map((channel) => channel.id))
-          : new Set<string>();
-        const affectedLeases = activeLeases.filter((lease) => affectedChannelIds.has(lease.channelId));
-        const affectedRecordings = activeRecordings.filter((recording) => affectedChannelIds.has(recording.channelId));
-
-        if (affectedLeases.length > 0) {
-          releasedStreams = (await tx.liveTvLease.updateMany({
-            where: { id: { in: affectedLeases.map((lease) => lease.id) } },
-            data: {
-              status: 'released', runtimeState: 'channel_hidden', endedAt: now,
-              leaseExpiresAt: now, lastError: 'channel_hidden_by_admin',
-            },
-          })).count;
-        }
-        if (affectedRecordings.length > 0) {
-          cancelledRecordings = (await tx.liveTvRecording.updateMany({
-            where: { id: { in: affectedRecordings.map((recording) => recording.id) } },
-            data: {
-              status: 'cancelled', error: 'Kanalen blev skjult af administratoren', recordingEndedAt: now,
-            },
-          })).count;
-        }
-        const jobIds = [...new Set([...affectedLeases, ...affectedRecordings]
-          .flatMap((item) => item.jobId ? [item.jobId] : []))];
-        if (jobIds.length > 0) {
-          await tx.systemJob.updateMany({
-            where: { accountId: actor.accountId, id: { in: jobIds }, status: { in: ['queued', 'running'] } },
-            data: { status: 'cancelled' },
-          });
-        }
-      }
-
-      await tx.auditLog.create({ data: {
-        accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId,
-        action: auditAction, outcome: 'success', code: action,
-        details: { ...auditScope, matchedCount, changedCount, releasedStreams, cancelledRecordings },
-      } });
-      return { action, matchedCount, changedCount, releasedStreams, cancelledRecordings };
-    }, LIVE_TV_VISIBILITY_TRANSACTION_OPTIONS);
+    return this.queueChannelVisibility(actor, { scope: 'group', action: dto.action, groupName });
   }
 
   async updateSource(actor: AuthenticatedUser, sourceId: string, dto: UpdateLiveTvSourceDto) {
@@ -566,6 +498,42 @@ export class LiveTvService {
       return { job, created: true };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     if (result.created) await this.audit(actor, `${type}.queue`, result.job.id, { providerId });
+    return result.job;
+  }
+
+  private async queueChannelVisibility(
+    actor: AuthenticatedUser,
+    request: { scope: 'all' | 'group'; action: 'show' | 'hide'; groupName?: string },
+  ) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('bbmedia:live-tv-visibility'), hashtext(CAST(${actor.accountId} AS text)))::text AS lock_result`;
+      const active = await tx.systemJob.findMany({
+        where: { accountId: actor.accountId, type: 'live-tv.channel-visibility', status: { in: ['queued', 'running'] } },
+        orderBy: { createdAt: 'asc' },
+      });
+      const existing = active.find((job) => {
+        const payload = job.payload as Record<string, unknown>;
+        return payload.scope === request.scope
+          && payload.action === request.action
+          && (request.scope !== 'group' || payload.groupName === request.groupName);
+      });
+      if (existing) return { job: existing, created: false };
+      const job = await tx.systemJob.create({ data: {
+        accountId: actor.accountId,
+        type: 'live-tv.channel-visibility',
+        status: 'queued',
+        maxAttempts: 3,
+        payload: {
+          ...request,
+          requestedBy: actor.sub,
+          progress: { stage: 'I kø', percent: 0, current: 0, total: null, message: null, updatedAt: new Date().toISOString() },
+        },
+      } });
+      return { job, created: true };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    if (result.created) {
+      await this.audit(actor, 'live_tv.channel_visibility.queue', result.job.id, request);
+    }
     return result.job;
   }
 

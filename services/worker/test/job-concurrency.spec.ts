@@ -44,13 +44,14 @@ describe('worker job concurrency', () => {
       'notification.push',
       'live-tv.import',
       'live-tv.epg',
+      'live-tv.channel-visibility',
     ]);
 
     expect(claimableWorkerJobTypes({
       workerMode: 'jobs',
       activeJobTypes: ['media.metadata', 'media.metadata', 'playback.expire-leases'],
       limits,
-    })).toEqual(['library.scan', 'media.playback-assets', 'notification.push', 'live-tv.import', 'live-tv.epg']);
+    })).toEqual(['library.scan', 'media.playback-assets', 'notification.push', 'live-tv.import', 'live-tv.epg', 'live-tv.channel-visibility']);
   });
 
   it('isolates transcode workers from catalog jobs', () => {

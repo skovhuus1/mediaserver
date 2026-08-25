@@ -141,7 +141,14 @@ export class ExperienceService {
       markers: episode.timelineMarkers,
       playback: this.playbackMedia(episode),
     })), histories, anchor.id);
-    const representative = playableEpisodes[0] ?? anchor;
+    const representative = playableEpisodes.find((episode) =>
+      readLocalCredits(episode.credits).length
+      || readLocalGenres(episode.genres).length
+      || readSimilarProviderIds(episode.similarProviderIds).length,
+    ) ?? playableEpisodes[0] ?? anchor;
+    const artworkRepresentative = playableEpisodes.find((episode) =>
+      Boolean(episode.seasonPosterPath ?? episode.posterPath ?? episode.backdropPath),
+    ) ?? representative;
     const related = await this.relatedTitles(actor.accountId, representative, seriesName);
     return {
       mode: 'series',
@@ -149,8 +156,11 @@ export class ExperienceService {
         ...base,
         displayTitle: seriesName,
         overview: anchor.seriesOverview ?? representative.seriesOverview ?? anchor.overview ?? representative.overview,
-        posterPath: anchor.seasonPosterPath ?? representative.seasonPosterPath ?? anchor.posterPath ?? representative.posterPath,
-        backdropPath: anchor.backdropPath ?? representative.backdropPath,
+        posterPath: anchor.seasonPosterPath
+          ?? anchor.posterPath
+          ?? artworkRepresentative.seasonPosterPath
+          ?? artworkRepresentative.posterPath,
+        backdropPath: anchor.backdropPath ?? artworkRepresentative.backdropPath,
       },
       series,
       discovery: this.discovery(representative, seriesName),
@@ -259,7 +269,7 @@ export class ExperienceService {
 
   private playbackSummary(item: MediaRecord, history: { positionMs: number; completed: boolean; updatedAt: Date } | null) {
     const durationMs = item.file?.durationMs ?? null;
-    const completed = Boolean(history?.completed) || Boolean(durationMs && history && history.positionMs / durationMs >= 0.9);
+    const completed = Boolean(history?.completed);
     const positionMs = completed ? 0 : history?.positionMs ?? 0;
     return { media: this.playbackMedia(item), positionMs, completed, progressPercent: durationMs && positionMs ? Math.max(0, Math.min(100, Math.round((positionMs / durationMs) * 100))) : 0, lastPlayedAt: history?.updatedAt.toISOString() ?? null };
   }
@@ -301,6 +311,9 @@ function collapseTitles(media: MediaRecord[]) {
   return [...groups.values()].map((items) => {
     const sorted = [...items].sort((left, right) => (left.seasonNumber ?? 0) - (right.seasonNumber ?? 0) || (left.episodeNumber ?? 0) - (right.episodeNumber ?? 0));
     const item = sorted[0]!;
+    const artwork = sorted.find((candidate) =>
+      Boolean(candidate.seasonPosterPath ?? candidate.posterPath ?? candidate.backdropPath),
+    ) ?? item;
     const seriesName = item.seriesDisplayTitle ?? item.seriesTitle;
     return {
       mediaId: item.id,
@@ -309,8 +322,8 @@ function collapseTitles(media: MediaRecord[]) {
       releaseYear: item.releaseYear,
       overview: item.seriesOverview ?? item.overview,
       rating: item.rating,
-      posterPath: item.seasonPosterPath ?? item.posterPath,
-      backdropPath: item.backdropPath,
+      posterPath: artwork.seasonPosterPath ?? artwork.posterPath,
+      backdropPath: artwork.backdropPath,
       genres: readLocalGenres(item.genres),
       episodeCount: seriesName ? sorted.length : null,
     };

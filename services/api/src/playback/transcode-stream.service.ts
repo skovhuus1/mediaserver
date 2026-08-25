@@ -34,6 +34,8 @@ type TranscodeLimits = {
   adaptiveQuality: AdaptiveQualityPlan;
   hdrMode: string;
   subtitleTrackId?: string | null;
+  audioTrackId?: string | null;
+  audioStreamIndex?: number | null;
   startPositionMs?: number;
 };
 
@@ -64,6 +66,12 @@ export class TranscodeStreamService {
           hdrMode: limits.hdrMode,
           ...(limits.subtitleTrackId
             ? { subtitleTrackId: limits.subtitleTrackId }
+            : {}),
+          ...(limits.audioTrackId
+            ? { audioTrackId: limits.audioTrackId }
+            : {}),
+          ...(typeof limits.audioStreamIndex === 'number'
+            ? { audioStreamIndex: limits.audioStreamIndex }
             : {}),
           ...(limits.startPositionMs
             ? { startPositionMs: limits.startPositionMs }
@@ -113,6 +121,7 @@ export class TranscodeStreamService {
       };
     }
     const manifestPath = this.assetPath(session.id, 'master.m3u8', jobGeneration);
+    let readySegments = 0;
     try {
       const master = await readFile(manifestPath, 'utf8');
       const variants = master
@@ -126,6 +135,9 @@ export class TranscodeStreamService {
         }
         const playlist = await readFile(this.assetPath(session.id, variant, jobGeneration), 'utf8');
         const segments = hlsPlaylistSegments(playlist);
+        readySegments = readySegments === 0
+          ? segments.length
+          : Math.min(readySegments, segments.length);
         if (!isHlsStartupBufferReady(playlist, this.requiredStartupSegments)) {
           throw new Error('HLS variant does not have a stable startup buffer');
         }
@@ -139,6 +151,9 @@ export class TranscodeStreamService {
       return {
         state: 'ready',
         message: session.method === 'direct_stream' ? 'Direct Stream HLS is ready' : 'Transcoded HLS is ready',
+        readySegments: this.requiredStartupSegments,
+        requiredSegments: this.requiredStartupSegments,
+        producerLeadMs: this.requiredStartupSegments * 4_000,
       };
     } catch {
       // The event playlists grow atomically while FFmpeg prepares a stable startup buffer.
@@ -152,6 +167,9 @@ export class TranscodeStreamService {
       message: job.status === 'running'
         ? session.method === 'direct_stream' ? 'FFmpeg is remuxing the stream' : 'FFmpeg is transcoding the stream'
         : 'Waiting for an HLS worker',
+      readySegments: Math.min(readySegments, this.requiredStartupSegments),
+      requiredSegments: this.requiredStartupSegments,
+      producerLeadMs: readySegments * 4_000,
     };
   }
 

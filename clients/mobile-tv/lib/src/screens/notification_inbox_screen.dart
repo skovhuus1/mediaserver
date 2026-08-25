@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../core/api_client.dart';
+import '../shared_core/notification_contract.dart';
 
 class NotificationInboxScreen extends StatefulWidget {
-  const NotificationInboxScreen({required this.api, super.key});
+  const NotificationInboxScreen({
+    required this.api,
+    this.notifications,
+    super.key,
+  });
 
   final ApiClient api;
+  final NotificationContract? notifications;
 
   @override
   State<NotificationInboxScreen> createState() =>
@@ -13,13 +19,16 @@ class NotificationInboxScreen extends StatefulWidget {
 }
 
 class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
+  late final NotificationContract notifications;
   bool loading = true;
   String? error;
-  List<Map<String, dynamic>> items = [];
+  List<ClientNotification> items = [];
 
   @override
   void initState() {
     super.initState();
+    notifications =
+        widget.notifications ?? NotificationUseCase(api: widget.api);
     _load();
   }
 
@@ -29,16 +38,7 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
       error = null;
     });
     try {
-      final response = await widget.api.getJson(
-        '/client-services/notifications',
-      );
-      final values = response is Map ? response['items'] : null;
-      items = values is List
-          ? values
-                .whereType<Map>()
-                .map((value) => Map<String, dynamic>.from(value))
-                .toList()
-          : [];
+      items = await notifications.load();
     } catch (failure) {
       error = failure.toString();
     } finally {
@@ -46,25 +46,20 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
     }
   }
 
-  Future<void> _read(Map<String, dynamic> item) async {
-    final id = item['id']?.toString();
-    if (id == null || item['readAt'] != null) return;
-    await widget.api.postJson('/client-services/notifications/$id/read');
+  Future<void> _read(ClientNotification item) async {
+    if (!item.unread) return;
+    await notifications.markRead(item.id);
     await _load();
   }
 
-  Future<void> _clear() async {
+  Future<void> _markAllRead() async {
     setState(() {
       loading = true;
       error = null;
     });
     try {
-      await widget.api.postJson('/client-services/notifications/read-all');
-      if (!mounted) return;
-      setState(() {
-        items = [];
-        loading = false;
-      });
+      await notifications.markAllRead();
+      await _load();
     } catch (failure) {
       if (!mounted) return;
       setState(() {
@@ -80,18 +75,7 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
       title: const Text('Notifikationer'),
       actions: [
         TextButton(
-          onPressed: items.isEmpty ? null : () => _clear(),
-          child: const Text('Ryd'),
-        ),
-        TextButton(
-          onPressed: items.isEmpty
-              ? null
-              : () async {
-                  await widget.api.postJson(
-                    '/client-services/notifications/read-all',
-                  );
-                  await _load();
-                },
+          onPressed: items.any((item) => item.unread) ? _markAllRead : null,
           child: const Text('Markér alle som læst'),
         ),
       ],
@@ -110,7 +94,7 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final item = items[index];
-                final unread = item['readAt'] == null;
+                final unread = item.unread;
                 return ListTile(
                   onTap: () => _read(item),
                   leading: Icon(
@@ -120,13 +104,13 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
                     color: unread ? const Color(0xFF62C9A7) : Colors.white38,
                   ),
                   title: Text(
-                    item['title']?.toString() ?? 'BoltBytes Media',
+                    item.title,
                     style: TextStyle(
                       fontWeight: unread ? FontWeight.w800 : FontWeight.w500,
                     ),
                   ),
-                  subtitle: Text(item['body']?.toString() ?? ''),
-                  trailing: Text(_date(item['createdAt']?.toString())),
+                  subtitle: Text(item.body),
+                  trailing: Text(_date(item.createdAt)),
                 );
               },
             ),
@@ -134,8 +118,7 @@ class _NotificationInboxScreenState extends State<NotificationInboxScreen> {
   );
 }
 
-String _date(String? raw) {
-  final value = DateTime.tryParse(raw ?? '')?.toLocal();
-  if (value == null) return '';
+String _date(DateTime raw) {
+  final value = raw.toLocal();
   return '${value.day}.${value.month}.${value.year}';
 }

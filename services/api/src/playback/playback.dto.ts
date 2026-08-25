@@ -3,12 +3,14 @@ import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, Is
 
 export class PlaybackCapabilitiesDto {
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(240)
   @Max(4320)
   screenHeight?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0.5)
   @Max(4)
@@ -39,6 +41,14 @@ export class PlaybackCapabilitiesDto {
   @IsOptional()
   @IsBoolean()
   supportsHdr = false;
+
+  @IsOptional()
+  @IsIn(['off', 'server', 'device'])
+  upscaleMode?: 'off' | 'server' | 'device';
+
+  @IsOptional()
+  @IsIn(['low_latency', 'auto', 'stable'])
+  bufferProfile?: 'low_latency' | 'auto' | 'stable';
 }
 
 export class AuthorizePlaybackDto {
@@ -82,6 +92,22 @@ export class ReconfigurePlaybackDto {
   @IsString()
   @Length(1, 120)
   subtitleTrackId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  audioTrackId?: string;
+
+  @IsOptional()
+  @IsIn(['auto', 'fixed', 'original'])
+  qualityMode?: 'auto' | 'fixed' | 'original';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(240)
+  @Max(4320)
+  fixedQualityHeight?: number;
 
   @IsBoolean()
   burnIn!: boolean;

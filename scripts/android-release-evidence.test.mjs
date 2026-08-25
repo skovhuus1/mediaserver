@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseApkSignerOutput, parseKeytoolFingerprint, validateArtifactSet } from "./android-release-evidence.mjs";
+import { parseApkSignerOutput, parseBundleManifest, parseKeytoolFingerprint, validateArtifactSet } from "./android-release-evidence.mjs";
 import { assertAndroidShrinkerMapping } from "./assert-android-shrinker.mjs";
 
 const certificate = "a".repeat(64);
 const manifests = {
   mobile: '<category android:name="android.intent.category.LAUNCHER" /><meta-data android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME" android:value="com.boltbytes.CastOptionsProvider" />',
-  tv: '<uses-feature android:name="android.software.leanback" android:required="true" /><category android:name="android.intent.category.LEANBACK_LAUNCHER" /><meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />',
+  tv: '<uses-feature android:name="android.software.leanback" android:required="true" /><uses-feature android:name="android.hardware.touchscreen" android:required="false" /><application android:banner="@drawable/tv_banner"><category android:name="android.intent.category.LEANBACK_LAUNCHER" /><meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" /></application>',
 };
 
 function artifact(variant, overrides = {}) {
-  return { packageId: "com.boltbytes.boltbytes_media", versionName: "1.2.3", versionCode: "42", sha256: `${variant}-hash`, manifest: manifests[variant], signing: { certificateSha256: certificate, distinguishedName: "CN=BoltBytes Media,O=BoltBytes", debugCertificate: false, verifiedV1: true, verifiedV2: true, verifiedV3: true, verifiedV4: false }, ...overrides };
+  return { packageId: variant === "tv" ? "com.boltbytes.boltbytes_media.tv" : "com.boltbytes.boltbytes_media", versionName: "1.2.3", versionCode: "42", sha256: `${variant}-hash`, manifest: manifests[variant], signing: { certificateSha256: certificate, distinguishedName: "CN=BoltBytes Media,O=BoltBytes", debugCertificate: false, verifiedV1: true, verifiedV2: true, verifiedV3: true, verifiedV4: false }, ...overrides };
 }
 
 function validate(overrides = {}) {
@@ -18,6 +18,11 @@ function validate(overrides = {}) {
 }
 
 test("accepts distinct mobile and TV flavors", () => assert.equal(validate().passed, true));
+test("accepts independently certified mobile and TV artifacts", () => {
+  assert.equal(validateArtifactSet({ mobile: artifact("mobile"), expected: { version: "1.2.3", buildNumber: "42" } }).passed, true);
+  assert.equal(validateArtifactSet({ tv: artifact("tv"), expected: { version: "1.2.3", buildNumber: "42" } }).passed, true);
+});
+test("requires distinct package identities", () => assert.equal(validate({ tv: { packageId: "com.boltbytes.boltbytes_media" } }).gates.find((gate) => gate.id === "tv.package")?.passed, false));
 test("rejects identical APKs", () => assert.equal(validate({ tv: { sha256: "mobile-hash" } }).gates.find((gate) => gate.id === "variants.distinct")?.passed, false));
 test("rejects Leanback in mobile", () => assert.equal(validate({ mobile: { manifest: `${manifests.mobile}${manifests.tv}` } }).gates.find((gate) => gate.id === "mobile.not_tv_launcher")?.passed, false));
 test("requires the Cast provider only in mobile", () => {
@@ -35,8 +40,13 @@ test("rejects production debug signing but permits explicit CI debug signing", (
 });
 test("rejects certificate mismatch", () => assert.equal(validate({ tv: { signing: { ...artifact("tv").signing, certificateSha256: "b".repeat(64) } } }).passed, false));
 test("requires a verified matching AAB", () => {
-  assert.equal(validate({ aab: { signatureVerified: true, certificateSha256: certificate } }).passed, true);
-  assert.equal(validate({ aab: { signatureVerified: false, certificateSha256: certificate } }).passed, false);
+  const aab = { variant: "tv", packageId: "com.boltbytes.boltbytes_media.tv", versionName: "1.2.3", versionCode: "42", manifest: manifests.tv, signatureVerified: true, certificateSha256: certificate };
+  assert.equal(validateArtifactSet({ tv: artifact("tv"), aab, expected: { version: "1.2.3", buildNumber: "42" } }).passed, true);
+  assert.equal(validateArtifactSet({ tv: artifact("tv"), aab: { ...aab, packageId: "com.example.wrong" }, expected: { version: "1.2.3", buildNumber: "42" } }).passed, false);
+  assert.equal(validateArtifactSet({ tv: artifact("tv"), aab: { ...aab, signatureVerified: false }, expected: { version: "1.2.3", buildNumber: "42" } }).passed, false);
+});
+test("parses Android identity from bundletool manifest output", () => {
+  assert.deepEqual(parseBundleManifest('<manifest xmlns:android="http://schemas.android.com/apk/res/android" android:versionCode="42" android:versionName="1.2.3" package="com.boltbytes.boltbytes_media.tv" />'), { packageId: "com.boltbytes.boltbytes_media.tv", versionName: "1.2.3", versionCode: "42" });
 });
 test("parses signing fingerprints", () => {
   const parsed = parseApkSignerOutput("Verified using v2 scheme (APK Signature Scheme v2): true\nVerified using v3 scheme (APK Signature Scheme v3): true\nSigner #1 certificate DN: CN=BoltBytes Media,O=BoltBytes\nSigner #1 certificate SHA-256 digest: AA:BB:CC");

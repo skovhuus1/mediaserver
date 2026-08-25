@@ -20,6 +20,7 @@ import { updateJobProgress, withJobProgress } from './job-progress.js';
 import { buildSdrColorMetadataArguments, resolveVideoColorPipeline } from './video-color.js';
 import { LibraryChangeDetector, resolveLibraryWatchConfig, type LibraryFileChange } from './library-change-detector.js';
 import { importLiveTvEpg, importLiveTvPlaylist } from './live-tv.js';
+import { processLiveTvChannelVisibilityJob } from './live-tv-channel-visibility-job.js';
 import { processLiveTvRecordingJob } from './live-tv-recordings.js';
 import { processLiveTvStreamJobWithFailover } from './live-tv-stream-failover.js';
 
@@ -221,6 +222,9 @@ async function processJob(job: ClaimedJob): Promise<void> {
       return;
     case 'live-tv.epg':
       await importLiveTvEpg(prisma, job, () => renewJobLease(job.id));
+      return;
+    case 'live-tv.channel-visibility':
+      await processLiveTvChannelVisibilityJob(prisma, job, () => renewJobLease(job.id));
       return;
     case 'live-tv.stream':
       await processLiveTvStreamJobWithFailover(prisma, job, transcodeRoot, () => renewJobLease(job.id));
@@ -496,6 +500,20 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     && renditions.every((rendition) => rendition.hdr);
   const subtitleTrackId =
     typeof payload.subtitleTrackId === 'string' ? payload.subtitleTrackId : null;
+  const selectedAudioStreamIndex = finiteInteger(payload.audioStreamIndex);
+  const availableAudioStreamIndexes = audioStreamIndexes(file.probe);
+  const hasAudio = availableAudioStreamIndexes.length > 0 || Boolean(file.audioCodec);
+  if (
+    selectedAudioStreamIndex !== null
+    && !availableAudioStreamIndexes.includes(selectedAudioStreamIndex)
+  ) {
+    throw new Error(
+      'audio_track_invalid: selected audio track is not available in the source file',
+    );
+  }
+  const audioInput = selectedAudioStreamIndex === null
+    ? '0:a:0'
+    : `0:${selectedAudioStreamIndex}`;
   const startPositionMs = Math.max(0, finiteInteger(payload.startPositionMs) ?? 0);
   const seek = resolveAccurateTranscodeSeek(startPositionMs);
   const inputSeekArguments = seek.inputSeekSeconds > 0
@@ -564,7 +582,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
 
   if (streamMode === 'direct_stream') {
     const audioMode = payload.audioMode === 'aac' ? 'aac' : 'copy';
-    const encoder = file.audioCodec ? `copy+audio:${audioMode}` : 'copy';
+    const encoder = hasAudio ? `copy+audio:${audioMode}` : 'copy';
     await publishTranscoderStatus({
       accountId: job.accountId,
       state: 'remuxing',
@@ -580,8 +598,9 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       variantPlaylistPath: resolve(outputPath, 'stream_%v.m3u8'),
       segmentFilename: resolve(outputPath, 'segment_%v_%05d.m4s'),
       videoCodec: file.videoCodec,
-      hasAudio: Boolean(file.audioCodec),
+      hasAudio,
       audioMode,
+      audioStreamIndex: selectedAudioStreamIndex,
     });
     const inputArgumentIndex = directStreamArguments.indexOf('-i');
     if (inputSeekArguments.length && inputArgumentIndex >= 0) {
@@ -635,13 +654,13 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     videoColor.filter,
     `[prepared]split=${renditions.length}${splitOutputs}`,
     ...scaleOutputs,
-    ...(file.audioCodec
-      ? [`[0:a:0]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS,asplit=${renditions.length}${audioOutputs}`]
+    ...(hasAudio
+      ? [`[${audioInput}]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS,asplit=${renditions.length}${audioOutputs}`]
       : []),
   ].join(';');
   const streamMaps = renditions.flatMap((_, index) => [
     '-map', `[v${index}]`,
-    ...(file.audioCodec ? ['-map', `[a${index}]`] : []),
+    ...(hasAudio ? ['-map', `[a${index}]`] : []),
   ]);
   const cpuProfile = resolveCpuTranscodeProfile({
     availableThreads: availableParallelism(),
@@ -666,7 +685,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       `-pix_fmt:v:${index}`, videoColor.outputPixelFormat,
       ...buildSdrColorMetadataArguments(index, videoColor.toneMappedToSdr),
       `-force_key_frames:v:${index}`, 'expr:gte(t,n_forced*4)',
-      ...(file.audioCodec ? [
+      ...(hasAudio ? [
         `-c:a:${index}`, 'aac',
         `-b:a:${index}`, '160k',
         `-ac:a:${index}`, '2',
@@ -674,7 +693,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     ];
   });
   const variantMap = renditions.map((_, index) =>
-    file.audioCodec ? `v:${index},a:${index},name:${index}` : `v:${index},name:${index}`,
+    hasAudio ? `v:${index},a:${index},name:${index}` : `v:${index},name:${index}`,
   ).join(' ');
   const transcodeArguments = (videoEncoder: string) => [
     '-hide_banner',
@@ -772,6 +791,16 @@ function textSubtitleStreamIndexes(probe: Prisma.JsonValue | null): number[] {
   return streams.flatMap((stream) => {
     if (stream.codec_type !== 'subtitle' || typeof stream.codec_name !== 'string') return [];
     if (!codecs.has(stream.codec_name.toLowerCase())) return [];
+    const index = finiteInteger(stream.index);
+    return index === null ? [] : [index];
+  });
+}
+
+function audioStreamIndexes(probe: Prisma.JsonValue | null): number[] {
+  const root = asJsonObject(probe);
+  const streams = Array.isArray(root.streams) ? root.streams.map(asJsonObject) : [];
+  return streams.flatMap((stream) => {
+    if (stream.codec_type !== 'audio') return [];
     const index = finiteInteger(stream.index);
     return index === null ? [] : [index];
   });
@@ -1243,28 +1272,48 @@ async function expirePlaybackLeases(): Promise<number> {
   return expired;
 }
 
-async function finishJob(job: ClaimedJob): Promise<void> {
-  await prisma.$transaction([
-    prisma.jobAttempt.update({
+async function finishJob(job: ClaimedJob): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const completed = await tx.systemJob.updateMany({
+      where: { id: job.id, status: 'running', workerId },
+      data: { status: 'completed', workerId: null, lockedAt: null, leaseExpiresAt: null, payload: withJobProgress(job.payload, { stage: 'Afsluttet', percent: 100 }) },
+    });
+    if (completed.count !== 1) {
+      await tx.jobAttempt.updateMany({
+        where: { jobId: job.id, number: job.attemptNumber, status: 'running' },
+        data: { status: 'cancelled', error: 'Opgaven blev annulleret', endedAt: new Date() },
+      });
+      return false;
+    }
+    await tx.jobAttempt.update({
       where: { jobId_number: { jobId: job.id, number: job.attemptNumber } },
       data: { status: 'completed', endedAt: new Date() },
-    }),
-    prisma.systemJob.update({
-      where: { id: job.id },
-      data: { status: 'completed', workerId: null, lockedAt: null, leaseExpiresAt: null, payload: withJobProgress(job.payload, { stage: 'Afsluttet', percent: 100 }) },
-    }),
-  ]);
+    });
+    return true;
+  });
 }
 
 async function failJob(job: ClaimedJob, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : 'Unknown worker failure';
   const terminal = job.attemptNumber >= job.maxAttempts;
-  await prisma.$transaction([
-    prisma.jobAttempt.update({
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.systemJob.findUnique({ where: { id: job.id }, select: { status: true } });
+    if (current?.status === 'cancelled') {
+      await tx.jobAttempt.updateMany({
+        where: { jobId: job.id, number: job.attemptNumber, status: 'running' },
+        data: { status: 'cancelled', error: 'Opgaven blev annulleret', endedAt: new Date() },
+      });
+      await tx.systemJob.update({
+        where: { id: job.id },
+        data: { workerId: null, lockedAt: null, leaseExpiresAt: null },
+      });
+      return;
+    }
+    await tx.jobAttempt.update({
       where: { jobId_number: { jobId: job.id, number: job.attemptNumber } },
       data: { status: 'failed', error: message.slice(0, 2_000), endedAt: new Date() },
-    }),
-    prisma.systemJob.update({
+    });
+    await tx.systemJob.update({
       where: { id: job.id },
       data: {
         status: terminal ? 'failed' : 'queued',
@@ -1273,8 +1322,8 @@ async function failJob(job: ClaimedJob, error: unknown): Promise<void> {
         lockedAt: null,
         leaseExpiresAt: null,
       },
-    }),
-  ]);
+    });
+  });
 }
 
 async function ensureRecurringLeaseJob(): Promise<void> {
@@ -1487,8 +1536,8 @@ async function rescheduleRecurringJob(job: ClaimedJob): Promise<void> {
 async function executeClaimedJob(job: ClaimedJob): Promise<void> {
   try {
     await processJob(job);
-    await finishJob(job);
-    await rescheduleRecurringJob(job);
+    const completed = await finishJob(job);
+    if (completed) await rescheduleRecurringJob(job);
   } catch (error) {
     if (workerMode === 'transcode') {
       const payload = asJsonObject(job.payload);

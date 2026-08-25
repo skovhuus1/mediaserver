@@ -11,6 +11,50 @@ type LiveTvSourceStore = {
   };
 };
 
+export type LiveTvSourceSnapshot = {
+  channelId: string;
+  externalId: string | null;
+  sourceName: string;
+  streamFormat: string;
+  qualityLabel: string;
+  qualityRank: number;
+  priority: number;
+  enabled: boolean;
+};
+
+export type LiveTvChannelMetadataSnapshot = {
+  tvgId: string | null;
+  name: string;
+  number: number | null;
+  logoUrl: string | null;
+  groupName: string | null;
+};
+
+export function hasLiveTvSourceChanges(
+  current: LiveTvSourceSnapshot,
+  incoming: LiveTvSourceSnapshot,
+): boolean {
+  return current.channelId !== incoming.channelId
+    || current.externalId !== incoming.externalId
+    || current.sourceName !== incoming.sourceName
+    || current.streamFormat !== incoming.streamFormat
+    || current.qualityLabel !== incoming.qualityLabel
+    || current.qualityRank !== incoming.qualityRank
+    || current.priority !== incoming.priority
+    || current.enabled !== incoming.enabled;
+}
+
+export function hasLiveTvChannelMetadataChanges(
+  current: LiveTvChannelMetadataSnapshot,
+  incoming: LiveTvChannelMetadataSnapshot,
+): boolean {
+  return current.tvgId !== incoming.tvgId
+    || current.name !== incoming.name
+    || current.number !== incoming.number
+    || current.logoUrl !== incoming.logoUrl
+    || current.groupName !== incoming.groupName;
+}
+
 export function stableChannelNumber(current: number | null, incoming: number | null): number | null {
   return current ?? incoming;
 }

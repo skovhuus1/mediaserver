@@ -4,7 +4,10 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const PACKAGE_ID = "com.boltbytes.boltbytes_media";
+const PACKAGE_IDS = {
+  mobile: "com.boltbytes.boltbytes_media",
+  tv: "com.boltbytes.boltbytes_media.tv",
+};
 
 function parseArgs(argv) {
   const values = {};
@@ -49,16 +52,34 @@ function hasRequiredFeature(manifest, name) {
   return tags.some((tag) => tag.includes(`android:name=\"${name}\"`) && tag.includes('android:required="true"'));
 }
 
+export function parseBundleManifest(manifest) {
+  const packageId = manifest.match(/<manifest\b[^>]*\bpackage="([^"]+)"/u)?.[1] ?? null;
+  const versionName = manifest.match(/\b(?:android:)?versionName="([^"]+)"/u)?.[1] ?? null;
+  const versionCode = manifest.match(/\b(?:android:)?versionCode="([^"]+)"/u)?.[1] ?? null;
+  return { packageId, versionName, versionCode };
+}
+
+function hasOptionalFeature(manifest, name) {
+  const tags = manifest.match(/<uses-feature\b[^>]*>/g) ?? [];
+  return tags.some((tag) => tag.includes(`android:name=\"${name}\"`) && tag.includes('android:required="false"'));
+}
+
 function hasMetadataValue(manifest, name, value) {
   const tags = manifest.match(/<meta-data\b[^>]*>/g) ?? [];
   return tags.some((tag) => tag.includes(`android:name=\"${name}\"`) && tag.includes(`android:value=\"${value}\"`));
 }
 
+function hasTvBanner(manifest) {
+  return /android:banner="@(?:drawable\/tv_banner|ref\/0x[0-9a-f]+)"/i.test(manifest);
+}
+
 export function validateArtifactSet({ mobile, tv, aab, expected, allowDebugSigning = false }) {
   const gates = [];
   const gate = (id, passed, detail) => gates.push({ id, passed: Boolean(passed), detail });
-  for (const [variant, artifact] of [["mobile", mobile], ["tv", tv]]) {
-    gate(`${variant}.package`, artifact.packageId === PACKAGE_ID, `${artifact.packageId} == ${PACKAGE_ID}`);
+  const artifacts = [["mobile", mobile], ["tv", tv]].filter(([, artifact]) => Boolean(artifact));
+  for (const [variant, artifact] of artifacts) {
+    const packageId = PACKAGE_IDS[variant];
+    gate(`${variant}.package`, artifact.packageId === packageId, `${artifact.packageId} == ${packageId}`);
     gate(`${variant}.version_name`, artifact.versionName === expected.version, `${artifact.versionName} == ${expected.version}`);
     gate(`${variant}.version_code`, String(artifact.versionCode) === String(expected.buildNumber), `${artifact.versionCode} == ${expected.buildNumber}`);
     gate(`${variant}.certificate`, Boolean(artifact.signing.certificateSha256), "Signing certificate is readable");
@@ -66,18 +87,37 @@ export function validateArtifactSet({ mobile, tv, aab, expected, allowDebugSigni
     gate(`${variant}.release_certificate`, allowDebugSigning || !artifact.signing.debugCertificate, allowDebugSigning ? "Debug certificate explicitly allowed for CI" : "Android Debug certificate is forbidden");
     gate(`${variant}.install_packages`, !artifact.manifest.includes("android.permission.REQUEST_INSTALL_PACKAGES"), "REQUEST_INSTALL_PACKAGES is absent");
   }
-  gate("mobile.launcher", mobile.manifest.includes("android.intent.category.LAUNCHER"), "Mobile exposes the touch launcher");
-  gate("mobile.not_tv_launcher", !mobile.manifest.includes("android.intent.category.LEANBACK_LAUNCHER"), "Mobile does not expose the TV launcher");
-  gate("mobile.cast_provider", mobile.manifest.includes("com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"), "Mobile initializes the Google Cast sender provider");
-  gate("tv.launcher", tv.manifest.includes("android.intent.category.LEANBACK_LAUNCHER"), "TV exposes the Leanback launcher");
-  gate("tv.leanback_required", hasRequiredFeature(tv.manifest, "android.software.leanback"), "TV requires android.software.leanback");
-  gate("tv.impeller_disabled", hasMetadataValue(tv.manifest, "io.flutter.embedding.android.EnableImpeller", "false"), "TV disables Impeller for broad graphics-driver compatibility");
-  gate("tv.no_cast_provider", !tv.manifest.includes("com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"), "TV does not initialize the mobile Cast sender provider");
-  gate("variants.distinct", mobile.sha256 !== tv.sha256, "Mobile and TV APK hashes differ");
-  gate("variants.same_certificate", mobile.signing.certificateSha256 === tv.signing.certificateSha256, "Mobile and TV certificates match");
+  if (mobile) {
+    gate("mobile.launcher", mobile.manifest.includes("android.intent.category.LAUNCHER"), "Mobile exposes the touch launcher");
+    gate("mobile.not_tv_launcher", !mobile.manifest.includes("android.intent.category.LEANBACK_LAUNCHER"), "Mobile does not expose the TV launcher");
+    gate("mobile.cast_provider", mobile.manifest.includes("com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"), "Mobile initializes the Google Cast sender provider");
+  }
+  if (tv) {
+    gate("tv.launcher", tv.manifest.includes("android.intent.category.LEANBACK_LAUNCHER"), "TV exposes the Leanback launcher");
+    gate("tv.leanback_required", hasRequiredFeature(tv.manifest, "android.software.leanback"), "TV requires android.software.leanback");
+    gate("tv.touchscreen_optional", hasOptionalFeature(tv.manifest, "android.hardware.touchscreen"), "TV does not require a touchscreen");
+    gate("tv.banner", hasTvBanner(tv.manifest), "TV exposes its Leanback banner");
+    gate("tv.impeller_disabled", hasMetadataValue(tv.manifest, "io.flutter.embedding.android.EnableImpeller", "false"), "TV disables Impeller for broad graphics-driver compatibility");
+    gate("tv.no_cast_provider", !tv.manifest.includes("com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"), "TV does not initialize the mobile Cast sender provider");
+  }
+  if (mobile && tv) {
+    gate("variants.distinct", mobile.sha256 !== tv.sha256, "Mobile and TV APK hashes differ");
+    gate("variants.same_certificate", mobile.signing.certificateSha256 === tv.signing.certificateSha256, "Mobile and TV certificates match");
+  }
   if (aab) {
+    const apk = mobile ?? tv;
+    const expectedPackageId = PACKAGE_IDS[aab.variant];
     gate("aab.signature", aab.signatureVerified, "AAB JAR signature verified");
-    gate("aab.same_certificate", aab.certificateSha256 === mobile.signing.certificateSha256, "AAB and APK certificates match");
+    gate("aab.same_certificate", aab.certificateSha256 === apk.signing.certificateSha256, "AAB and APK certificates match");
+    gate("aab.package", aab.packageId === expectedPackageId, `${aab.packageId} == ${expectedPackageId}`);
+    gate("aab.version_name", aab.versionName === expected.version, `${aab.versionName} == ${expected.version}`);
+    gate("aab.version_code", String(aab.versionCode) === String(expected.buildNumber), `${aab.versionCode} == ${expected.buildNumber}`);
+    if (aab.variant === "tv") {
+      gate("aab.tv_launcher", aab.manifest.includes("android.intent.category.LEANBACK_LAUNCHER"), "TV AAB exposes the Leanback launcher");
+      gate("aab.tv_leanback_required", hasRequiredFeature(aab.manifest, "android.software.leanback"), "TV AAB requires Leanback");
+      gate("aab.tv_touchscreen_optional", hasOptionalFeature(aab.manifest, "android.hardware.touchscreen"), "TV AAB does not require a touchscreen");
+      gate("aab.tv_banner", hasTvBanner(aab.manifest), "TV AAB exposes its Leanback banner");
+    }
   }
   return { passed: gates.every((entry) => entry.passed), gates };
 }
@@ -107,8 +147,22 @@ function resolveTool(name) {
   if (name === "apksigner" && sdk) {
     for (const directory of versionDirectories(join(sdk, "build-tools"))) candidates.push(join(sdk, "build-tools", directory, executable));
   }
-  if ((name === "keytool" || name === "jarsigner") && javaHome) candidates.push(join(javaHome, "bin", executable));
+  if ((name === "keytool" || name === "jarsigner" || name === "java") && javaHome) candidates.push(join(javaHome, "bin", executable));
   return candidates.find((candidate) => existsSync(candidate)) ?? name;
+}
+
+function resolveBundletoolJar() {
+  if (process.env.BUNDLETOOL_JAR && existsSync(process.env.BUNDLETOOL_JAR)) return process.env.BUNDLETOOL_JAR;
+  const home = process.env.USERPROFILE ?? process.env.HOME;
+  const root = home ? join(home, ".gradle", "caches", "modules-2", "files-2.1", "com.android.tools.build", "bundletool") : null;
+  for (const version of versionDirectories(root)) {
+    const versionRoot = join(root, version);
+    for (const hashDirectory of versionDirectories(versionRoot)) {
+      const candidate = join(versionRoot, hashDirectory, `bundletool-${version}.jar`);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  throw new Error("bundletool.jar was not found; build the AAB before running release evidence");
 }
 
 function run(tool, args) {
@@ -144,22 +198,26 @@ function inspectApk(filePath, variant, tools) {
   };
 }
 
-function inspectAab(filePath, tools) {
-  run(tools.jarsigner, ["-verify", "-strict", filePath]);
+function inspectAab(filePath, variant, tools) {
+  run(tools.jarsigner, ["-verify", filePath]);
+  const manifest = run(tools.java, ["-jar", tools.bundletool, "dump", "manifest", `--bundle=${filePath}`, "--module=base"]);
+  const identity = parseBundleManifest(manifest);
   return {
-    variant: "google-play",
+    variant,
     file: basename(filePath),
     path: filePath,
     bytes: readFileSync(filePath).byteLength,
     sha256: hash(filePath),
     signatureVerified: true,
     certificateSha256: parseKeytoolFingerprint(run(tools.keytool, ["-printcert", "-jarfile", filePath])),
+    manifest,
+    ...identity,
   };
 }
 
-function publicArtifact(artifact, repository, version) {
+function publicArtifact(artifact, repository, releaseTag) {
   const { path: _path, manifest: _manifest, ...fields } = artifact;
-  return { ...fields, downloadUrl: `https://github.com/${repository}/releases/download/android-v${version}/${artifact.file}` };
+  return { ...fields, downloadUrl: `https://github.com/${repository}/releases/download/${releaseTag}/${artifact.file}` };
 }
 
 function evidenceMarkdown(manifest) {
@@ -170,24 +228,28 @@ function evidenceMarkdown(manifest) {
 
 export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  for (const required of ["mobile", "tv", "version", "build-number", "commit", "repository", "output-dir"]) if (!args[required]) throw new Error(`Missing required --${required}`);
-  const mobilePath = resolve(args.mobile);
-  const tvPath = resolve(args.tv);
+  for (const required of ["version", "build-number", "commit", "repository", "output-dir"]) if (!args[required]) throw new Error(`Missing required --${required}`);
+  if (!args.mobile && !args.tv) throw new Error("At least one of --mobile or --tv is required");
+  const mobilePath = args.mobile ? resolve(args.mobile) : null;
+  const tvPath = args.tv ? resolve(args.tv) : null;
   const aabPath = args.aab ? resolve(args.aab) : null;
   for (const filePath of [mobilePath, tvPath, aabPath].filter(Boolean)) if (!existsSync(filePath)) throw new Error(`Artifact does not exist: ${filePath}`);
-  const tools = { apkanalyzer: resolveTool("apkanalyzer"), apksigner: resolveTool("apksigner"), keytool: resolveTool("keytool"), jarsigner: resolveTool("jarsigner") };
-  const mobile = inspectApk(mobilePath, "mobile", tools);
-  const tv = inspectApk(tvPath, "tv", tools);
-  const aab = aabPath ? inspectAab(aabPath, tools) : null;
+  const tools = { apkanalyzer: resolveTool("apkanalyzer"), apksigner: resolveTool("apksigner"), keytool: resolveTool("keytool"), jarsigner: resolveTool("jarsigner"), java: resolveTool("java"), bundletool: aabPath ? resolveBundletoolJar() : null };
+  const mobile = mobilePath ? inspectApk(mobilePath, "mobile", tools) : null;
+  const tv = tvPath ? inspectApk(tvPath, "tv", tools) : null;
+  const aab = aabPath ? inspectAab(aabPath, mobile ? "mobile" : "tv", tools) : null;
   const validation = validateArtifactSet({ mobile, tv, aab, expected: { version: args.version, buildNumber: args["build-number"] }, allowDebugSigning: args["allow-debug-signing"] === "true" });
+  const variant = mobile && tv ? "combined" : mobile ? "mobile" : "tv";
+  const releaseTag = args["release-tag"] ?? (variant === "combined" ? `android-v${args.version}` : `android-${variant}-v${args.version}`);
   const manifest = {
-    schemaVersion: 1,
-    product: "BoltBytes Media Android",
-    packageId: PACKAGE_ID,
+    schemaVersion: 2,
+    product: variant === "combined" ? "BoltBytes Media Android" : `BoltBytes Media ${variant === "tv" ? "TV" : "Mobile"}`,
+    packageIds: Object.fromEntries([["mobile", mobile], ["tv", tv]].filter(([, artifact]) => Boolean(artifact)).map(([name]) => [name, PACKAGE_IDS[name]])),
     generatedAt: new Date().toISOString(),
     version: { name: args.version, buildNumber: Number(args["build-number"]) },
     source: { repository: args.repository, commit: args.commit, ref: process.env.GITHUB_REF ?? null, runId: process.env.GITHUB_RUN_ID ?? null, runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null },
-    artifacts: [mobile, tv, aab].filter(Boolean).map((artifact) => publicArtifact(artifact, args.repository, args.version)),
+    releaseTag,
+    artifacts: [mobile, tv, aab].filter(Boolean).map((artifact) => publicArtifact(artifact, args.repository, releaseTag)),
     validation,
   };
   const outputDirectory = resolve(args["output-dir"]);

@@ -7,17 +7,23 @@ on:
       - "clients/mobile-tv/**"
       - "scripts/android-release-evidence.mjs"
       - "scripts/android-release-evidence.test.mjs"
+      - "scripts/android-version-code.mjs"
+      - "scripts/android-version-code.test.mjs"
       - "scripts/assert-android-shrinker.mjs"
       - ".github/workflows/flutter-client.yml"
-      - ".github/workflows/android-release.yml"
+      - ".github/workflows/android-mobile-release.yml"
+      - ".github/workflows/android-tv-release.yml"
   pull_request:
     paths:
       - "clients/mobile-tv/**"
       - "scripts/android-release-evidence.mjs"
       - "scripts/android-release-evidence.test.mjs"
+      - "scripts/android-version-code.mjs"
+      - "scripts/android-version-code.test.mjs"
       - "scripts/assert-android-shrinker.mjs"
       - ".github/workflows/flutter-client.yml"
-      - ".github/workflows/android-release.yml"
+      - ".github/workflows/android-mobile-release.yml"
+      - ".github/workflows/android-tv-release.yml"
 
 permissions:
   contents: read
@@ -51,18 +57,32 @@ jobs:
         run: flutter analyze
       - name: Test
         run: flutter test
+      - name: Test Android release tooling
+        run: node --test ../../scripts/android-release-evidence.test.mjs ../../scripts/android-version-code.test.mjs
+      - name: Resolve deterministic Android version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version: \([^+]*\).*/\1/p' pubspec.yaml)"
+          build_number="$(node ../../scripts/android-version-code.mjs --version "$version" --attempt "$GITHUB_RUN_ATTEMPT")"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
       - name: Native Android lint
-        run: cd android && ./gradlew --console=plain :app:lintTvRelease
+        run: cd android && ./gradlew --console=plain :app:lintMobileDebug :app:lintTvRelease
       - name: Build mobile flavor
         run: >-
-          flutter build apk --debug --flavor mobile
-          --build-name=0.1.0 --build-number=${{ github.run_number }}
+          flutter build apk --debug --flavor mobile -t lib/main_mobile.dart
+          --build-name="$RELEASE_VERSION" --build-number="$BUILD_NUMBER"
           --dart-define=BB_MEDIA_DEVICE_TYPE=mobile
+          --dart-define=BB_MEDIA_APP_VERSION="$RELEASE_VERSION"
+          --dart-define=BB_MEDIA_DEFAULT_SERVER_URL=https://media.boltbytes.com/api/v1
       - name: Build TV flavor
         run: >-
-          flutter build apk --release --flavor tv
-          --build-name=0.1.0 --build-number=${{ github.run_number }}
+          flutter build apk --release --flavor tv -t lib/main_tv.dart
+          --build-name="$RELEASE_VERSION" --build-number="$BUILD_NUMBER"
           --dart-define=BB_MEDIA_DEVICE_TYPE=tv
+          --dart-define=BB_MEDIA_APP_VERSION="$RELEASE_VERSION"
+          --dart-define=BB_MEDIA_DEFAULT_SERVER_URL=https://media.boltbytes.com/api/v1
       - name: Verify TV release shrinker output
         run: >-
           node ../../scripts/assert-android-shrinker.mjs
@@ -77,8 +97,8 @@ jobs:
           node ../../scripts/android-release-evidence.mjs
           --mobile build/ci-artifacts/boltbytes-media-mobile-debug.apk
           --tv build/ci-artifacts/boltbytes-media-tv-release.apk
-          --version 0.1.0
-          --build-number ${{ github.run_number }}
+          --version "$RELEASE_VERSION"
+          --build-number "$BUILD_NUMBER"
           --commit ${{ github.sha }}
           --repository ${{ github.repository }}
           --output-dir build/release-gate

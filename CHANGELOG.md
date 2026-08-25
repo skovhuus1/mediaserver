@@ -2,9 +2,24 @@
 
 Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versionsnummer i workspaces, lockfil og health-API.
 
-## Unreleased
+## 0.2.13
 
-- Rettet global og gruppebaseret Live TV-kanalsynlighed for kataloger over 50.000 kanaler; scope-opdateringer kører direkte i PostgreSQL med kontrolleret transaktionstid, og adminpanelet viser stabilt layout samt afsluttet status.
+- Flytter store Live TV-synlighedsændringer til annullerbare worker-jobs med progress/resultat og gør M3U-import inkrementel, så identiske kanal- og sourcerækker ikke genskrives.
+
+- Rettet global og gruppebaseret Live TV-kanalsynlighed for kataloger over 50.000 kanaler; scope-opdateringer kører direkte i PostgreSQL med kontrolleret transaktionstid, og adminpanelet viser stabilt layout samt afsluttet status. - 2026-08-24
+
+- Flytter Android TV-undertekster ned i broadcast-safe-zone og erstatter den
+  store mørke boks med hvid tekst, sort outline og responsiv størrelse.
+- Tilføjer profilscopet undertekststil, farve, størrelse, placering og
+  synkroniserings-offset med validering og migration.
+- Skifter TV-kvalitet på den eksisterende Media3-session via native HLS-spor i
+  stedet for at frigive sessionen og genstarte FFmpeg.
+- Tilføjer 30-120 sekunders TV-bufferprofil, native bitrate/buffer/frame-
+  telemetri og en hysterese-baseret Auto-policy med 45 sekunders stabilitetsgate.
+- Bruger TV’ets hardware til opskalering og forhindrer serveren i at generere
+  CPU-tunge renditions over kildens opløsning for Android TV.
+- Viser HLS-startbufferens konkrete segmentfremdrift og sender faktisk kvalitet,
+  båndbredde, dropped frames og stalls til playback-heartbeatet.
 
 ## 0.2.12 - 2026-08-24
 

@@ -7,19 +7,27 @@ import '../app.dart';
 import '../core/api_client.dart';
 import '../core/models.dart';
 import '../core/offline_downloads.dart';
+import '../shared_core/title_contract.dart';
 import 'player_screen.dart';
 
 class TitleScreen extends StatefulWidget {
-  const TitleScreen({required this.api, required this.media, super.key});
+  const TitleScreen({
+    required this.api,
+    required this.media,
+    this.titleContract,
+    super.key,
+  });
 
   final ApiClient api;
   final MediaItem media;
+  final TitleContract? titleContract;
 
   @override
   State<TitleScreen> createState() => _TitleScreenState();
 }
 
 class _TitleScreenState extends State<TitleScreen> {
+  late final TitleContract titleContract;
   TitleExperience? experience;
   bool loading = true;
   String? error;
@@ -32,6 +40,7 @@ class _TitleScreenState extends State<TitleScreen> {
   @override
   void initState() {
     super.initState();
+    titleContract = widget.titleContract ?? TitleUseCase(api: widget.api);
     unawaited(_load());
   }
 
@@ -41,13 +50,8 @@ class _TitleScreenState extends State<TitleScreen> {
       error = null;
     });
     try {
-      final query = season == null ? '' : '?seasonNumber=$season';
-      final responses = await Future.wait([
-        widget.api.getJson('/experience/titles/${widget.media.id}$query'),
-        widget.api.getJson('/playback/history/${widget.media.id}/status'),
-      ]);
-      final next = TitleExperience.fromJson(responses[0]);
-      final status = jsonMap(responses[1]);
+      final payload = await titleContract.loadTitle(widget.media.id);
+      final next = payload.experience;
       if (!mounted) return;
       setState(() {
         experience = next;
@@ -56,8 +60,8 @@ class _TitleScreenState extends State<TitleScreen> {
             next.selectedSeasonNumber ??
             next.seasons.firstOrNull?.number;
         loading = false;
-        inWatchlist = status['inWatchlist'] == true;
-        watched = status['watched'] == true;
+        inWatchlist = payload.inWatchlist;
+        watched = payload.watched;
       });
     } on ApiException catch (failure) {
       if (!mounted) return;
@@ -90,7 +94,11 @@ class _TitleScreenState extends State<TitleScreen> {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
-        builder: (_) => TitleScreen(api: widget.api, media: media),
+        builder: (_) => TitleScreen(
+          api: widget.api,
+          media: media,
+          titleContract: titleContract,
+        ),
       ),
     );
     await _load(selectedSeason);
@@ -100,11 +108,7 @@ class _TitleScreenState extends State<TitleScreen> {
     if (actionBusy) return;
     setState(() => actionBusy = true);
     try {
-      if (inWatchlist) {
-        await widget.api.deleteJson('/playback/watchlist/${widget.media.id}');
-      } else {
-        await widget.api.putJson('/playback/watchlist/${widget.media.id}');
-      }
+      await titleContract.setWatchlist(widget.media.id, included: !inWatchlist);
       if (mounted) {
         setState(() {
           inWatchlist = !inWatchlist;
@@ -125,10 +129,7 @@ class _TitleScreenState extends State<TitleScreen> {
     if (actionBusy) return;
     setState(() => actionBusy = true);
     try {
-      await widget.api.patchJson(
-        '/playback/history/${widget.media.id}/watched',
-        {'watched': !watched},
-      );
+      await titleContract.setWatched(widget.media.id, watched: !watched);
       if (mounted) {
         setState(() {
           watched = !watched;
@@ -527,7 +528,6 @@ class _TitleScreenState extends State<TitleScreen> {
                       selected: selectedSeason == season.number,
                       onPressed: () {
                         setState(() => selectedSeason = season.number);
-                        _load(season.number);
                       },
                     ),
                   ),

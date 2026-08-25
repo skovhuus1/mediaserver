@@ -5,8 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../app.dart';
-import '../core/brand_theme.dart';
 import '../core/models.dart';
+import '../shared_core/ui_tokens/tv_design_tokens.dart';
 import '../state/app_controller.dart';
 import '../widgets/brand.dart';
 
@@ -27,7 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _serverFocus = FocusNode(debugLabel: 'tv-login-server');
   final _serverSwitchFocus = FocusNode(debugLabel: 'tv-login-server-switch');
   final _qrActionFocus = FocusNode(debugLabel: 'tv-login-qr-action');
-  final _manualToggleFocus = FocusNode(debugLabel: 'tv-login-manual-toggle');
+  final _startupRetryFocus = FocusNode(debugLabel: 'tv-login-startup-retry');
   final _emailFocus = FocusNode(debugLabel: 'tv-login-email');
   final _passwordFocus = FocusNode(debugLabel: 'tv-login-password');
   final _loginButtonFocus = FocusNode(debugLabel: 'tv-login-submit');
@@ -35,8 +35,11 @@ class _LoginScreenState extends State<LoginScreen> {
   Timer? _qrPollTimer;
   TvLoginPairing? _tvPairing;
   String? _qrMessage;
+  FocusNode? _tvKeyboardFocus;
+  int _qrPollFailures = 0;
   bool _qrStarting = false;
-  bool _showPasswordLogin = false;
+  bool _manualLoginInFlight = false;
+  bool _tvKeyboardOpen = false;
   bool _showPassword = false;
   bool _editServer = false;
 
@@ -71,7 +74,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _serverFocus,
     _serverSwitchFocus,
     _qrActionFocus,
-    _manualToggleFocus,
+    _startupRetryFocus,
     _emailFocus,
     _passwordFocus,
     _loginButtonFocus,
@@ -79,7 +82,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _focusInitialTvAction() {
     if (!mounted || !useTvLayout(context)) return;
-    (_editServer ? _serverFocus : _qrActionFocus).requestFocus();
+    _emailFocus.requestFocus();
+    unawaited(_startQrLogin());
   }
 
   void _focusAfterBuild(FocusNode node) {
@@ -108,27 +112,43 @@ class _LoginScreenState extends State<LoginScreen> {
     _focusAfterBuild(_serverFocus);
   }
 
-  void _togglePasswordLogin() {
-    setState(() => _showPasswordLogin = !_showPasswordLogin);
-    _focusAfterBuild(_showPasswordLogin ? _emailFocus : _qrActionFocus);
-  }
-
   Future<void> _submit() async {
     _server.text = _normalizeServerInput(_server.text);
     if (!(_form.currentState?.validate() ?? false)) return;
-    await widget.controller.login(
-      email: _email.text.trim(),
-      password: _password.text,
-      requestedServerUrl: _server.text,
-    );
+    final tv = useTvLayout(context);
+    if (tv) {
+      _qrPollTimer?.cancel();
+      setState(() => _manualLoginInFlight = true);
+    }
+    try {
+      await widget.controller.login(
+        email: _email.text.trim(),
+        password: _password.text,
+        requestedServerUrl: _server.text,
+      );
+    } finally {
+      if (mounted && tv) {
+        setState(() => _manualLoginInFlight = false);
+        final pairing = _tvPairing;
+        if (pairing != null && DateTime.now().isBefore(pairing.expiresAt)) {
+          _scheduleQrPoll(const Duration(seconds: 1));
+        } else {
+          _scheduleQrRestart(const Duration(seconds: 1));
+        }
+      }
+    }
   }
 
   Future<void> _startQrLogin() async {
+    if (!mounted || _qrStarting || _manualLoginInFlight) return;
     _server.text = _normalizeServerInput(_server.text);
     final serverError = _validateServerInput(_server.text);
     if (serverError != null) {
-      setState(() => _qrMessage = serverError);
-      _focusAfterBuild(_serverFocus);
+      setState(
+        () => _qrMessage = useTvLayout(context)
+            ? 'QR-login er ikke tilgængeligt lige nu.'
+            : serverError,
+      );
       return;
     }
     _qrPollTimer?.cancel();
@@ -144,18 +164,30 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _qrStarting = false;
       _tvPairing = pairing;
+      _qrPollFailures = 0;
       _qrMessage = pairing == null
-          ? null
+          ? 'QR-login kunne ikke oprettes. Prøver automatisk igen.'
           : 'Scan QR-koden med en mobil eller browser, hvor du allerede er logget ind.';
     });
-    _focusAfterBuild(_qrActionFocus);
     if (pairing != null) {
       _scheduleQrPoll(const Duration(milliseconds: 700));
+    } else {
+      _scheduleQrRestart(const Duration(seconds: 5));
     }
+  }
+
+  void _scheduleQrRestart([Duration delay = const Duration(seconds: 2)]) {
+    _qrPollTimer?.cancel();
+    if (!mounted || _manualLoginInFlight) return;
+    _qrPollTimer = Timer(delay, () {
+      if (!mounted || _manualLoginInFlight) return;
+      _restartQrLogin();
+    });
   }
 
   void _scheduleQrPoll([Duration? delay]) {
     _qrPollTimer?.cancel();
+    if (_manualLoginInFlight) return;
     final pairing = _tvPairing;
     if (pairing == null) return;
     final seconds = pairing.pollIntervalSeconds.clamp(1, 10);
@@ -164,13 +196,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _pollQrLogin() async {
     final pairing = _tvPairing;
-    if (!mounted || pairing == null) return;
+    if (!mounted || pairing == null || _manualLoginInFlight) return;
     if (DateTime.now().isAfter(pairing.expiresAt)) {
       setState(() {
         _tvPairing = null;
-        _qrMessage = 'QR-koden er udløbet. Opret en ny kode.';
+        _qrMessage = 'QR-koden er udløbet. Opretter en ny kode...';
       });
-      _focusAfterBuild(_qrActionFocus);
+      _scheduleQrRestart(const Duration(milliseconds: 500));
       return;
     }
     try {
@@ -184,20 +216,21 @@ class _LoginScreenState extends State<LoginScreen> {
       if (result.isExpired) {
         setState(() {
           _tvPairing = null;
-          _qrMessage = 'QR-koden er udløbet. Opret en ny kode.';
+          _qrMessage = 'QR-koden er udløbet. Opretter en ny kode...';
         });
-        _focusAfterBuild(_qrActionFocus);
+        _scheduleQrRestart(const Duration(milliseconds: 500));
         return;
       }
       if (result.isConsumed) {
         setState(() {
           _tvPairing = null;
-          _qrMessage = 'QR-koden er allerede brugt. Opret en ny kode.';
+          _qrMessage = 'QR-koden er allerede brugt. Opretter en ny kode...';
         });
-        _focusAfterBuild(_qrActionFocus);
+        _scheduleQrRestart(const Duration(milliseconds: 500));
         return;
       }
       setState(() {
+        _qrPollFailures = 0;
         _qrMessage = 'Venter på godkendelse... Kode ${pairing.userCode}.';
       });
       _scheduleQrPoll(
@@ -205,18 +238,62 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } catch (_) {
       if (!mounted) return;
-      setState(() => _qrMessage = 'QR-login fejlede. Opret en ny kode.');
+      _qrPollFailures += 1;
+      if (_qrPollFailures >= 3) {
+        setState(() {
+          _tvPairing = null;
+          _qrMessage = 'Forbindelsen blev afbrudt. Opretter en ny QR-kode...';
+        });
+        _scheduleQrRestart();
+      } else {
+        setState(
+          () => _qrMessage = 'Forbindelsen blev afbrudt. Prøver igen...',
+        );
+        _scheduleQrPoll(const Duration(seconds: 2));
+      }
     }
   }
 
-  void _cancelQrLogin() {
+  void _restartQrLogin() {
+    if (!mounted || _qrStarting || _manualLoginInFlight) return;
     _qrPollTimer?.cancel();
     setState(() {
       _tvPairing = null;
-      _qrMessage = null;
+      _qrMessage = 'Opretter en ny QR-kode...';
       _qrStarting = false;
+      _qrPollFailures = 0;
     });
-    _focusAfterBuild(_qrActionFocus);
+    unawaited(_startQrLogin());
+  }
+
+  Future<void> _retryStartup() async {
+    _qrPollTimer?.cancel();
+    await widget.controller.retryStartup();
+  }
+
+  void _openTvKeyboard(FocusNode node) {
+    if (!mounted || !useTvLayout(context)) return;
+    node.requestFocus();
+    if (!_tvKeyboardOpen || _tvKeyboardFocus != node) {
+      setState(() {
+        _tvKeyboardOpen = true;
+        _tvKeyboardFocus = node;
+      });
+    }
+    unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.show'));
+  }
+
+  void _closeTvKeyboard({FocusNode? nextFocus}) {
+    if (!mounted) return;
+    final target = nextFocus ?? _tvKeyboardFocus ?? _emailFocus;
+    if (_tvKeyboardOpen || _tvKeyboardFocus != null) {
+      setState(() {
+        _tvKeyboardOpen = false;
+        _tvKeyboardFocus = null;
+      });
+    }
+    unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.hide'));
+    _focusAfterBuild(target);
   }
 
   String _normalizeServerInput(String value) {
@@ -265,22 +342,32 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final tv = useTvLayout(context);
-    final showPasswordLogin = !tv || _showPasswordLogin;
     Widget ordered(double order, Widget child) =>
         FocusTraversalOrder(order: NumericFocusOrder(order), child: child);
+    Widget tvEditorShortcuts(FocusNode node, Widget child) {
+      if (!tv) return child;
+      void openKeyboard() => _openTvKeyboard(node);
+      return CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.enter): openKeyboard,
+          const SingleActivator(LogicalKeyboardKey.numpadEnter): openKeyboard,
+          const SingleActivator(LogicalKeyboardKey.select): openKeyboard,
+        },
+        child: child,
+      );
+    }
 
-    final hero = Column(
+    final mobileHero = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         const BrandLockup(),
-        SizedBox(height: tv ? 36 : 36),
+        const SizedBox(height: 36),
         Text(
           'Dit bibliotek.\nPå alle skærme.',
-          style: Theme.of(context).textTheme.displayLarge?.copyWith(
-            fontSize: tv ? 52 : 42,
-            height: 0.95,
-          ),
+          style: Theme.of(
+            context,
+          ).textTheme.displayLarge?.copyWith(fontSize: 42, height: 0.95),
         ),
         const SizedBox(height: 14),
         ConstrainedBox(
@@ -290,208 +377,217 @@ class _LoginScreenState extends State<LoginScreen> {
             style: TextStyle(color: Colors.white60, height: 1.5),
           ),
         ),
-        if (tv) ...[
-          const SizedBox(height: 24),
-          const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.gamepad_outlined, color: BoltColors.primaryBright),
-              SizedBox(width: 10),
-              Text(
-                'Brug pil op/ned og OK på fjernbetjeningen',
-                style: TextStyle(color: Colors.white70),
-              ),
-            ],
-          ),
-        ],
       ],
     );
 
     final controls = ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: tv ? 560 : 460),
+      constraints: BoxConstraints(maxWidth: tv ? 500 : 460),
       child: Form(
         key: _form,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_editServer)
-              ordered(
-                1,
-                TextFormField(
-                  controller: _server,
-                  focusNode: _serverFocus,
-                  autofocus: false,
-                  textInputAction: TextInputAction.next,
-                  keyboardType: TextInputType.text,
-                  autocorrect: false,
-                  textCapitalization: TextCapitalization.none,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.deny(RegExp(r'\s')),
+        child: Container(
+          padding: tv ? const EdgeInsets.all(22) : EdgeInsets.zero,
+          decoration: tv
+              ? BoxDecoration(
+                  color: TvDesignTokens.surfaceGlass,
+                  borderRadius: BorderRadius.circular(
+                    TvDesignTokens.panelRadius,
+                  ),
+                  border: Border.all(color: TvDesignTokens.panelBorderSoft),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x99000000),
+                      blurRadius: 34,
+                      offset: Offset(0, 18),
+                    ),
                   ],
-                  decoration: const InputDecoration(
-                    labelText: 'Server',
-                    hintText: 'fx media.boltbytes.com:6555',
-                    prefixIcon: Icon(Icons.dns_outlined),
-                    helperText: 'Du kan indsætte https://... direkte.',
+                )
+              : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!tv && _editServer)
+                ordered(
+                  1,
+                  TextFormField(
+                    controller: _server,
+                    focusNode: _serverFocus,
+                    autofocus: false,
+                    textInputAction: TextInputAction.next,
+                    keyboardType: TextInputType.text,
+                    autocorrect: false,
+                    textCapitalization: TextCapitalization.none,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Server',
+                      hintText: 'fx media.boltbytes.com:6555',
+                      prefixIcon: Icon(Icons.dns_outlined),
+                      helperText: 'Du kan indsætte https://... direkte.',
+                    ),
+                    validator: _validateServerInput,
+                    onFieldSubmitted: (_) => _emailFocus.requestFocus(),
                   ),
-                  validator: _validateServerInput,
-                  onFieldSubmitted: (_) =>
-                      (tv ? _qrActionFocus : _emailFocus).requestFocus(),
                 ),
-              ),
-            if (!_editServer)
-              ordered(
-                1,
-                _TvFocusFrame(
-                  focusNode: _serverSwitchFocus,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF11171E),
-                      border: Border.all(color: const Color(0xFF29323D)),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.verified_user_outlined),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'BoltBytes-server',
-                                style: TextStyle(fontWeight: FontWeight.w800),
-                              ),
-                              Text(
-                                _server.text,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white60),
-                              ),
-                            ],
+              if (!tv && !_editServer)
+                ordered(
+                  1,
+                  _TvFocusFrame(
+                    focusNode: _serverSwitchFocus,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF11171E),
+                        border: Border.all(color: const Color(0xFF29323D)),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.verified_user_outlined),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'BoltBytes-server',
+                                  style: TextStyle(fontWeight: FontWeight.w800),
+                                ),
+                                Text(
+                                  _server.text,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: Colors.white60),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        TextButton(
-                          focusNode: _serverSwitchFocus,
-                          onPressed: _editServerAddress,
-                          child: const Text('Skift'),
-                        ),
-                      ],
+                          TextButton(
+                            focusNode: _serverSwitchFocus,
+                            onPressed: _editServerAddress,
+                            child: const Text('Skift'),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            if (tv) ...[
-              const SizedBox(height: 18),
+              if (tv) ...[
+                Text(
+                  'Log ind med e-mail',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(height: 7),
+                const Text(
+                  'Log ind med e-mail og adgangskode, eller scan QR-koden til højre. Serveren er låst for TV.',
+                  style: TextStyle(
+                    color: TvDesignTokens.textMuted,
+                    height: 1.35,
+                    fontSize: 13.5,
+                  ),
+                ),
+                const SizedBox(height: 18),
+              ] else
+                const SizedBox(height: 14),
               ordered(
-                2,
-                _TvFocusFrame(
-                  focusNode: _qrActionFocus,
-                  child: _TvQrLoginPanel(
-                    pairing: _tvPairing,
-                    starting: _qrStarting || widget.controller.busy,
-                    message: _qrMessage,
-                    error: widget.controller.error,
-                    actionFocusNode: _qrActionFocus,
-                    onStart: _startQrLogin,
-                    onCancel: _cancelQrLogin,
+                tv ? 1 : 2,
+                tvEditorShortcuts(
+                  _emailFocus,
+                  TextFormField(
+                    controller: _email,
+                    focusNode: _emailFocus,
+                    autofocus: !tv,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    onTap: tv ? () => _openTvKeyboard(_emailFocus) : null,
+                    onFieldSubmitted: (_) => tv
+                        ? _openTvKeyboard(_passwordFocus)
+                        : _passwordFocus.requestFocus(),
+                    autofillHints: const [AutofillHints.email],
+                    decoration: const InputDecoration(
+                      labelText: 'E-mail',
+                      prefixIcon: Icon(Icons.alternate_email),
+                    ),
+                    validator: (value) {
+                      final raw = value?.trim() ?? '';
+                      if (raw.isEmpty) return 'Indtast din e-mail.';
+                      if (_isUrlLike(raw)) {
+                        return 'Indtast kun e-mail, ikke URL.';
+                      }
+                      return raw.contains('@')
+                          ? null
+                          : 'Indtast en gyldig e-mail.';
+                    },
                   ),
                 ),
               ),
               const SizedBox(height: 12),
               ordered(
-                3,
-                _TvFocusFrame(
-                  focusNode: _manualToggleFocus,
-                  child: TextButton.icon(
-                    focusNode: _manualToggleFocus,
-                    onPressed: _togglePasswordLogin,
-                    icon: Icon(
-                      _showPasswordLogin
-                          ? Icons.qr_code_2_outlined
-                          : Icons.keyboard_outlined,
-                    ),
-                    label: Text(
-                      _showPasswordLogin
-                          ? 'Brug QR-login i stedet'
-                          : 'Log ind med e-mail og adgangskode',
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            if (showPasswordLogin) ...[
-              const SizedBox(height: 14),
-              ordered(
-                4,
-                TextFormField(
-                  controller: _email,
-                  focusNode: _emailFocus,
-                  autofocus: !tv,
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
-                  autofillHints: const [AutofillHints.email],
-                  decoration: const InputDecoration(
-                    labelText: 'E-mail',
-                    prefixIcon: Icon(Icons.alternate_email),
-                  ),
-                  validator: (value) {
-                    if (!showPasswordLogin) return null;
-                    final raw = value?.trim() ?? '';
-                    if (raw.isEmpty) return 'Indtast din e-mail.';
-                    if (_isUrlLike(raw)) {
-                      return 'Indtast kun e-mail, ikke URL.';
-                    }
-                    return raw.contains('@')
-                        ? null
-                        : 'Indtast en gyldig e-mail.';
-                  },
-                ),
-              ),
-              const SizedBox(height: 14),
-              ordered(
-                5,
-                TextFormField(
-                  controller: _password,
-                  focusNode: _passwordFocus,
-                  obscureText: !_showPassword,
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) => _submit(),
-                  autofillHints: const [AutofillHints.password],
-                  decoration: InputDecoration(
-                    labelText: 'Adgangskode',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    suffixIcon: IconButton(
-                      onPressed: () =>
-                          setState(() => _showPassword = !_showPassword),
-                      icon: Icon(
-                        _showPassword ? Icons.visibility_off : Icons.visibility,
+                tv ? 2 : 3,
+                tvEditorShortcuts(
+                  _passwordFocus,
+                  TextFormField(
+                    controller: _password,
+                    focusNode: _passwordFocus,
+                    obscureText: !_showPassword,
+                    textInputAction: TextInputAction.done,
+                    onTap: tv ? () => _openTvKeyboard(_passwordFocus) : null,
+                    onFieldSubmitted: (_) {
+                      if (tv) _closeTvKeyboard(nextFocus: _passwordFocus);
+                      unawaited(_submit());
+                    },
+                    autofillHints: const [AutofillHints.password],
+                    decoration: InputDecoration(
+                      labelText: 'Adgangskode',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      suffixIcon: ExcludeFocus(
+                        excluding: tv,
+                        child: IconButton(
+                          onPressed: () =>
+                              setState(() => _showPassword = !_showPassword),
+                          icon: Icon(
+                            _showPassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  validator: (value) {
-                    if (!showPasswordLogin) return null;
-                    return value == null || value.isEmpty
+                    validator: (value) => value == null || value.isEmpty
                         ? 'Indtast adgangskoden.'
-                        : null;
-                  },
+                        : null,
+                  ),
                 ),
               ),
-            ],
-            if (widget.controller.error != null) ...[
-              const SizedBox(height: 14),
-              _ErrorMessage(widget.controller.error!),
-            ],
-            if (showPasswordLogin) ...[
-              const SizedBox(height: 20),
+              if (widget.controller.visibleError != null) ...[
+                const SizedBox(height: 14),
+                _ErrorMessage(widget.controller.visibleError!),
+              ],
+              if (widget.controller.canRetryStartup) ...[
+                const SizedBox(height: 12),
+                ordered(
+                  tv ? 4 : 5,
+                  _TvFocusFrame(
+                    focusNode: _startupRetryFocus,
+                    child: OutlinedButton.icon(
+                      focusNode: _startupRetryFocus,
+                      onPressed: widget.controller.busy ? null : _retryStartup,
+                      icon: const Icon(Icons.refresh_outlined),
+                      label: const Text('Prøv igen'),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
               ordered(
-                6,
+                tv ? 3 : 4,
                 _TvFocusFrame(
                   focusNode: _loginButtonFocus,
                   child: FilledButton.icon(
@@ -504,34 +600,52 @@ class _LoginScreenState extends State<LoginScreen> {
                           )
                         : const Icon(Icons.login),
                     label: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 14),
+                      padding: EdgeInsets.symmetric(vertical: 12),
                       child: Text('Log ind'),
                     ),
                   ),
                 ),
               ),
             ],
-          ],
+          ),
         ),
       ),
     );
 
-    final tvControls = CallbackShortcuts(
+    final qrPanel = ordered(
+      5,
+      _TvFocusFrame(
+        focusNode: _qrActionFocus,
+        child: _TvQrLoginPanel(
+          pairing: _tvPairing,
+          starting:
+              _qrStarting || _manualLoginInFlight || widget.controller.busy,
+          message: _qrMessage,
+          error: widget.controller.visibleError,
+          actionFocusNode: _qrActionFocus,
+          onRefresh: _restartQrLogin,
+        ),
+      ),
+    );
+
+    Widget tvTraversal(Widget child) => CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.arrowDown): () {
+          if (_tvKeyboardOpen) return;
           FocusScope.of(context).nextFocus();
         },
         const SingleActivator(LogicalKeyboardKey.arrowUp): () {
+          if (_tvKeyboardOpen) return;
           FocusScope.of(context).previousFocus();
         },
       },
       child: FocusTraversalGroup(
         policy: OrderedTraversalPolicy(),
-        child: controls,
+        child: child,
       ),
     );
 
-    return Scaffold(
+    final screen = Scaffold(
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -542,53 +656,71 @@ class _LoginScreenState extends State<LoginScreen> {
                     builder: (context, constraints) {
                       // Android TV commonly reports 960 logical pixels on a
                       // 1920px panel. Use the TV-sized logical breakpoint so
-                      // the brand and QR controls stay visible together.
-                      final wide = constraints.maxWidth >= 900 && !_editServer;
+                      // both login methods stay visible together.
+                      final wide = constraints.maxWidth >= 900;
                       final horizontal = constraints.maxWidth >= 1500
-                          ? 72.0
-                          : 36.0;
+                          ? 64.0
+                          : 32.0;
                       final vertical = constraints.maxHeight >= 800
-                          ? 36.0
-                          : 20.0;
+                          ? 30.0
+                          : 18.0;
                       final panelWidth = (constraints.maxWidth * 0.46)
-                          .clamp(440.0, 580.0)
+                          .clamp(410.0, 540.0)
                           .toDouble();
                       if (!wide) {
-                        return SingleChildScrollView(
-                          controller: _tvControlsScroll,
+                        return tvTraversal(
+                          SingleChildScrollView(
+                            controller: _tvControlsScroll,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: horizontal,
+                              vertical: vertical,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const BrandLockup(),
+                                const SizedBox(height: 28),
+                                controls,
+                                const SizedBox(height: 28),
+                                qrPanel,
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+                      return tvTraversal(
+                        Padding(
                           padding: EdgeInsets.symmetric(
                             horizontal: horizontal,
                             vertical: vertical,
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              hero,
-                              const SizedBox(height: 28),
-                              tvControls,
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  controller: _tvControlsScroll,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const BrandLockup(),
+                                      const SizedBox(height: 28),
+                                      controls,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 42),
+                              SizedBox(
+                                width: panelWidth,
+                                height: constraints.maxHeight - (vertical * 2),
+                                child: Center(
+                                  child: SingleChildScrollView(child: qrPanel),
+                                ),
+                              ),
                             ],
                           ),
-                        );
-                      }
-                      return Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: horizontal,
-                          vertical: vertical,
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(child: hero),
-                            const SizedBox(width: 42),
-                            SizedBox(
-                              width: panelWidth,
-                              height: constraints.maxHeight - (vertical * 2),
-                              child: SingleChildScrollView(
-                                controller: _tvControlsScroll,
-                                child: tvControls,
-                              ),
-                            ),
-                          ],
                         ),
                       );
                     },
@@ -602,13 +734,25 @@ class _LoginScreenState extends State<LoginScreen> {
                       alignment: Alignment.centerLeft,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [hero, const SizedBox(height: 28), controls],
+                        children: [
+                          mobileHero,
+                          const SizedBox(height: 28),
+                          controls,
+                        ],
                       ),
                     ),
                   ),
           ),
         ],
       ),
+    );
+    if (!tv) return screen;
+    return PopScope(
+      canPop: !_tvKeyboardOpen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _tvKeyboardOpen) _closeTvKeyboard();
+      },
+      child: screen,
     );
   }
 }
@@ -620,8 +764,7 @@ class _TvQrLoginPanel extends StatelessWidget {
     required this.message,
     required this.error,
     required this.actionFocusNode,
-    required this.onStart,
-    required this.onCancel,
+    required this.onRefresh,
   });
 
   final TvLoginPairing? pairing;
@@ -629,8 +772,7 @@ class _TvQrLoginPanel extends StatelessWidget {
   final String? message;
   final String? error;
   final FocusNode actionFocusNode;
-  final VoidCallback onStart;
-  final VoidCallback onCancel;
+  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -638,14 +780,18 @@ class _TvQrLoginPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F151D),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFF263241)),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xEE121820), Color(0xE8090B0E)],
+        ),
+        borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
+        border: Border.all(color: TvDesignTokens.panelBorderSoft),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x66000000),
-            blurRadius: 28,
-            offset: Offset(0, 16),
+            color: Color(0x99000000),
+            blurRadius: 36,
+            offset: Offset(0, 18),
           ),
         ],
       ),
@@ -654,14 +800,11 @@ class _TvQrLoginPanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.qr_code_2_outlined,
-                color: BoltColors.primaryBright,
-              ),
+              const Icon(Icons.qr_code_2_outlined, color: TvDesignTokens.cyan),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'TV-login med QR',
+                  'Log ind med QR-kode',
                   style: Theme.of(
                     context,
                   ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
@@ -670,34 +813,63 @@ class _TvQrLoginPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          if (activePairing == null)
-            FilledButton.icon(
-              focusNode: actionFocusNode,
-              onPressed: starting ? null : onStart,
-              icon: starting
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.qr_code_scanner_outlined),
-              label: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 14),
-                child: Text('Vis QR-kode'),
+          if (activePairing == null) ...[
+            Center(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(
+                    TvDesignTokens.panelRadius,
+                  ),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: SizedBox.square(
+                  dimension: MediaQuery.sizeOf(context).height < 800
+                      ? 156
+                      : 188,
+                  child: Center(
+                    child: starting
+                        ? const CircularProgressIndicator()
+                        : const Icon(
+                            Icons.qr_code_2_outlined,
+                            size: 72,
+                            color: Colors.white24,
+                          ),
+                  ),
+                ),
               ),
-            )
-          else ...[
+            ),
+            if (!starting) ...[
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                focusNode: actionFocusNode,
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh_outlined),
+                label: const Text('Prøv igen'),
+              ),
+            ],
+          ] else ...[
             Center(
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(22),
+                  borderRadius: BorderRadius.circular(
+                    TvDesignTokens.panelRadius,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x558EDCFF),
+                      blurRadius: 28,
+                      offset: Offset(0, 10),
+                    ),
+                  ],
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(10),
                   child: QrImageView(
                     data: activePairing.approveUrl,
                     version: QrVersions.auto,
-                    size: MediaQuery.sizeOf(context).height < 800 ? 168 : 220,
+                    size: MediaQuery.sizeOf(context).height < 800 ? 150 : 184,
                     eyeStyle: const QrEyeStyle(
                       eyeShape: QrEyeShape.square,
                       color: Color(0xFF071018),
@@ -715,8 +887,9 @@ class _TvQrLoginPanel extends StatelessWidget {
               child: SelectableText(
                 activePairing.userCode,
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  color: BoltColors.primaryBright,
-                  letterSpacing: 4,
+                  color: TvDesignTokens.goldSoft,
+                  fontSize: 22,
+                  letterSpacing: 3,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -730,9 +903,9 @@ class _TvQrLoginPanel extends StatelessWidget {
             const SizedBox(height: 14),
             OutlinedButton.icon(
               focusNode: actionFocusNode,
-              onPressed: onCancel,
+              onPressed: starting ? null : onRefresh,
               icon: const Icon(Icons.refresh_outlined),
-              label: const Text('Opret ny kode'),
+              label: const Text('Ny QR-kode'),
             ),
           ],
           if ((message ?? '').isNotEmpty) ...[
@@ -777,16 +950,18 @@ class _TvFocusFrame extends StatelessWidget {
       duration: const Duration(milliseconds: 140),
       curve: Curves.easeOut,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius + 6),
         border: Border.all(
-          color: focusNode.hasFocus ? BoltColors.focus : Colors.transparent,
-          width: 3,
+          color: focusNode.hasFocus
+              ? TvDesignTokens.goldSoft
+              : Colors.transparent,
+          width: 2,
         ),
         boxShadow: focusNode.hasFocus
             ? const [
                 BoxShadow(
-                  color: Color(0x554EA1FF),
-                  blurRadius: 22,
+                  color: Color(0x66F7C35F),
+                  blurRadius: 24,
                   spreadRadius: 1,
                 ),
               ]
@@ -908,16 +1083,53 @@ class _AuthBackdrop extends StatelessWidget {
   const _AuthBackdrop();
 
   @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: const BoxDecoration(
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF080C11), Color(0xFF111B23), Color(0xFF201331)],
-        stops: [0, 0.62, 1],
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
+    children: [
+      const DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              TvDesignTokens.background,
+              Color(0xFF071018),
+              Color(0xFF130F08),
+            ],
+            stops: [0, 0.58, 1],
+          ),
+        ),
       ),
-    ),
-    child: CustomPaint(painter: _GridPainter()),
+      Positioned(
+        top: -260,
+        right: -180,
+        child: Container(
+          width: 660,
+          height: 660,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [Color(0x264EA1FF), Color(0x00000000)],
+            ),
+          ),
+        ),
+      ),
+      Positioned(
+        bottom: -280,
+        left: -140,
+        child: Container(
+          width: 620,
+          height: 620,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [Color(0x24F7C35F), Color(0x00000000)],
+            ),
+          ),
+        ),
+      ),
+      CustomPaint(painter: _GridPainter()),
+    ],
   );
 }
 

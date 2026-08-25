@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.12**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.3.0**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -30,6 +30,25 @@ Ethernet-TV uden Wi-Fi-krav, eksplicit no-backup af tokens/offline-nøgler og de
 Android-regler for dynamiske updater-receivere og eksporterede Leanback activities.
 Gradles Linux- og Windows-wrappers samt wrapper-JAR er versionsstyrede, så den samme
 native lint- og release-kæde kan køres reproducerbart lokalt og på GitHub Actions.
+
+### Android TV-player, buffer og undertekster
+
+Fra `0.2.13` bruger TV-playeren Media3-sporvalg direkte på den aktive HLS-session.
+Auto og faste kvaliteter opretter derfor ikke en ny playback-session og genstarter
+ikke FFmpeg. Auto starter konservativt, kræver 45 sekunders stabil afspilning,
+30 sekunders buffer og 1,5 gange bitrate i målt båndbredde før opjustering og
+bruger 120 sekunders cooldown efter rebuffer.
+
+TV-bufferprofilen holder 30-120 sekunder fremad og 30 sekunder bagud. Adminens
+playbacktelemetri modtager aktuel rendition, bitrate, buffer, båndbredde, dropped
+frames og stalls fra den native player. HLS-forberedelsen viser samtidig antallet
+af klarlagte startsegmenter i stedet for kun en ubestemt FFmpeg-status.
+
+Android TV annoncerer `upscaleMode=device`, så serveren aldrig softwareopskalerer
+over kildens opløsning. TV’ets hardware skalerer billedet til panelet uden ekstra
+FFmpeg-belastning. Tekstundertekster vises som standard lavt i safe-zone med hvid
+tekst, sort outline og uden boks; stil, farve, størrelse, placering og timing gemmes
+pr. profil under klientens indstillinger.
 
 ## Live TV fra M3U
 
@@ -205,7 +224,7 @@ Arbejdet laves på **agent/...** branches. Hver færdig leverance skal have opda
 
 Alle releases bruger ét SemVer-nummer. Sæt næste version med `npm run version:set -- 0.2.1`, opdater `CHANGELOG.md`, og kør `npm run version:check`; CI afviser versionsdrift mellem pakker, lockfil og health-API.
 
-Android-releases bygges som separate `mobile`- og `tv`-flavors. Produktionsworkflowet udgiver APK/AAB sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk mobil-, TV- og Cast-certificering forbliver en særskilt releasegate.
+Android-releases bygges som separate `mobile`- og `tv`-flavors. TV-produktionsworkflowet udgiver den signerede APK sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk TV-certificering forbliver en særskilt releasegate.
 
 TV-klienten bruger en blå BoltBytes-shell med synligt logo, kompakte mediekort og én samlet D-pad-model. TV-login har QR som primær handling, serievisningen viser sæsoner og alle afsnit, og Live TV-klienten bruger serverens guide-, favorit-, forbindelsespulje-, heartbeat- og kanalskiftkontrakter. E-mail-login er en eksplicit fallback og kræver ikke, at brugeren kan pege eller swipe på skærmen.
 
@@ -229,3 +248,8 @@ Licens er ikke fastlagt i repositoryet. Tilføj en licensfil, før projektet dis
 - Vis alle og Skjul alle arbejder på hele kontoens katalog direkte i PostgreSQL og er ikke begrænset af den valgte side eller 50.000-kanalsgrænsen for manuel UUID-bulkmarkering.
 - Gruppevisning kan ændres uden at indlæse alle kanal-id'er i API-processens hukommelse. Skjulning frigiver berørte aktive streams, annullerer berørte optagelser og skriver resultatet til auditloggen atomisk.
 - Adminpanelet holder globale handlinger, gruppehandlinger og manuel markering i separate responsive rækker og viser både igangværende status og afsluttet antal.
+### Durable Live TV-vedligeholdelsesjobs
+
+- Globale og gruppebaserede synlighedsændringer oprettes som live-tv.channel-visibility-jobs. Jobbet leases af workeren, deduplikeres pr. scope og handling, kan annulleres og udfører kanalændring, streamfrigivelse, optagelsesannullering og audit atomisk.
+- GET /api/v1/live-tv/admin/jobs returnerer progress, seneste fejl, varighed og et vedvarende resultat. Adminpanelets Opgaver-række opdateres hvert andet sekund og viser antal ændrede kanaler eller M3U-importens nye, ændrede, uændrede og deaktiverede sources.
+- M3U-importen springer identiske kanalmetadata og sourcerækker over. Manglende sources deaktiveres fortsat i afgrænsede batches, og afsluttende importstatistik gemmes både i job-payloaden og auditloggen.

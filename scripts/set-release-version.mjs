@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { computeAndroidVersionCode } from './android-version-code.mjs';
 
 const version = process.argv[2];
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('Brug: npm run version:set -- <major.minor.patch>');
@@ -35,9 +36,13 @@ const flutterVersionMatch = flutterManifest.match(/^version:\s*([^+\s]+)(?:\+(\d
 if (!flutterVersionMatch) throw new Error('clients/mobile-tv/pubspec.yaml mangler et gyldigt version-felt');
 const currentFlutterVersion = flutterVersionMatch[1];
 const currentBuildNumber = Number.parseInt(flutterVersionMatch[2] ?? '0', 10);
-const nextBuildNumber = currentFlutterVersion === version
-  ? Math.max(1, currentBuildNumber)
+const stableAndroidVersion = /^\d+\.\d+\.\d+$/u.test(version);
+const deterministicBuildNumber = stableAndroidVersion
+  ? computeAndroidVersionCode(version, 1)
   : Math.max(1, currentBuildNumber + 1);
+const nextBuildNumber = currentFlutterVersion === version
+  ? Math.max(deterministicBuildNumber, currentBuildNumber)
+  : deterministicBuildNumber;
 await writeFile(
   flutterManifestPath,
   flutterManifest.replace(

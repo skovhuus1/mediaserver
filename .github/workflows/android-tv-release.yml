@@ -1,0 +1,117 @@
+name: Android TV release
+
+on:
+  push:
+    tags: ["android-tv-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver without the android-tv-v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: android-tv-release-${{ github.ref }}-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      FIREBASE_DART_DEFINES_BASE64: ${{ secrets.FIREBASE_TV_DART_DEFINES_BASE64 }}
+      BB_MEDIA_DEFAULT_SERVER_URL: ${{ vars.BB_MEDIA_DEFAULT_SERVER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate release source and configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "Release commit must be contained in origin/main." >&2; exit 1; }
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF_NAME" != "main" ]]; then echo "Manual releases must run from main." >&2; exit 1; fi
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then version="${GITHUB_REF_NAME#android-tv-v}"; else version="${{ inputs.version }}"; fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid stable semver: $version" >&2; exit 1; }
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD FIREBASE_DART_DEFINES_BASE64 BB_MEDIA_DEFAULT_SERVER_URL; do [[ -n "${!name:-}" ]] || { echo "Missing release configuration: $name" >&2; exit 1; }; done
+          [[ "$BB_MEDIA_DEFAULT_SERVER_URL" == "https://media.boltbytes.com/api/v1" ]] || { echo "TV release server must be https://media.boltbytes.com/api/v1" >&2; exit 1; }
+          release_tag="android-tv-v$version"
+          if gh release view "$release_tag" >/dev/null 2>&1; then echo "Release $release_tag already exists." >&2; exit 1; fi
+          previous_tag="$(git tag --list 'android-tv-v*' --sort=-v:refname | grep -E '^android-tv-v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vxF "$release_tag" | head -n 1 || true)"
+          version_args=(--version "$version" --attempt "$GITHUB_RUN_ATTEMPT")
+          if [[ -n "$previous_tag" ]]; then version_args+=(--previous-version "${previous_tag#android-tv-v}"); fi
+          build_number="$(node scripts/android-version-code.mjs "${version_args[@]}")"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Materialize protected build configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/boltbytes-release.jks"
+          printf '%s' "$FIREBASE_DART_DEFINES_BASE64" | base64 --decode > "$RUNNER_TEMP/tv-firebase-defines.json"
+          chmod 600 "$RUNNER_TEMP/boltbytes-release.jks" "$RUNNER_TEMP/tv-firebase-defines.json"
+          node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); for (const key of ["BB_MEDIA_FIREBASE_API_KEY","BB_MEDIA_FIREBASE_APP_ID","BB_MEDIA_FIREBASE_MESSAGING_SENDER_ID","BB_MEDIA_FIREBASE_PROJECT_ID"]) if (!value[key]) throw new Error(`Missing Firebase define: ${key}`);' "$RUNNER_TEMP/tv-firebase-defines.json"
+          echo "BB_MEDIA_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/boltbytes-release.jks" >> "$GITHUB_ENV"
+          echo "BB_MEDIA_ANDROID_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "BB_MEDIA_ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "BB_MEDIA_ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+          echo "BB_MEDIA_REQUIRE_PRODUCTION_SIGNING=true" >> "$GITHUB_ENV"
+      - name: Resolve, analyze and test Flutter client
+        working-directory: clients/mobile-tv
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+      - name: Test Android release tooling
+        run: node --test scripts/android-release-evidence.test.mjs scripts/android-version-code.test.mjs
+      - name: Build signed TV APK
+        working-directory: clients/mobile-tv
+        run: |
+          flutter build apk --release --flavor tv -t lib/main_tv.dart --build-name="$RELEASE_VERSION" --build-number="$BUILD_NUMBER" --dart-define-from-file="$RUNNER_TEMP/tv-firebase-defines.json" --dart-define=BB_MEDIA_DEVICE_TYPE=tv --dart-define=BB_MEDIA_APP_VERSION="$RELEASE_VERSION" --dart-define=BB_MEDIA_DEFAULT_SERVER_URL="$BB_MEDIA_DEFAULT_SERVER_URL"
+      - name: Certify artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp clients/mobile-tv/build/app/outputs/flutter-apk/app-tv-release.apk release/boltbytes-media-tv-release.apk
+          node scripts/android-release-evidence.mjs --tv release/boltbytes-media-tv-release.apk --version "$RELEASE_VERSION" --build-number "$BUILD_NUMBER" --commit "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" --release-tag "$RELEASE_TAG" --output-dir release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boltbytes-android-tv-${{ env.RELEASE_VERSION }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/attest@v4
+        with:
+          subject-path: release/*
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release create "$RELEASE_TAG" release/* --target "$GITHUB_SHA" --title "BoltBytes Media TV $RELEASE_VERSION" --notes "Certified Android TV release from $GITHUB_SHA"
+      - name: Remove protected files
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/boltbytes-release.jks" "$RUNNER_TEMP/tv-firebase-defines.json"

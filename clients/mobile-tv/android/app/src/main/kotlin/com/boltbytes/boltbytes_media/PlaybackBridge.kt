@@ -20,6 +20,7 @@ class PlaybackBridge(
     private var eventSink: EventChannel.EventSink? = null
     private var active = false
     private var playing = false
+    private var keepScreenOnRequested = false
     private var allowPictureInPicture = false
     private var videoWidth = 16
     private var videoHeight = 9
@@ -44,7 +45,8 @@ class PlaybackBridge(
                 allowPictureInPicture = call.argument<Boolean>("allowPictureInPicture") == true
                 videoWidth = (call.argument<Number>("videoWidth")?.toInt() ?: 16).coerceAtLeast(1)
                 videoHeight = (call.argument<Number>("videoHeight")?.toInt() ?: 9).coerceAtLeast(1)
-                activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                keepScreenOnRequested = true
+                applyKeepScreenOn()
                 updatePictureInPictureParams()
                 MediaPlaybackService.update(
                     activity,
@@ -65,10 +67,16 @@ class PlaybackBridge(
             "clear" -> {
                 active = false
                 playing = false
+                keepScreenOnRequested = false
                 allowPictureInPicture = false
-                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                applyKeepScreenOn()
                 MediaPlaybackService.stop(activity)
                 updatePictureInPictureParams()
+                result.success(null)
+            }
+            "setKeepScreenOn" -> {
+                keepScreenOnRequested = call.arguments == true
+                applyKeepScreenOn()
                 result.success(null)
             }
             else -> result.notImplemented()
@@ -79,6 +87,10 @@ class PlaybackBridge(
         if (active && playing && allowPictureInPicture && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             enterPictureInPicture()
         }
+    }
+
+    fun reapplyKeepScreenOn() {
+        applyKeepScreenOn()
     }
 
     fun pictureInPictureChanged(inPictureInPicture: Boolean) {
@@ -105,6 +117,16 @@ class PlaybackBridge(
                 .setSeamlessResizeEnabled(true)
         }
         activity.setPictureInPictureParams(builder.build())
+    }
+
+    private fun applyKeepScreenOn() {
+        val enabled = active || keepScreenOnRequested
+        if (enabled) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        activity.window.decorView.keepScreenOn = enabled
     }
 
     private fun enterPictureInPicture(): Boolean {

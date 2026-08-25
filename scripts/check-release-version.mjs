@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { computeAndroidVersionCode } from './android-version-code.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifests = ['package.json', 'services/api/package.json', 'services/worker/package.json', 'web/admin/package.json', 'shared/contracts/package.json'];
@@ -23,6 +24,10 @@ if (!flutterVersionMatch) {
 } else {
   if (flutterVersionMatch[1] !== version) errors.push(`Flutter-klienten har ${flutterVersionMatch[1]}, forventede ${version}`);
   if (!/^\d+$/u.test(flutterVersionMatch[2] ?? '') || Number(flutterVersionMatch[2]) < 1) errors.push('Flutter-klienten mangler et positivt Android buildnummer');
+  if (/^\d+\.\d+\.\d+$/u.test(version)) {
+    const expectedBuildNumber = computeAndroidVersionCode(version, 1);
+    if (Number(flutterVersionMatch[2]) !== expectedBuildNumber) errors.push(`Flutter-klienten har Android buildnummer ${flutterVersionMatch[2]}, forventede ${expectedBuildNumber}`);
+  }
 }
 const readme = await readFile(resolve(root, 'README.md'), 'utf8');
 if (!readme.includes(`Aktuel release: **${version}**`)) errors.push(`README.md viser ikke aktuel release ${version}`);

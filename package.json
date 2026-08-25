@@ -1,6 +1,6 @@
 {
   "name": "boltbytes-media-server",
-  "version": "0.2.12",
+  "version": "0.3.0",
   "private": true,
   "engines": {
     "node": ">=22 <23",
@@ -20,7 +20,7 @@
     "lint": "eslint services/api/src services/api/test services/worker/src services/worker/test web/admin/src shared/contracts/src --ext .ts,.tsx",
     "typecheck": "npm run build --workspace=@boltbytes/contracts && npm run typecheck --workspace=@boltbytes/api && npm run typecheck --workspace=@boltbytes/worker && npm run typecheck --workspace=@boltbytes/admin",
     "test": "npm run test --workspace=@boltbytes/api && npm run test --workspace=@boltbytes/worker && npm run test:release",
-    "test:release": "node --test scripts/android-release-evidence.test.mjs",
+    "test:release": "node --test scripts/android-release-evidence.test.mjs scripts/android-version-code.test.mjs",
     "test:integration": "npm run test:integration --workspace=@boltbytes/api",
     "prisma:generate": "npm run prisma:generate --workspace=@boltbytes/api",
     "prisma:migrate": "npm run prisma:migrate --workspace=@boltbytes/api",

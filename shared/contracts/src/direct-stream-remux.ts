@@ -7,10 +7,14 @@ export type DirectStreamHlsInput = {
   videoCodec: string | null;
   hasAudio: boolean;
   audioMode: DirectStreamAudioMode;
+  audioStreamIndex?: number | null;
 };
 
 export function buildDirectStreamHlsArguments(input: DirectStreamHlsInput): string[] {
   const hevc = /^(?:hevc|h265|hev1|hvc1|x265)$/i.test(input.videoCodec?.trim() ?? '');
+  const audioMap = input.audioStreamIndex === null || input.audioStreamIndex === undefined
+    ? '0:a:0?'
+    : `0:${input.audioStreamIndex}?`;
   return [
     '-hide_banner',
     '-loglevel', 'warning',
@@ -19,7 +23,7 @@ export function buildDirectStreamHlsArguments(input: DirectStreamHlsInput): stri
     '-fflags', '+genpts',
     '-i', input.inputPath,
     '-map', '0:v:0',
-    ...(input.hasAudio ? ['-map', '0:a:0?'] : []),
+    ...(input.hasAudio ? ['-map', audioMap] : []),
     '-map_metadata', '-1',
     '-map_chapters', '-1',
     '-sn',
