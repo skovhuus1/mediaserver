@@ -79,7 +79,8 @@ export class PlaybackHistoryService {
       },
     });
 
-    if (progress.completed && session.status === 'active') {
+    await this.invalidateHome(actor, session.profileId);
+    if (dto.completed === true && session.status === 'active') {
       await this.reservations.release(actor, session.id, 'completed');
     }
     return {

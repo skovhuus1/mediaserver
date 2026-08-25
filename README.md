@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.2.13**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.2.14**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -40,6 +40,9 @@ invalideres ved Min liste, playlister, historik og profilindstillinger.
 
 - Standardrækkefølgen er Anbefalinger, Fortsæt med at se, Min liste, Seneste
   episoder, Nye film, Nye serier, Genrer og Populært lokalt.
+- Fortsæt med at se markerer fortsat en titel som set ved 90 %, men denne
+  historikheuristik frigiver aldrig den aktive stream. Reservationen afsluttes
+  kun ved et eksplicit `ended`-signal eller når brugeren stopper playeren.
 - `/watch/my-list` viser profilens kanoniske Min liste. Serieafsnit gemmes som én
   stabil serieidentitet, så samme serie ikke gentages for hvert afsnit.
 - `/watch/playlists` administrerer op til 50 private playlister pr. profil og 500
@@ -257,7 +260,7 @@ Se [domæne og Nginx Proxy Manager](docs/domain-nginx-proxy-manager.md).
 
 Arbejdet laves på **agent/...** branches. Hver færdig leverance skal have opdateret dokumentation, lokale gates og grønne push- og PR-checks. Først derefter squash-merges den til **main**.
 
-Server, worker, admin og delte kontrakter bruger ét SemVer-nummer. Sæt næste serverversion med `npm run version:set -- 0.2.13`, opdater `CHANGELOG.md`, og kør `npm run version:check`; CI afviser versionsdrift mellem serverpakker, lockfil, health-API og README. Flutter mobile/TV versionsstyres og udgives separat, så rene serverleverancer aldrig skriver i appmapperne.
+Server, worker, admin og delte kontrakter bruger ét SemVer-nummer. Sæt næste serverversion med `npm run version:set -- 0.2.14`, opdater `CHANGELOG.md`, og kør `npm run version:check`; CI afviser versionsdrift mellem serverpakker, lockfil, health-API og README. Flutter mobile/TV versionsstyres og udgives separat, så rene serverleverancer aldrig skriver i appmapperne.
 
 Android-releases bygges som separate `mobile`- og `tv`-flavors. Produktionsworkflowet udgiver APK/AAB sammen med checksums, et maskinlæsbart release-manifest og GitHub provenance; fysisk mobil-, TV- og Cast-certificering forbliver en særskilt releasegate.
 
