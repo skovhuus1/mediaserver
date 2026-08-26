@@ -4,6 +4,12 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.2 - 2026-08-26
+
+- Retter masse-genanalyse, sa foraldede markoranalyseversioner altid koes med `force` i stedet for fejlagtigt at blive betragtet som friske videofiler.
+- Opretter playback-assets og jobs atomisk i bulk under en account-scopet advisory lock, sa store biblioteker ikke rammer HTTP-timeout efter cirka 200 titler.
+- Fjerner den tidligere graense pa 5.000 medier og deduplikerer aktive jobs, sa alle laesbare film og episoder omfattes af handlingen.
+
 ## 0.3.1 - 2026-08-26
 
 - Tilfojer fail-soft TheIntroDB-opslag for intro, recap og rulletekster med TMDB-, TVDB- og IMDb-identitet, timeout og valgfri API-nogle.

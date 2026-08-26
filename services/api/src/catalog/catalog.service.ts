@@ -605,25 +605,64 @@ export class CatalogService {
   }
 
   async queuePlaybackAssetsBatch(actor: AuthenticatedUser, dto: QueuePlaybackAssetsBatchDto) {
-    const items = await this.prisma.mediaItem.findMany({
-      where: { accountId: actor.accountId, type: { in: dto.mediaType === 'movie' ? ['movie'] : dto.mediaType === 'series' ? ['episode'] : ['movie', 'episode'] }, file: { is: { status: 'ready' } } },
-      select: { id: true, file: { select: { modifiedAt: true } }, playbackAsset: { select: { status: true, sourceModifiedAt: true, manifest: true } } },
-      orderBy: { createdAt: 'asc' },
-      take: 5_000,
-    });
-    let queued = 0;
-    let skipped = 0;
-    for (const item of items) {
-      if (!item.file) continue;
-      const fresh = item.playbackAsset?.status === 'ready'
-        && Boolean(item.playbackAsset.sourceModifiedAt && item.playbackAsset.sourceModifiedAt >= item.file.modifiedAt)
-        && !playbackMarkerAnalysisIsStale(item.playbackAsset.manifest);
-      if (dto.mode === 'missing' && fresh) { skipped += 1; continue; }
-      const result = await this.queuePlaybackAssetsInternal(actor.accountId, item.id, item.file.modifiedAt, dto.mode === 'all');
-      if (result.queued) queued += 1; else skipped += 1;
-    }
-    await this.prisma.auditLog.create({ data: { accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId, action: 'media.playback_assets.batch', outcome: 'allowed', code: 'playback_assets_batch_queued', details: { mode: dto.mode, mediaType: dto.mediaType, inspected: items.length, queued, skipped } } });
-    return { inspected: items.length, queued, skipped, limited: items.length === 5_000 };
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext('bbmedia:playback-assets-batch'),
+          hashtext(CAST(${actor.accountId} AS text))
+        )::text AS lock_result
+      `;
+      const [items, activeJobs] = await Promise.all([
+        tx.mediaItem.findMany({
+          where: { accountId: actor.accountId, type: { in: dto.mediaType === 'movie' ? ['movie'] : dto.mediaType === 'series' ? ['episode'] : ['movie', 'episode'] }, file: { is: { status: 'ready' } } },
+          select: { id: true, file: { select: { modifiedAt: true } }, playbackAsset: { select: { status: true, sourceModifiedAt: true, manifest: true } } },
+          orderBy: { createdAt: 'asc' },
+        }),
+        tx.systemJob.findMany({
+          where: { accountId: actor.accountId, type: 'media.playback-assets', status: { in: ['queued', 'running'] } },
+          select: { payload: true },
+        }),
+      ]);
+      const activeMediaIds = new Set(activeJobs.flatMap((job) => {
+        const payload = job.payload;
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
+        const mediaId = (payload as Prisma.JsonObject).mediaId;
+        return typeof mediaId === 'string' && mediaId ? [mediaId] : [];
+      }));
+      const candidates = items.flatMap((item) => {
+        if (!item.file || activeMediaIds.has(item.id)) return [];
+        const markerAnalysisStale = item.playbackAsset
+          ? playbackMarkerAnalysisIsStale(item.playbackAsset.manifest)
+          : false;
+        const fresh = item.playbackAsset?.status === 'ready'
+          && Boolean(item.playbackAsset.sourceModifiedAt && item.playbackAsset.sourceModifiedAt >= item.file.modifiedAt)
+          && !markerAnalysisStale;
+        if (dto.mode === 'missing' && fresh) return [];
+        return [{ accountId: actor.accountId, mediaId: item.id, force: dto.mode === 'all' || markerAnalysisStale }];
+      });
+      if (!candidates.length) return { inspected: items.length, queued: 0, skipped: items.length, limited: false };
+      const mediaIds = candidates.map((candidate) => candidate.mediaId);
+      await tx.mediaPlaybackAsset.createMany({
+        data: candidates.map((candidate) => ({ accountId: candidate.accountId, mediaId: candidate.mediaId, status: 'queued' })),
+        skipDuplicates: true,
+      });
+      await tx.mediaPlaybackAsset.updateMany({
+        where: { accountId: actor.accountId, mediaId: { in: mediaIds } },
+        data: { status: 'queued', error: null },
+      });
+      await tx.systemJob.createMany({
+        data: candidates.map((candidate) => ({
+          accountId: candidate.accountId,
+          type: 'media.playback-assets',
+          status: 'queued',
+          payload: { mediaId: candidate.mediaId, force: candidate.force },
+          maxAttempts: 3,
+        })),
+      });
+      return { inspected: items.length, queued: candidates.length, skipped: items.length - candidates.length, limited: false };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    await this.prisma.auditLog.create({ data: { accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId, action: 'media.playback_assets.batch', outcome: 'allowed', code: 'playback_assets_batch_queued', details: { mode: dto.mode, mediaType: dto.mediaType, ...result } } });
+    return result;
   }
 
   async updateTimelineMarkers(actor: AuthenticatedUser, mediaId: string, dto: UpdateTimelineMarkersDto) {

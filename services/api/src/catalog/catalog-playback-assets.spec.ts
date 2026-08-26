@@ -70,4 +70,46 @@ describe('catalog playback assets', () => {
       data: expect.objectContaining({ kind: 'recap', source: 'manual' }),
     }));
   });
+
+  it('bulk queues stale marker analyses atomically and skips fresh or active media', async () => {
+    const now = new Date();
+    const tx = {
+      $queryRaw: vi.fn(),
+      mediaItem: { findMany: vi.fn().mockResolvedValue([
+        { id: 'fresh', file: { modifiedAt: now }, playbackAsset: { status: 'ready', sourceModifiedAt: now, manifest: { analysis: { markerAnalysisVersion: 3 } } } },
+        { id: 'stale-analysis', file: { modifiedAt: now }, playbackAsset: { status: 'ready', sourceModifiedAt: now, manifest: { analysis: { markerAnalysisVersion: 2 } } } },
+        { id: 'missing', file: { modifiedAt: now }, playbackAsset: null },
+        { id: 'active', file: { modifiedAt: now }, playbackAsset: null },
+      ]) },
+      systemJob: {
+        findMany: vi.fn().mockResolvedValue([{ payload: { mediaId: 'active', force: false } }]),
+        createMany: vi.fn(),
+      },
+      mediaPlaybackAsset: { createMany: vi.fn(), updateMany: vi.fn() },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+      auditLog: { create: vi.fn() },
+    };
+    const service = new CatalogService(prisma as never);
+
+    await expect(service.queuePlaybackAssetsBatch({ accountId: 'account-1' } as never, {
+      mediaType: 'all',
+      mode: 'missing',
+    })).resolves.toEqual({ inspected: 4, queued: 2, skipped: 2, limited: false });
+
+    expect(tx.mediaPlaybackAsset.createMany).toHaveBeenCalledWith({
+      data: [
+        { accountId: 'account-1', mediaId: 'stale-analysis', status: 'queued' },
+        { accountId: 'account-1', mediaId: 'missing', status: 'queued' },
+      ],
+      skipDuplicates: true,
+    });
+    expect(tx.systemJob.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ payload: { mediaId: 'stale-analysis', force: true } }),
+        expect.objectContaining({ payload: { mediaId: 'missing', force: false } }),
+      ],
+    });
+  });
 });
