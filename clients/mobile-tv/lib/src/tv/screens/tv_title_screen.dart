@@ -425,22 +425,24 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
       _selectHoldFired = false;
       _selectHoldMedia = media;
       _selectHoldTimer = Timer(const Duration(milliseconds: 560), () {
-        final heldMedia = _selectHoldMedia;
-        if (!mounted || !_selectHoldTracking || heldMedia == null) return;
+        if (!mounted || !_selectHoldTracking || _selectHoldMedia == null) {
+          return;
+        }
         _selectHoldFired = true;
-        _selectHoldTracking = false;
-        _selectHoldMedia = null;
         _selectHoldTimer = null;
-        unawaited(_openContextMenu(heldMedia));
       });
       return true;
     }
     if (event is KeyRepeatEvent) return true;
     if (event is KeyUpEvent) {
       final fired = _selectHoldFired;
+      final heldMedia = _selectHoldMedia;
       _resetSelectHold();
-      if (!fired) return _activateFocused();
-      return true;
+      if (fired && heldMedia != null) {
+        unawaited(_openContextMenu(heldMedia));
+        return true;
+      }
+      return _activateFocused();
     }
     return false;
   }

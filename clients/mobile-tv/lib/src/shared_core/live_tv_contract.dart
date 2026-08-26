@@ -279,6 +279,7 @@ class LiveTvSession {
     required this.statusUrl,
     required this.heartbeatUrl,
     required this.releaseUrl,
+    this.contentType = 'application/vnd.apple.mpegurl',
   });
 
   final String leaseId;
@@ -289,10 +290,15 @@ class LiveTvSession {
   final String statusUrl;
   final String heartbeatUrl;
   final String releaseUrl;
+  final String contentType;
 
   bool get ready => status == 'ready' || status == 'active';
 
-  LiveTvSession copyWith({String? status, String? streamUrl}) => LiveTvSession(
+  LiveTvSession copyWith({
+    String? status,
+    String? streamUrl,
+    String? contentType,
+  }) => LiveTvSession(
     leaseId: leaseId,
     method: method,
     status: status ?? this.status,
@@ -301,6 +307,7 @@ class LiveTvSession {
     statusUrl: statusUrl,
     heartbeatUrl: heartbeatUrl,
     releaseUrl: releaseUrl,
+    contentType: contentType ?? this.contentType,
   );
 
   factory LiveTvSession.fromJson(dynamic value) {
@@ -314,6 +321,9 @@ class LiveTvSession {
       statusUrl: stringValue(json['statusUrl']) ?? '',
       heartbeatUrl: stringValue(json['heartbeatUrl']) ?? '',
       releaseUrl: stringValue(json['releaseUrl']) ?? '',
+      contentType:
+          stringValue(json['contentType']) ??
+          'application/vnd.apple.mpegurl',
     );
   }
 }

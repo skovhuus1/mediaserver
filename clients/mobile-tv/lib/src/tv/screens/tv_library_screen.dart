@@ -194,21 +194,24 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
       _selectHoldFired = false;
       _selectHoldMedia = item;
       _selectHoldTimer = Timer(const Duration(milliseconds: 560), () {
-        final heldItem = _selectHoldMedia;
-        if (!mounted || !_selectHoldTracking || heldItem == null) return;
+        if (!mounted || !_selectHoldTracking || _selectHoldMedia == null) {
+          return;
+        }
         _selectHoldFired = true;
-        _selectHoldTracking = false;
-        _selectHoldMedia = null;
         _selectHoldTimer = null;
-        unawaited(_openContextMenu(heldItem));
       });
       return true;
     }
     if (event is KeyRepeatEvent) return true;
     if (event is KeyUpEvent) {
       final fired = _selectHoldFired;
+      final heldItem = _selectHoldMedia;
       _resetSelectHold();
-      if (!fired) _activate();
+      if (fired && heldItem != null) {
+        unawaited(_openContextMenu(heldItem));
+      } else {
+        _activate();
+      }
       return true;
     }
     return false;

@@ -8,7 +8,6 @@ import '../../core/api_client.dart';
 import '../../core/app_config.dart';
 import '../../core/models.dart';
 import '../../core/playback_platform.dart';
-import '../../core/tv_quality_policy.dart';
 import '../../core/webvtt.dart';
 import 'playback_tuning.dart';
 
@@ -334,8 +333,6 @@ class PlaybackSessionController extends ChangeNotifier
   PlaybackAuthorization? _authorization;
   List<WebVttCue> _cues = const [];
   List<VideoTrack> _videoTracks = const [];
-  TvQualityPolicy? _tvQualityPolicy;
-  DateTime? _lastQualityCapAt;
   DateTime? _lastKeepAwakeAt;
   double? _estimatedDownlinkMbps;
   Timer? _heartbeatTimer;
@@ -546,7 +543,7 @@ class PlaybackSessionController extends ChangeNotifier
     );
     final controller = VideoPlayerController.networkUrl(
       api.endpoint(authorization.streamUrl),
-      formatHint: authorization.isHls ? VideoFormat.hls : null,
+      formatHint: authorization.isHls ? VideoFormat.hls : VideoFormat.other,
       videoPlayerOptions: VideoPlayerOptions(
         mixWithOthers: false,
         allowBackgroundPlayback: true,
@@ -684,9 +681,6 @@ class PlaybackSessionController extends ChangeNotifier
       return;
     }
     _reassertKeepScreenOn();
-    if (AppConfig.isTvBuild && currentQualityMode == 'auto') {
-      unawaited(_applyAutomaticQualityCap(controller, auth));
-    }
     final durationMs = math.max(1, _durationMs);
     final bufferedMs = math.max(
       0,
@@ -852,7 +846,7 @@ class PlaybackSessionController extends ChangeNotifier
       ),
     );
     try {
-      await retry();
+      await _restartAtCurrentPosition(manual: false);
     } finally {
       _prematureEndRecovering = false;
     }
@@ -1175,6 +1169,9 @@ class PlaybackSessionController extends ChangeNotifier
       );
       if (directTrackSupported) {
         if (mode == 'auto') {
+          await _platform.setAutoMaximumHeight(
+            currentUpscaleMode == 'server' ? 0 : sourceHeight,
+          );
           await controller.selectVideoTrack(null);
           _setState(
             _state.copyWith(
@@ -1402,18 +1399,15 @@ class PlaybackSessionController extends ChangeNotifier
     _videoTracks =
         _videoTracks.where((track) => (track.height ?? 0) > 0).toList()
           ..sort((a, b) => (a.height ?? 0).compareTo(b.height ?? 0));
-    _tvQualityPolicy = TvQualityPolicy(
-      startedAt: DateTime.now(),
-      sourceHeight:
-          authorization.sourceHeight ??
-          (_videoTracks.isEmpty ? null : _videoTracks.last.height) ??
-          1080,
-      allowUpscale: currentUpscaleMode == 'server',
-    );
-    _lastQualityCapAt = null;
     final mode = _sessionQualityMode ?? authorization.preferences.qualityMode;
     if (mode == 'auto') {
-      await _applyAutomaticQualityCap(controller, authorization);
+      final sourceHeight =
+          authorization.sourceHeight ??
+          (_videoTracks.isEmpty ? null : _videoTracks.last.height) ??
+          1080;
+      await _platform.setAutoMaximumHeight(
+        currentUpscaleMode == 'server' ? 0 : sourceHeight,
+      );
       await controller.selectVideoTrack(null);
       return;
     }
@@ -1453,43 +1447,6 @@ class PlaybackSessionController extends ChangeNotifier
     final value = _estimatedDownlinkMbps;
     if (value == null || !value.isFinite || value <= 0) return null;
     return value.clamp(0.1, 1000).toDouble();
-  }
-
-  Future<void> _applyAutomaticQualityCap(
-    VideoPlayerController controller,
-    PlaybackAuthorization authorization,
-  ) async {
-    final policy = _tvQualityPolicy;
-    if (policy == null || currentQualityMode != 'auto') return;
-    final now = DateTime.now();
-    final previous = _lastQualityCapAt;
-    if (previous != null &&
-        now.difference(previous) < const Duration(seconds: 5)) {
-      return;
-    }
-    _lastQualityCapAt = now;
-    final telemetry = await _platform.videoTelemetry();
-    final bandwidth = telemetry?.bandwidthEstimate ?? 0;
-    if (bandwidth > 0) {
-      _estimatedDownlinkMbps = bandwidth / 1000000;
-    }
-    policy.observe(now: now, buffering: controller.value.isBuffering);
-    final tracks = authorization.renditions
-        .map(
-          (rendition) => TvQualityTrack(
-            height: rendition.height,
-            bitrate: rendition.bitrate,
-          ),
-        )
-        .toList(growable: false);
-    await _platform.setAutoMaximumHeight(
-      policy.automaticMaximumHeight(
-        now: now,
-        bufferAheadMs: _bufferAheadMs,
-        bandwidthEstimate: bandwidth,
-        tracks: tracks,
-      ),
-    );
   }
 
   int? _serverUpscaleTarget(PlaybackAuthorization authorization) {
@@ -1663,8 +1620,24 @@ class PlaybackSessionController extends ChangeNotifier
   }
 
   @override
-  Future<void> retry() async {
+  Future<void> retry() => _restartAtCurrentPosition(manual: true);
+
+  Future<void> _restartAtCurrentPosition({required bool manual}) async {
     final position = _absolutePositionMs;
+    if (manual) {
+      _prematureEndRetryCount = 0;
+      _prematureEndRecovering = false;
+    }
+    _setState(
+      _state.copyWith(
+        status: 'Genoptager afspilningen...',
+        error: null,
+        loading: true,
+        buffering: true,
+        playing: false,
+        nextEpisodeCountdown: null,
+      ),
+    );
     _stopTimers();
     await saveProgress();
     await _release();

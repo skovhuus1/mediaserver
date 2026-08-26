@@ -381,6 +381,16 @@ class _TvRecordingPlayerScreenState extends State<_TvRecordingPlayerScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  void _handleBack() {
+    if (_closing) return;
+    if (_overlay) {
+      _overlayTimer?.cancel();
+      setState(() => _overlay = false);
+      return;
+    }
+    unawaited(_close());
+  }
+
   @override
   void dispose() {
     _overlayTimer?.cancel();
@@ -397,6 +407,9 @@ class _TvRecordingPlayerScreenState extends State<_TvRecordingPlayerScreen> {
     final video = _controller.video;
     return PopScope(
       canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Focus(

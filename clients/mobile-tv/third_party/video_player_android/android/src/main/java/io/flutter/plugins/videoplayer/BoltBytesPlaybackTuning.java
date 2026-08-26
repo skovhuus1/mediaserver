@@ -26,7 +26,7 @@ public final class BoltBytesPlaybackTuning {
             .build();
       default:
         return new DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30_000, 120_000, 2_500, 5_000)
+            .setBufferDurationsMs(30_000, 120_000, 1_000, 2_000)
             .setBackBuffer(30_000, true)
             .build();
     }

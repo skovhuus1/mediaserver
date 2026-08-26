@@ -3,6 +3,7 @@ import 'package:boltbytes_media/src/core/models.dart';
 import 'package:boltbytes_media/src/shared_core/library_contract.dart';
 import 'package:boltbytes_media/src/state/app_controller.dart';
 import 'package:boltbytes_media/src/tv/screens/tv_hub_screen.dart';
+import 'package:boltbytes_media/src/widgets/media_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -60,10 +61,11 @@ void main() {
 
     await _press(tester, LogicalKeyboardKey.arrowDown);
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'tv-top-1');
+    expect(find.text('Nyeste film'), findsNothing);
+    await _press(tester, LogicalKeyboardKey.enter);
     expect(find.text('Nyeste film'), findsOneWidget);
     expect(find.text('FILM · UDVALGT'), findsOneWidget);
     expect(find.text('Se alle film'), findsOneWidget);
-    await _press(tester, LogicalKeyboardKey.arrowRight);
     expect(
       FocusManager.instance.primaryFocus?.debugLabel,
       'tv-section-5-item-0',
@@ -149,11 +151,14 @@ void main() {
 
     await _press(tester, LogicalKeyboardKey.arrowDown, count: 4);
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'tv-top-4');
+    await _press(tester, LogicalKeyboardKey.enter);
     expect(find.text('Fortsæt med at se'), findsOneWidget);
     expect(find.text('Nye episoder klar'), findsOneWidget);
 
+    await _press(tester, LogicalKeyboardKey.arrowLeft);
     await _press(tester, LogicalKeyboardKey.arrowDown);
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'tv-top-5');
+    await _press(tester, LogicalKeyboardKey.enter);
     expect(find.text('Filmgenrer'), findsOneWidget);
     expect(find.text('Seriegenrer'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -167,11 +172,58 @@ void main() {
     final fixture = await _pumpHub(tester);
 
     await _press(tester, LogicalKeyboardKey.arrowDown, count: 11);
-    await _press(tester, LogicalKeyboardKey.arrowRight);
     await _press(tester, LogicalKeyboardKey.enter);
 
     expect(fixture.controller.stage, AppStage.profiles);
     fixture.client.close();
+  });
+
+  testWidgets('TV media card separates short and long remote select', (
+    tester,
+  ) async {
+    final storage = MemorySessionStorage();
+    final client = MockClient((_) async => http.Response('{}', 404));
+    final api = ApiClient(
+      baseUrl: 'https://media.example.test/api/v1',
+      storage: storage,
+      httpClient: client,
+    );
+    final focusNode = FocusNode(debugLabel: 'remote-hold-card');
+    var presses = 0;
+    var holds = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MediaPosterCard(
+            api: api,
+            media: _items('movie', 1).single,
+            isTv: true,
+            focusNode: focusNode,
+            onPressed: () => presses += 1,
+            onLongPressed: () => holds += 1,
+          ),
+        ),
+      ),
+    );
+    focusNode.requestFocus();
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    expect(presses, 1);
+    expect(holds, 0);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    expect(presses, 1);
+    expect(holds, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    focusNode.dispose();
+    client.close();
   });
 
   testWidgets('root Back asks before leaving the TV hub', (tester) async {

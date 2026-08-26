@@ -103,6 +103,9 @@ class LiveTvSessionController extends ChangeNotifier
     );
     final controller = VideoPlayerController.networkUrl(
       Uri.parse(session.streamUrl),
+      formatHint: session.contentType.toLowerCase().contains('mpegurl')
+          ? VideoFormat.hls
+          : VideoFormat.other,
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
     );
     _video = controller;

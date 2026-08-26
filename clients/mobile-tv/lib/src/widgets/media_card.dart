@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/api_client.dart';
 import '../core/brand_theme.dart';
@@ -39,9 +41,13 @@ class MediaPosterCard extends StatefulWidget {
 
 class _MediaPosterCardState extends State<MediaPosterCard> {
   bool _focused = false;
+  bool _remoteHoldTracking = false;
+  bool _remoteHoldFired = false;
+  Timer? _remoteHoldTimer;
 
   void _setFocus(bool value) {
     if (_focused == value) return;
+    if (!value) _resetRemoteHold();
     setState(() => _focused = value);
     widget.onFocus?.call(value);
     if (value) {
@@ -55,6 +61,54 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
         );
       });
     }
+  }
+
+  KeyEventResult _handleRemoteKey(FocusNode node, KeyEvent event) {
+    if (!widget.isTv) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    final select = key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.space;
+    if (!select) return KeyEventResult.ignored;
+    if (event is KeyDownEvent) {
+      if (_remoteHoldTracking) return KeyEventResult.handled;
+      _remoteHoldTracking = true;
+      _remoteHoldFired = false;
+      if (widget.onLongPressed != null) {
+        _remoteHoldTimer = Timer(const Duration(milliseconds: 560), () {
+          if (!mounted || !_focused || !_remoteHoldTracking) return;
+          _remoteHoldFired = true;
+          _remoteHoldTimer = null;
+        });
+      }
+      return KeyEventResult.handled;
+    }
+    if (event is KeyRepeatEvent) return KeyEventResult.handled;
+    if (event is KeyUpEvent) {
+      final held = _remoteHoldFired;
+      _resetRemoteHold();
+      if (held) {
+        widget.onLongPressed?.call();
+      } else {
+        widget.onPressed();
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.handled;
+  }
+
+  void _resetRemoteHold() {
+    _remoteHoldTimer?.cancel();
+    _remoteHoldTimer = null;
+    _remoteHoldTracking = false;
+    _remoteHoldFired = false;
+  }
+
+  @override
+  void dispose() {
+    _resetRemoteHold();
+    super.dispose();
   }
 
   @override
@@ -124,17 +178,20 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
             boxShadow: widget.isTv ? null : focusRing,
           ),
           clipBehavior: widget.isTv ? Clip.none : Clip.antiAlias,
-          child: InkWell(
+          child: Focus(
             focusNode: widget.focusNode,
             onFocusChange: _setFocus,
-            onTap: widget.onPressed,
-            onLongPress: widget.onLongPressed,
-            autofocus: false,
-            borderRadius: BorderRadius.circular(radius),
-            focusColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-            splashColor: Colors.transparent,
-            child: Column(
+            onKeyEvent: widget.isTv ? _handleRemoteKey : null,
+            child: InkWell(
+              canRequestFocus: false,
+              onTap: widget.onPressed,
+              onLongPress: widget.onLongPressed,
+              autofocus: false,
+              borderRadius: BorderRadius.circular(radius),
+              focusColor: Colors.transparent,
+              highlightColor: Colors.transparent,
+              splashColor: Colors.transparent,
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 AnimatedContainer(
@@ -408,6 +465,7 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                   ),
               ],
             ),
+          ),
           ),
         ),
       ),

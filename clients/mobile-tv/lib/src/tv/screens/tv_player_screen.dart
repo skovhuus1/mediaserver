@@ -138,6 +138,9 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
   );
   final FocusNode _markerNode = FocusNode(debugLabel: 'tv-player-skip-marker');
   final FocusNode _nextNode = FocusNode(debugLabel: 'tv-player-next-episode');
+  final FocusNode _errorRetryNode = FocusNode(
+    debugLabel: 'tv-player-error-retry',
+  );
   Timer? _hideTimer;
   Timer? _seekFeedbackTimer;
   Timer? _awakeTimer;
@@ -147,6 +150,7 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
   bool _keepScreenOnActive = false;
   int _row = 0;
   int _index = 1;
+  String? _focusedError;
 
   PlaybackViewState get state => widget.controller.state;
 
@@ -178,6 +182,19 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
 
   void _changed() {
     if (!mounted) return;
+    final error = state.error;
+    if (error != null && error != _focusedError) {
+      _focusedError = error;
+      _hideTimer?.cancel();
+      _controlsVisible = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _errorRetryNode.canRequestFocus) {
+          _errorRetryNode.requestFocus();
+        }
+      });
+    } else if (error == null) {
+      _focusedError = null;
+    }
     if (state.initialized || state.playing || state.buffering) {
       _setPlaybackAwake(true);
     }
@@ -310,6 +327,17 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
         key == LogicalKeyboardKey.goBack ||
         key == LogicalKeyboardKey.browserBack) {
       unawaited(_handleBack());
+      return KeyEventResult.handled;
+    }
+    if (state.error != null) {
+      if (key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter ||
+          key == LogicalKeyboardKey.select ||
+          key == LogicalKeyboardKey.space) {
+        unawaited(widget.controller.retry());
+      } else if (_errorRetryNode.canRequestFocus) {
+        _errorRetryNode.requestFocus();
+      }
       return KeyEventResult.handled;
     }
     if (!_controlsVisible) {
@@ -671,6 +699,7 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
       ..._secondaryNodes,
       _markerNode,
       _nextNode,
+      _errorRetryNode,
     ]) {
       node.dispose();
     }
@@ -817,6 +846,7 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
                   icon: Icons.error_outline,
                   actionLabel: 'Prøv igen',
                   onPressed: widget.controller.retry,
+                  actionFocusNode: _errorRetryNode,
                 ),
               )
             else if (state.loading || !state.initialized)
@@ -1478,12 +1508,14 @@ class _TvPlayerMessage extends StatelessWidget {
     required this.icon,
     this.actionLabel,
     this.onPressed,
+    this.actionFocusNode,
   });
 
   final String message;
   final IconData icon;
   final String? actionLabel;
   final Future<void> Function()? onPressed;
+  final FocusNode? actionFocusNode;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1524,6 +1556,7 @@ class _TvPlayerMessage extends StatelessWidget {
             icon: Icons.refresh,
             primary: true,
             onPressed: onPressed,
+            focusNode: actionFocusNode,
           ),
         ],
       ],

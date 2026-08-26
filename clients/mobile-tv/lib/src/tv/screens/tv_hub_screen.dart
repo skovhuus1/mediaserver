@@ -163,11 +163,6 @@ class _TvHubScreenState extends State<TvHubScreen> {
 
   void _onFocusStateChanged() {
     if (!mounted) return;
-    final topTab = _focusController.state.topTab;
-    if (_configuredTopTab != topTab) {
-      _configuredTopTab = topTab;
-      _rebuildSections();
-    }
     setState(() {});
   }
 
@@ -766,6 +761,8 @@ class _TvHubScreenState extends State<TvHubScreen> {
       key == LogicalKeyboardKey.space;
 
   bool _handleSelectKey(KeyEvent event) {
+    if (event is KeyUpEvent && !_selectHoldTracking) return true;
+    if (event is KeyRepeatEvent && !_selectHoldTracking) return true;
     final media = _focusedContextMedia();
     if (media == null) {
       if (event is KeyDownEvent) return _activate();
@@ -778,22 +775,24 @@ class _TvHubScreenState extends State<TvHubScreen> {
       _selectHoldFired = false;
       _selectHoldMedia = media;
       _selectHoldTimer = Timer(const Duration(milliseconds: 560), () {
-        final heldMedia = _selectHoldMedia;
-        if (!mounted || !_selectHoldTracking || heldMedia == null) return;
+        if (!mounted || !_selectHoldTracking || _selectHoldMedia == null) {
+          return;
+        }
         _selectHoldFired = true;
-        _selectHoldTracking = false;
-        _selectHoldMedia = null;
         _selectHoldTimer = null;
-        unawaited(_openContextMenu(heldMedia));
       });
       return true;
     }
     if (event is KeyRepeatEvent) return true;
     if (event is KeyUpEvent) {
       final fired = _selectHoldFired;
+      final heldMedia = _selectHoldMedia;
       _resetSelectHold();
-      if (!fired) return _activate();
-      return true;
+      if (fired && heldMedia != null) {
+        unawaited(_openContextMenu(heldMedia));
+        return true;
+      }
+      return _activate();
     }
     return false;
   }
@@ -831,6 +830,10 @@ class _TvHubScreenState extends State<TvHubScreen> {
       return true;
     }
     if (state.topTab != 0) {
+      if (_configuredTopTab != 0) {
+        _configuredTopTab = 0;
+        _rebuildSections();
+      }
       _focusController.setActive(topTab: 0, sectionIndex: -1, itemIndex: 0);
       return true;
     }
@@ -949,6 +952,10 @@ class _TvHubScreenState extends State<TvHubScreen> {
       case 11:
         widget.controller.showProfiles();
         return;
+    }
+    if (_configuredTopTab != index) {
+      _configuredTopTab = index;
+      _rebuildSections();
     }
     _focusController.moveRight();
   }
@@ -1147,8 +1154,8 @@ class _TvHubScreenState extends State<TvHubScreen> {
               separatorBuilder: (_, _) =>
                   const SizedBox(height: TvDesignTokens.sidebarGap),
               itemBuilder: (_, index) {
-                final selected = state.topTab == index;
-                final focused = state.isTopRow && selected;
+                final selected = _configuredTopTab == index;
+                final focused = state.isTopRow && state.topTab == index;
                 return AnimatedScale(
                   scale: focused ? TvDesignTokens.focusScale : 1,
                   duration: TvDesignTokens.focusAnimationDuration,
