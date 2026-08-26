@@ -4,6 +4,12 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.4 - 2026-08-26
+
+- Tilfojer en atomisk `replaceQueue`-handling til playback-masseanalyse, som annullerer ventende analysejobs uden at afbryde aktive workers eller slette manuelle markorer.
+- Genopbygger erstatningskoen deterministisk med serieafsnit grupperet efter serie, saeson og episode foran film.
+- Bevarer aktive jobs som deduplikerede og registrerer antal annullerede jobs i API-resultat og auditlog.
+
 ## 0.3.3 - 2026-08-26
 
 - Fornyer system-job-leases periodisk omkring hele worker-korslen, sa langvarig playback-analyse ikke genudleveres eller fejler med `Worker lease expired`.

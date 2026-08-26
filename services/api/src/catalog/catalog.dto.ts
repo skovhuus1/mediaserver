@@ -248,6 +248,10 @@ export class QueuePlaybackAssetsBatchDto {
   @IsOptional()
   @IsIn(['all', 'movie', 'series'])
   mediaType: 'all' | 'movie' | 'series' = 'all';
+
+  @IsOptional()
+  @IsBoolean()
+  replaceQueue?: boolean;
 }
 
 export class TimelineMarkerRangeDto {
