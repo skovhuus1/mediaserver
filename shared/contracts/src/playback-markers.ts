@@ -1,6 +1,6 @@
 export type TimelineMarkerKind = 'intro' | 'recap' | 'credits';
 
-export const playbackMarkerAnalysisVersion = 3;
+export const playbackMarkerAnalysisVersion = 4;
 
 export type TimelineMarker = {
   kind: TimelineMarkerKind;
@@ -32,6 +32,7 @@ export type MarkerDetectionReason =
   | 'detected'
   | 'external_provider'
   | 'chapter_marker'
+  | 'explicit_evidence_required'
   | 'insufficient_references'
   | 'low_information'
   | 'no_repeated_sequence';

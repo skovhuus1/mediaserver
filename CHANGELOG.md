@@ -4,6 +4,11 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.5 - 2026-08-26
+
+- Adskiller intro og recap i playback-analysen: gentagne lokale fingerprints kan nu kun oprette intro-markorer, mens recap kraever eksplicit kapiteldata eller TheIntroDB-evidens.
+- Haevede markoranalyseversionen, sa berorte medier genanalyseres og forkerte automatiske recap-markorer fjernes uden at beroere manuelle eller eksterne markorer.
+
 ## 0.3.4 - 2026-08-26
 
 - Tilfojer en atomisk `replaceQueue`-handling til playback-masseanalyse, som annullerer ventende analysejobs uden at afbryde aktive workers eller slette manuelle markorer.

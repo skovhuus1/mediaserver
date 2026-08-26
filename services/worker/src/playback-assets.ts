@@ -1,7 +1,6 @@
 import {
   buildTrickplayCues,
   analyzeRepeatedIntro,
-  analyzeRepeatedRecap,
   chapterTimelineMarkers,
   creditsMarkerFromBlackSegments,
   playbackMarkerAnalysisVersion,
@@ -10,6 +9,7 @@ import {
   type TimelineMarker,
 } from '@boltbytes/contracts';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { recapRequiresExplicitEvidence } from './recap-evidence.js';
 import { spawn } from 'node:child_process';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
@@ -197,19 +197,13 @@ async function discoverMarkers(
       return parsed ? [{ mediaId: asset.mediaId, fingerprint: parsed }] : [];
     });
 
-    if (!markers.some((marker) => marker.kind === 'recap')) {
-      const detection = analyzeRepeatedRecap(fingerprint, siblingFingerprints.map((asset) => asset.fingerprint), {
-        minimumReferences: 1,
-      });
-      recapAnalysis = withoutMarker(detection);
-      if (detection.marker) markers.push(detection.marker);
-      await syncAutomaticMarker(prisma, media.accountId, media.id, 'recap', detection);
-    }
     if (!markers.some((marker) => marker.kind === 'intro')) {
-      const recapEndSeconds = Math.ceil((markers.find((marker) => marker.kind === 'recap')?.endMs ?? 0) / 1_000);
+      const explicitRecapEndSeconds = Math.ceil(
+        (markers.find((marker) => marker.kind === 'recap')?.endMs ?? 0) / 1_000,
+      );
       const detection = analyzeRepeatedIntro(fingerprint, siblingFingerprints.map((asset) => asset.fingerprint), {
         minimumReferences: 1,
-        minimumStartSeconds: recapEndSeconds > 0 ? recapEndSeconds : 0,
+        minimumStartSeconds: explicitRecapEndSeconds > 0 ? explicitRecapEndSeconds : 0,
         maximumStartSeconds: 10 * 60,
         maximumEndSeconds: 15 * 60,
       });
@@ -218,16 +212,9 @@ async function discoverMarkers(
       await syncAutomaticMarker(prisma, media.accountId, media.id, 'intro', detection);
     }
     if (!markers.some((marker) => marker.kind === 'recap')) {
-      const detection = recapLeadInFromIntro(
-        fingerprint,
-        markers.find((marker) => marker.kind === 'intro') ?? null,
-        siblingFingerprints.length,
-      );
-      if (detection.marker) {
-        recapAnalysis = withoutMarker(detection);
-        markers.push(detection.marker);
-        await syncAutomaticMarker(prisma, media.accountId, media.id, 'recap', detection);
-      }
+      const detection = recapRequiresExplicitEvidence(siblingFingerprints.length);
+      recapAnalysis = withoutMarker(detection);
+      await syncAutomaticMarker(prisma, media.accountId, media.id, 'recap', detection);
     }
 
     for (const sibling of siblingFingerprints) {
@@ -235,28 +222,21 @@ async function discoverMarkers(
         fingerprint,
         ...siblingFingerprints.filter((entry) => entry.mediaId !== sibling.mediaId).map((entry) => entry.fingerprint),
       ];
-      let siblingRecapDetection = analyzeRepeatedRecap(sibling.fingerprint, references, {
-        minimumReferences: 1,
-      });
       const siblingIntroDetection = analyzeRepeatedIntro(sibling.fingerprint, references, {
         minimumReferences: 1,
-        minimumStartSeconds: siblingRecapDetection.marker
-          ? Math.ceil(siblingRecapDetection.marker.endMs / 1_000)
-          : 0,
+        minimumStartSeconds: 0,
         maximumStartSeconds: 10 * 60,
         maximumEndSeconds: 15 * 60,
       });
-      if (!siblingRecapDetection.marker) {
-        const leadInDetection = recapLeadInFromIntro(
-          sibling.fingerprint,
-          siblingIntroDetection.marker,
-          references.length,
-        );
-        if (leadInDetection.marker) siblingRecapDetection = leadInDetection;
-      }
-      await syncAutomaticMarker(prisma, media.accountId, sibling.mediaId, 'recap', siblingRecapDetection);
+      await syncAutomaticMarker(
+        prisma,
+        media.accountId,
+        sibling.mediaId,
+        'recap',
+        recapRequiresExplicitEvidence(references.length),
+      );
       await syncAutomaticMarker(prisma, media.accountId, sibling.mediaId, 'intro', siblingIntroDetection);
-      await mergeMarkerAnalysis(prisma, sibling.mediaId, { recap: siblingRecapDetection, intro: siblingIntroDetection });
+      await mergeMarkerAnalysis(prisma, sibling.mediaId, { intro: siblingIntroDetection });
     }
   }
   if (!markers.some((marker) => marker.kind === 'credits')) {
