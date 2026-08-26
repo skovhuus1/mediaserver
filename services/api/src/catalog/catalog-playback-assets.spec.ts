@@ -112,4 +112,52 @@ describe('catalog playback assets', () => {
       ],
     });
   });
+
+  it('atomically replaces queued analysis jobs with series-first deterministic work', async () => {
+    const now = new Date('2026-08-26T14:00:00.000Z');
+    vi.setSystemTime(now);
+    const item = (id: string, type: 'movie' | 'episode', seriesTitle: string | null, seasonNumber: number | null, episodeNumber: number | null) => ({
+      id, type, seriesMetadataProviderId: null, seriesDisplayTitle: null, seriesTitle, seasonNumber, episodeNumber,
+      file: { modifiedAt: now }, playbackAsset: null,
+    });
+    const tx = {
+      $queryRaw: vi.fn(),
+      mediaItem: { findMany: vi.fn().mockResolvedValue([
+        item('movie-1', 'movie', null, null, null),
+        item('series-b-2', 'episode', 'Zulu', 1, 2),
+        item('series-a-2', 'episode', 'Alpha', 1, 2),
+        item('series-a-1', 'episode', 'Alpha', 1, 1),
+      ]) },
+      systemJob: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'queued-job', status: 'queued', payload: { mediaId: 'series-a-1', force: true } },
+          { id: 'running-job', status: 'running', payload: { mediaId: 'series-b-2', force: true } },
+        ]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        createMany: vi.fn(),
+      },
+      mediaPlaybackAsset: { createMany: vi.fn(), updateMany: vi.fn() },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback) => callback(tx)),
+      auditLog: { create: vi.fn() },
+    };
+    const service = new CatalogService(prisma as never);
+
+    await expect(service.queuePlaybackAssetsBatch({ accountId: 'account-1' } as never, {
+      mediaType: 'all', mode: 'all', replaceQueue: true,
+    })).resolves.toEqual({ inspected: 4, queued: 3, skipped: 1, limited: false, cancelled: 1 });
+
+    expect(tx.systemJob.updateMany).toHaveBeenCalledWith({
+      where: { accountId: 'account-1', id: { in: ['queued-job'] }, status: 'queued' },
+      data: { status: 'cancelled', workerId: null, lockedAt: null, leaseExpiresAt: null },
+    });
+    const jobs = tx.systemJob.createMany.mock.calls[0]![0].data;
+    expect(jobs.map((job: { payload: { mediaId: string } }) => job.payload.mediaId)).toEqual([
+      'series-a-1', 'series-a-2', 'movie-1',
+    ]);
+    expect(jobs.map((job: { availableAt: Date }) => job.availableAt.getTime())).toEqual([
+      now.getTime(), now.getTime() + 1, now.getTime() + 2,
+    ]);
+  });
 });

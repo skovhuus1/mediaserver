@@ -615,21 +615,39 @@ export class CatalogService {
       const [items, activeJobs] = await Promise.all([
         tx.mediaItem.findMany({
           where: { accountId: actor.accountId, type: { in: dto.mediaType === 'movie' ? ['movie'] : dto.mediaType === 'series' ? ['episode'] : ['movie', 'episode'] }, file: { is: { status: 'ready' } } },
-          select: { id: true, file: { select: { modifiedAt: true } }, playbackAsset: { select: { status: true, sourceModifiedAt: true, manifest: true } } },
+          select: { id: true, type: true, seriesMetadataProviderId: true, seriesDisplayTitle: true, seriesTitle: true, seasonNumber: true, episodeNumber: true, file: { select: { modifiedAt: true } }, playbackAsset: { select: { status: true, sourceModifiedAt: true, manifest: true } } },
           orderBy: { createdAt: 'asc' },
         }),
         tx.systemJob.findMany({
           where: { accountId: actor.accountId, type: 'media.playback-assets', status: { in: ['queued', 'running'] } },
-          select: { payload: true },
+          select: { id: true, status: true, payload: true },
         }),
       ]);
+      const queuedJobs = dto.replaceQueue ? activeJobs.filter((job) => job.status === 'queued') : [];
+      if (queuedJobs.length) {
+        await tx.systemJob.updateMany({
+          where: { accountId: actor.accountId, id: { in: queuedJobs.map((job) => job.id) }, status: 'queued' },
+          data: { status: 'cancelled', workerId: null, lockedAt: null, leaseExpiresAt: null },
+        });
+      }
       const activeMediaIds = new Set(activeJobs.flatMap((job) => {
+        if (dto.replaceQueue && job.status !== 'running') return [];
         const payload = job.payload;
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
         const mediaId = (payload as Prisma.JsonObject).mediaId;
         return typeof mediaId === 'string' && mediaId ? [mediaId] : [];
       }));
-      const candidates = items.flatMap((item) => {
+      const orderedItems = dto.replaceQueue ? [...items].sort((left, right) => {
+        const typeOrder = Number(left.type !== 'episode') - Number(right.type !== 'episode');
+        if (typeOrder) return typeOrder;
+        const leftSeries = left.seriesDisplayTitle ?? left.seriesTitle ?? left.seriesMetadataProviderId ?? '';
+        const rightSeries = right.seriesDisplayTitle ?? right.seriesTitle ?? right.seriesMetadataProviderId ?? '';
+        return leftSeries.localeCompare(rightSeries, 'da-DK', { sensitivity: 'base' })
+          || (left.seasonNumber ?? 0) - (right.seasonNumber ?? 0)
+          || (left.episodeNumber ?? 0) - (right.episodeNumber ?? 0)
+          || left.id.localeCompare(right.id);
+      }) : items;
+      const candidates = orderedItems.flatMap((item) => {
         if (!item.file || activeMediaIds.has(item.id)) return [];
         const markerAnalysisStale = item.playbackAsset
           ? playbackMarkerAnalysisIsStale(item.playbackAsset.manifest)
@@ -640,7 +658,8 @@ export class CatalogService {
         if (dto.mode === 'missing' && fresh) return [];
         return [{ accountId: actor.accountId, mediaId: item.id, force: dto.mode === 'all' || markerAnalysisStale }];
       });
-      if (!candidates.length) return { inspected: items.length, queued: 0, skipped: items.length, limited: false };
+      const replacement = dto.replaceQueue ? { cancelled: queuedJobs.length } : {};
+      if (!candidates.length) return { inspected: items.length, queued: 0, skipped: items.length, limited: false, ...replacement };
       const mediaIds = candidates.map((candidate) => candidate.mediaId);
       await tx.mediaPlaybackAsset.createMany({
         data: candidates.map((candidate) => ({ accountId: candidate.accountId, mediaId: candidate.mediaId, status: 'queued' })),
@@ -651,17 +670,18 @@ export class CatalogService {
         data: { status: 'queued', error: null },
       });
       await tx.systemJob.createMany({
-        data: candidates.map((candidate) => ({
+        data: candidates.map((candidate, index) => ({
           accountId: candidate.accountId,
           type: 'media.playback-assets',
           status: 'queued',
           payload: { mediaId: candidate.mediaId, force: candidate.force },
           maxAttempts: 3,
+          ...(dto.replaceQueue ? { availableAt: new Date(Date.now() + index) } : {}),
         })),
       });
-      return { inspected: items.length, queued: candidates.length, skipped: items.length - candidates.length, limited: false };
+      return { inspected: items.length, queued: candidates.length, skipped: items.length - candidates.length, limited: false, ...replacement };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
-    await this.prisma.auditLog.create({ data: { accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId, action: 'media.playback_assets.batch', outcome: 'allowed', code: 'playback_assets_batch_queued', details: { mode: dto.mode, mediaType: dto.mediaType, ...result } } });
+    await this.prisma.auditLog.create({ data: { accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId, action: 'media.playback_assets.batch', outcome: 'allowed', code: 'playback_assets_batch_queued', details: { mode: dto.mode, mediaType: dto.mediaType, replaceQueue: dto.replaceQueue, ...result } } });
     return result;
   }
 
