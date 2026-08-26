@@ -9,6 +9,7 @@ import { applyMediaCors } from './media-cors';
 import {
   embeddedSubtitleDescriptors,
   sidecarSubtitleDescriptor,
+  subtitleLanguageLabel,
   subtitleToWebVtt,
   type SubtitleDescriptor,
 } from './subtitle-stream-policy';
@@ -176,17 +177,38 @@ export class SubtitleStreamService {
       throw new UnauthorizedException({ code: 'media_path_invalid', message: 'Resolved media path escapes its storage root' });
     }
     const directory = dirname(mediaPath);
-    const entries = await readdir(directory, { withFileTypes: true });
-    const tracks: SidecarTrack[] = [];
+    const videoFilename = basename(mediaPath);
+    const tracks: Array<SidecarTrack & { sortKey: string }> = [];
+    await this.collectSidecars(rootPath, directory, videoFilename, false, tracks);
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!entry.isDirectory() || !isSubtitleDirectoryName(entry.name)) continue;
+      const subtitleDirectory = await realpath(resolve(directory, entry.name)).catch(() => null);
+      if (!subtitleDirectory || !isPathWithin(rootPath, subtitleDirectory)) continue;
+      await this.collectSidecars(rootPath, subtitleDirectory, videoFilename, true, tracks, `${entry.name}/`);
+    }
+    return tracks
+      .sort((left, right) => left.sortKey.localeCompare(right.sortKey))
+      .map(({ sortKey: _sortKey, ...track }) => track);
+  }
+
+  private async collectSidecars(
+    rootPath: string,
+    directory: string,
+    videoFilename: string,
+    allowLanguageOnly: boolean,
+    tracks: Array<SidecarTrack & { sortKey: string }>,
+    sortPrefix = '',
+  ): Promise<void> {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       if (!entry.isFile()) continue;
-      const descriptor = sidecarSubtitleDescriptor(basename(mediaPath), entry.name);
+      const descriptor = sidecarSubtitleDescriptor(videoFilename, entry.name, { allowLanguageOnly });
       if (!descriptor) continue;
-      const candidate = await realpath(resolve(directory, entry.name));
-      if (!isPathWithin(rootPath, candidate)) continue;
-      tracks.push({ ...descriptor, path: candidate });
+      const candidate = await realpath(resolve(directory, entry.name)).catch(() => null);
+      if (!candidate || !isPathWithin(rootPath, candidate)) continue;
+      tracks.push({ ...descriptor, path: candidate, sortKey: `${sortPrefix}${entry.name}` });
     }
-    return tracks;
   }
 
   private async validSession(sessionId: string, token: string | undefined) {
@@ -259,9 +281,15 @@ export function imageSubtitleDescriptors(probe: unknown) {
       typeof stream.tags === 'object' && stream.tags !== null && !Array.isArray(stream.tags)
         ? stream.tags as Record<string, unknown>
         : {};
-    const language =
-      typeof tags.language === 'string' ? tags.language.toLowerCase() : 'und';
-    const title = typeof tags.title === 'string' ? tags.title : language.toUpperCase();
+    const alias = subtitleLanguageLabel(
+      typeof tags.language === 'string'
+        ? tags.language
+        : typeof tags.title === 'string'
+        ? tags.title
+        : null,
+    );
+    const language = alias?.code ?? 'und';
+    const title = typeof tags.title === 'string' ? tags.title : alias?.label ?? language.toUpperCase();
     const disposition =
       typeof stream.disposition === 'object'
       && stream.disposition !== null
@@ -275,4 +303,9 @@ export function imageSubtitleDescriptors(probe: unknown) {
       forced: disposition.forced === 1,
     }];
   });
+}
+
+function isSubtitleDirectoryName(value: string): boolean {
+  return ['sub', 'subs', 'subtitle', 'subtitles', 'undertekst', 'undertekster']
+    .includes(value.toLowerCase().replace(/[\s_.-]+/g, ''));
 }

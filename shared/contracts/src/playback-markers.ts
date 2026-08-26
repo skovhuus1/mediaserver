@@ -1,5 +1,7 @@
 export type TimelineMarkerKind = 'intro' | 'recap' | 'credits';
 
+export const playbackMarkerAnalysisVersion = 2;
+
 export type TimelineMarker = {
   kind: TimelineMarkerKind;
   startMs: number;

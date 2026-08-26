@@ -89,7 +89,9 @@ class _TvRecordingsScreenState extends State<TvRecordingsScreen> {
         _focus(_selected + 1);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.enter:
+      case LogicalKeyboardKey.numpadEnter:
       case LogicalKeyboardKey.select:
+      case LogicalKeyboardKey.space:
         unawaited(_activate());
         return KeyEventResult.handled;
       case LogicalKeyboardKey.escape:
@@ -353,7 +355,9 @@ class _TvRecordingPlayerScreenState extends State<_TvRecordingPlayerScreen> {
         unawaited(_controller.seekBy(const Duration(seconds: 30)));
         return KeyEventResult.handled;
       case LogicalKeyboardKey.enter:
+      case LogicalKeyboardKey.numpadEnter:
       case LogicalKeyboardKey.select:
+      case LogicalKeyboardKey.space:
         unawaited(_controller.togglePlayback());
         return KeyEventResult.handled;
       case LogicalKeyboardKey.escape:

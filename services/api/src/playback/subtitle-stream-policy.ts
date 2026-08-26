@@ -7,44 +7,88 @@ export type SubtitleDescriptor = {
   forced: boolean;
 };
 
+export type SubtitleDescriptorOptions = {
+  allowLanguageOnly?: boolean;
+};
+
 const languageAliases: Record<string, { code: string; label: string }> = {
   da: { code: 'da', label: 'Dansk' },
   dan: { code: 'da', label: 'Dansk' },
+  danish: { code: 'da', label: 'Dansk' },
+  dansk: { code: 'da', label: 'Dansk' },
   dk: { code: 'da', label: 'Dansk' },
   en: { code: 'en', label: 'Engelsk' },
   eng: { code: 'en', label: 'Engelsk' },
+  english: { code: 'en', label: 'Engelsk' },
+  engelsk: { code: 'en', label: 'Engelsk' },
   de: { code: 'de', label: 'Tysk' },
   deu: { code: 'de', label: 'Tysk' },
   ger: { code: 'de', label: 'Tysk' },
+  german: { code: 'de', label: 'Tysk' },
+  deutsch: { code: 'de', label: 'Tysk' },
+  tysk: { code: 'de', label: 'Tysk' },
   no: { code: 'no', label: 'Norsk' },
   nor: { code: 'no', label: 'Norsk' },
+  norsk: { code: 'no', label: 'Norsk' },
   sv: { code: 'sv', label: 'Svensk' },
   swe: { code: 'sv', label: 'Svensk' },
+  svensk: { code: 'sv', label: 'Svensk' },
+  swedish: { code: 'sv', label: 'Svensk' },
   fi: { code: 'fi', label: 'Finsk' },
   fin: { code: 'fi', label: 'Finsk' },
+  finnish: { code: 'fi', label: 'Finsk' },
+  finsk: { code: 'fi', label: 'Finsk' },
   fr: { code: 'fr', label: 'Fransk' },
   fra: { code: 'fr', label: 'Fransk' },
   fre: { code: 'fr', label: 'Fransk' },
+  french: { code: 'fr', label: 'Fransk' },
+  fransk: { code: 'fr', label: 'Fransk' },
   es: { code: 'es', label: 'Spansk' },
   spa: { code: 'es', label: 'Spansk' },
+  spanish: { code: 'es', label: 'Spansk' },
+  spansk: { code: 'es', label: 'Spansk' },
 };
 
 const textSubtitleCodecs = new Set(['ass', 'mov_text', 'ssa', 'srt', 'subrip', 'webvtt']);
 
-export function sidecarSubtitleDescriptor(videoFilename: string, subtitleFilename: string): SubtitleDescriptor | null {
+const forcedTokens = new Set(['forced', 'foreign', 'tvungen', 'forcedonly']);
+const hearingImpairedTokens = new Set(['sdh', 'hi', 'cc', 'hearingimpaired', 'hoerehaemmede', 'hørehæmmede']);
+const neutralSubtitleTokens = new Set([
+  'sub',
+  'subs',
+  'subtitle',
+  'subtitles',
+  'undertekst',
+  'undertekster',
+  'default',
+  'full',
+  'normal',
+  'complete',
+  'closedcaptions',
+]);
+
+export function sidecarSubtitleDescriptor(
+  videoFilename: string,
+  subtitleFilename: string,
+  options: SubtitleDescriptorOptions = {},
+): SubtitleDescriptor | null {
   const extension = extname(subtitleFilename).toLowerCase();
   if (extension !== '.srt' && extension !== '.vtt') return null;
   const videoStem = basename(videoFilename, extname(videoFilename));
   const subtitleStem = basename(subtitleFilename, extension);
-  const videoLower = videoStem.toLowerCase();
-  const subtitleLower = subtitleStem.toLowerCase();
-  if (subtitleLower !== videoLower && !subtitleLower.startsWith(`${videoLower}.`)) return null;
+  const matchesVideo = subtitleStemMatchesVideo(videoStem, subtitleStem);
+  const allTokens = subtitleTokens(subtitleStem);
+  if (!matchesVideo && !(options.allowLanguageOnly && isLanguageOnlySubtitleStem(allTokens))) return null;
 
-  const suffix = subtitleStem.slice(videoStem.length).replace(/^\./, '');
-  const tokens = suffix.toLowerCase().split('.').filter(Boolean);
-  const language = tokens.map((token) => languageAliases[token]).find(Boolean);
-  const forced = tokens.includes('forced') || tokens.includes('foreign');
-  const hearingImpaired = tokens.includes('sdh') || tokens.includes('hi');
+  const suffix = matchesVideo && subtitleStem.toLowerCase().startsWith(videoStem.toLowerCase())
+    ? subtitleStem.slice(videoStem.length).replace(/^[.\s_-]+/, '')
+    : subtitleStem;
+  const tokens = subtitleTokens(suffix);
+  const language = subtitleLanguage(tokens) ?? subtitleLanguage(allTokens);
+  const forced = tokens.some((token) => forcedTokens.has(token)) || allTokens.some((token) => forcedTokens.has(token));
+  const hearingImpaired =
+    tokens.some((token) => hearingImpairedTokens.has(token))
+    || allTokens.some((token) => hearingImpairedTokens.has(token));
   const qualifiers = [
     ...(forced ? ['tvungen'] : []),
     ...(hearingImpaired ? ['hørehæmmede'] : []),
@@ -72,18 +116,21 @@ export function embeddedSubtitleDescriptors(probe: unknown): Array<{
     const streamIndex = finiteInteger(stream.index);
     if (streamIndex === null) return [];
     const tags = asObject(stream.tags);
-    const alias = typeof tags.language === 'string'
-      ? languageAliases[tags.language.toLowerCase()]
-      : undefined;
     const title = typeof tags.title === 'string' && tags.title.trim() ? tags.title.trim() : null;
+    const titleTokens = title ? subtitleTokens(title) : [];
+    const alias = subtitleLanguage([
+      ...(typeof tags.language === 'string' ? subtitleTokens(tags.language) : []),
+      ...titleTokens,
+    ]);
     const disposition = asObject(stream.disposition);
-    const forced = disposition.forced === 1;
-    const hearingImpaired = disposition.hearing_impaired === 1;
+    const forced = disposition.forced === 1 || titleTokens.some((token) => forcedTokens.has(token));
+    const hearingImpaired = disposition.hearing_impaired === 1 || titleTokens.some((token) => hearingImpairedTokens.has(token));
     const qualifiers = [
       ...(forced ? ['tvungen'] : []),
       ...(hearingImpaired ? ['hørehæmmede'] : []),
     ];
-    const baseLabel = title ?? alias?.label ?? `Undertekster ${streamIndex}`;
+    const titleIsOnlySubtitleTags = titleTokens.length > 0 && isLanguageOnlySubtitleStem(titleTokens);
+    const baseLabel = title && !titleIsOnlySubtitleTags ? title : alias?.label ?? `Undertekster ${streamIndex}`;
     return [{
       streamIndex,
       language: alias?.code ?? 'und',
@@ -91,6 +138,10 @@ export function embeddedSubtitleDescriptors(probe: unknown): Array<{
       forced,
     }];
   });
+}
+
+export function subtitleLanguageLabel(value: string | null | undefined) {
+  return subtitleLanguage(value ? subtitleTokens(value) : []) ?? null;
 }
 
 export function subtitleToWebVtt(input: string, format: 'srt' | 'vtt'): string {
@@ -113,4 +164,51 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function finiteInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function subtitleStemMatchesVideo(videoStem: string, subtitleStem: string): boolean {
+  const videoLower = videoStem.toLowerCase();
+  const subtitleLower = subtitleStem.toLowerCase();
+  if (subtitleLower === videoLower) return true;
+  if (subtitleLower.startsWith(videoLower)) {
+    const next = subtitleLower.charAt(videoLower.length);
+    if (!next || /[.\s_[\]()-]/.test(next)) return true;
+  }
+  const videoNormalized = normalizeSubtitleStem(videoStem);
+  const subtitleNormalized = normalizeSubtitleStem(subtitleStem);
+  return subtitleNormalized === videoNormalized
+    || subtitleNormalized.startsWith(`${videoNormalized}.`);
+}
+
+function normalizeSubtitleStem(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/\.+/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+}
+
+function subtitleTokens(value: string): string[] {
+  return normalizeSubtitleStem(value).split('.').filter(Boolean);
+}
+
+function subtitleLanguage(tokens: readonly string[]) {
+  for (const token of tokens) {
+    const alias = languageAliases[token];
+    if (alias) return alias;
+  }
+  return null;
+}
+
+function isLanguageOnlySubtitleStem(tokens: readonly string[]): boolean {
+  const semantic = tokens.filter((token) => !/^\d+$/.test(token) && !neutralSubtitleTokens.has(token));
+  return semantic.length > 0
+    && semantic.every((token) =>
+      Boolean(languageAliases[token])
+      || forcedTokens.has(token)
+      || hearingImpairedTokens.has(token)
+    )
+    && semantic.some((token) => Boolean(languageAliases[token]));
 }

@@ -16,6 +16,24 @@ describe('subtitle stream policy', () => {
     expect(sidecarSubtitleDescriptor('Movie (2026).mkv', 'Another Movie.da.srt')).toBeNull();
   });
 
+  it('normalizes sidecar language names, locale tags and accessibility qualifiers', () => {
+    expect(sidecarSubtitleDescriptor('Show.S01E01.mkv', 'Show S01E01 da-DK SDH.vtt')).toEqual({
+      language: 'da',
+      label: 'Dansk (hørehæmmede)',
+      format: 'vtt',
+      forced: false,
+    });
+    expect(sidecarSubtitleDescriptor('Show.S01E01.mkv', 'Dansk.forced.srt')).toBeNull();
+    expect(sidecarSubtitleDescriptor('Show.S01E01.mkv', 'Dansk.forced.srt', {
+      allowLanguageOnly: true,
+    })).toEqual({
+      language: 'da',
+      label: 'Dansk (tvungen)',
+      format: 'srt',
+      forced: true,
+    });
+  });
+
   it('converts SRT timestamps to valid WebVTT', () => {
     expect(subtitleToWebVtt('1\r\n00:00:00,100 --> 00:00:01,200\r\nHej\r\n', 'srt'))
       .toBe('WEBVTT\n\n1\n00:00:00.100 --> 00:00:01.200\nHej\n');
@@ -48,6 +66,22 @@ describe('subtitle stream policy', () => {
       streamIndex: 7,
       language: 'en',
       label: 'Engelsk (tvungen)',
+      forced: true,
+    }]);
+  });
+
+  it('normalizes embedded subtitle title metadata when language tags are weak', () => {
+    expect(embeddedSubtitleDescriptors({
+      streams: [{
+        index: 8,
+        codec_type: 'subtitle',
+        codec_name: 'webvtt',
+        tags: { title: 'Danish SDH Forced' },
+      }],
+    })).toEqual([{
+      streamIndex: 8,
+      language: 'da',
+      label: 'Dansk (tvungen, hørehæmmede)',
       forced: true,
     }]);
   });

@@ -5,6 +5,7 @@ import {
   sanitizeMediaTitle,
   metadataOverrideScopeKey,
   metadataOverrideSeriesKey,
+  playbackMarkerAnalysisVersion,
   type MetadataOverrideScope,
   selectSeriesContinuation,
   type AuthenticatedUser,
@@ -552,9 +553,10 @@ export class CatalogService {
     }
     let asset = await this.prisma.mediaPlaybackAsset.findUnique({ where: { mediaId } });
     const stale = Boolean(asset?.sourceModifiedAt && asset.sourceModifiedAt < media.file.modifiedAt);
+    const markerAnalysisStale = asset ? playbackMarkerAnalysisIsStale(asset.manifest) : false;
     const retryableFailure = asset?.status === 'failed' && Date.now() - asset.updatedAt.getTime() > 60 * 60_000;
-    if (!asset || stale || retryableFailure) {
-      asset = (await this.queuePlaybackAssetsInternal(actor.accountId, mediaId, media.file.modifiedAt, stale)).asset;
+    if (!asset || stale || markerAnalysisStale || retryableFailure) {
+      asset = (await this.queuePlaybackAssetsInternal(actor.accountId, mediaId, media.file.modifiedAt, stale || markerAnalysisStale)).asset;
     }
     const markers = await this.prisma.mediaTimelineMarker.findMany({
       where: { accountId: actor.accountId, mediaId },
@@ -605,7 +607,7 @@ export class CatalogService {
   async queuePlaybackAssetsBatch(actor: AuthenticatedUser, dto: QueuePlaybackAssetsBatchDto) {
     const items = await this.prisma.mediaItem.findMany({
       where: { accountId: actor.accountId, type: { in: dto.mediaType === 'movie' ? ['movie'] : dto.mediaType === 'series' ? ['episode'] : ['movie', 'episode'] }, file: { is: { status: 'ready' } } },
-      select: { id: true, file: { select: { modifiedAt: true } }, playbackAsset: { select: { status: true, sourceModifiedAt: true } } },
+      select: { id: true, file: { select: { modifiedAt: true } }, playbackAsset: { select: { status: true, sourceModifiedAt: true, manifest: true } } },
       orderBy: { createdAt: 'asc' },
       take: 5_000,
     });
@@ -613,7 +615,9 @@ export class CatalogService {
     let skipped = 0;
     for (const item of items) {
       if (!item.file) continue;
-      const fresh = item.playbackAsset?.status === 'ready' && Boolean(item.playbackAsset.sourceModifiedAt && item.playbackAsset.sourceModifiedAt >= item.file.modifiedAt);
+      const fresh = item.playbackAsset?.status === 'ready'
+        && Boolean(item.playbackAsset.sourceModifiedAt && item.playbackAsset.sourceModifiedAt >= item.file.modifiedAt)
+        && !playbackMarkerAnalysisIsStale(item.playbackAsset.manifest);
       if (dto.mode === 'missing' && fresh) { skipped += 1; continue; }
       const result = await this.queuePlaybackAssetsInternal(actor.accountId, item.id, item.file.modifiedAt, dto.mode === 'all');
       if (result.queued) queued += 1; else skipped += 1;
@@ -1366,4 +1370,14 @@ function seriesMetadataScore(item: {
     + Number(Boolean(item.seriesOverview)) * 3
     + Number(Boolean(item.posterPath)) * 2
     + Number(Boolean(item.backdropPath));
+}
+
+function playbackMarkerAnalysisIsStale(manifest: unknown): boolean {
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return true;
+  const analysis = (manifest as Record<string, unknown>).analysis;
+  if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)) return true;
+  const version = (analysis as Record<string, unknown>).markerAnalysisVersion;
+  return typeof version !== 'number'
+    || !Number.isFinite(version)
+    || version < playbackMarkerAnalysisVersion;
 }

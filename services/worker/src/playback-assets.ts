@@ -4,6 +4,7 @@ import {
   analyzeRepeatedRecap,
   chapterTimelineMarkers,
   creditsMarkerFromBlackSegments,
+  playbackMarkerAnalysisVersion,
   type FrameFingerprint,
   type MediaChapter,
   type TimelineMarker,
@@ -96,6 +97,7 @@ export async function generatePlaybackAssets(prisma: PrismaClient, job: Playback
           cues,
           analysis: {
             fingerprintVersion,
+            markerAnalysisVersion: playbackMarkerAnalysisVersion,
             preview: 'preview.jpg',
             recap: markerResult.recapAnalysis,
             intro: markerResult.introAnalysis,
@@ -165,7 +167,9 @@ async function discoverMarkers(
     });
 
     if (!markers.some((marker) => marker.kind === 'recap')) {
-      const detection = analyzeRepeatedRecap(fingerprint, siblingFingerprints.map((asset) => asset.fingerprint));
+      const detection = analyzeRepeatedRecap(fingerprint, siblingFingerprints.map((asset) => asset.fingerprint), {
+        minimumReferences: 1,
+      });
       recapAnalysis = withoutMarker(detection);
       if (detection.marker) markers.push(detection.marker);
       await syncAutomaticMarker(prisma, media.accountId, media.id, 'recap', detection);
@@ -173,7 +177,8 @@ async function discoverMarkers(
     if (!markers.some((marker) => marker.kind === 'intro')) {
       const recapEndSeconds = Math.ceil((markers.find((marker) => marker.kind === 'recap')?.endMs ?? 0) / 1_000);
       const detection = analyzeRepeatedIntro(fingerprint, siblingFingerprints.map((asset) => asset.fingerprint), {
-        minimumStartSeconds: Math.max(45, recapEndSeconds),
+        minimumReferences: 1,
+        minimumStartSeconds: recapEndSeconds > 0 ? recapEndSeconds : 0,
         maximumStartSeconds: 10 * 60,
         maximumEndSeconds: 15 * 60,
       });
@@ -181,19 +186,44 @@ async function discoverMarkers(
       if (detection.marker) markers.push(detection.marker);
       await syncAutomaticMarker(prisma, media.accountId, media.id, 'intro', detection);
     }
+    if (!markers.some((marker) => marker.kind === 'recap')) {
+      const detection = recapLeadInFromIntro(
+        fingerprint,
+        markers.find((marker) => marker.kind === 'intro') ?? null,
+        siblingFingerprints.length,
+      );
+      if (detection.marker) {
+        recapAnalysis = withoutMarker(detection);
+        markers.push(detection.marker);
+        await syncAutomaticMarker(prisma, media.accountId, media.id, 'recap', detection);
+      }
+    }
 
     for (const sibling of siblingFingerprints) {
       const references = [
         fingerprint,
         ...siblingFingerprints.filter((entry) => entry.mediaId !== sibling.mediaId).map((entry) => entry.fingerprint),
       ];
-      const siblingRecapDetection = analyzeRepeatedRecap(sibling.fingerprint, references);
-      await syncAutomaticMarker(prisma, media.accountId, sibling.mediaId, 'recap', siblingRecapDetection);
+      let siblingRecapDetection = analyzeRepeatedRecap(sibling.fingerprint, references, {
+        minimumReferences: 1,
+      });
       const siblingIntroDetection = analyzeRepeatedIntro(sibling.fingerprint, references, {
-        minimumStartSeconds: Math.max(45, Math.ceil((siblingRecapDetection.marker?.endMs ?? 0) / 1_000)),
+        minimumReferences: 1,
+        minimumStartSeconds: siblingRecapDetection.marker
+          ? Math.ceil(siblingRecapDetection.marker.endMs / 1_000)
+          : 0,
         maximumStartSeconds: 10 * 60,
         maximumEndSeconds: 15 * 60,
       });
+      if (!siblingRecapDetection.marker) {
+        const leadInDetection = recapLeadInFromIntro(
+          sibling.fingerprint,
+          siblingIntroDetection.marker,
+          references.length,
+        );
+        if (leadInDetection.marker) siblingRecapDetection = leadInDetection;
+      }
+      await syncAutomaticMarker(prisma, media.accountId, sibling.mediaId, 'recap', siblingRecapDetection);
       await syncAutomaticMarker(prisma, media.accountId, sibling.mediaId, 'intro', siblingIntroDetection);
       await mergeMarkerAnalysis(prisma, sibling.mediaId, { recap: siblingRecapDetection, intro: siblingIntroDetection });
     }
@@ -223,6 +253,74 @@ function chapterOrEmptyAnalysis(kind: 'intro' | 'recap', markers: readonly Timel
 function withoutMarker(detection: MarkerDetection): MarkerAnalysis {
   const { marker: _marker, ...analysis } = detection;
   return analysis;
+}
+
+export function recapLeadInFromIntro(
+  fingerprint: FrameFingerprint,
+  intro: TimelineMarker | null,
+  referenceCount: number,
+): MarkerDetection {
+  const introStartMs = intro?.kind === 'intro' ? intro.startMs : 0;
+  const minimumRecapMs = 20_000;
+  const maximumRecapMs = 4 * 60_000;
+  if (introStartMs < minimumRecapMs || introStartMs > maximumRecapMs) {
+    return {
+      state: 'not-detected',
+      reason: 'no_repeated_sequence',
+      referenceCount,
+      supportCount: 0,
+      usableFrameRatio: leadInUsableFrameRatio(fingerprint, introStartMs),
+      confidence: null,
+      marker: null,
+    };
+  }
+  const usableFrameRatio = leadInUsableFrameRatio(fingerprint, introStartMs);
+  if (usableFrameRatio < 0.25) {
+    return {
+      state: 'not-detected',
+      reason: 'low_information',
+      referenceCount,
+      supportCount: 0,
+      usableFrameRatio,
+      confidence: null,
+      marker: null,
+    };
+  }
+  const confidence = Math.min(0.72, 0.42 + usableFrameRatio * 0.18 + Math.min(0.12, introStartMs / 240_000 * 0.12));
+  return {
+    state: 'detected',
+    reason: 'detected',
+    referenceCount,
+    supportCount: Math.max(1, Math.min(referenceCount, 1)),
+    usableFrameRatio,
+    confidence,
+    marker: {
+      kind: 'recap',
+      startMs: 0,
+      endMs: introStartMs,
+      source: 'automatic',
+      confidence,
+    },
+  };
+}
+
+function leadInUsableFrameRatio(fingerprint: FrameFingerprint, endMs: number): number {
+  if (endMs <= 0 || !fingerprint.hashes.length) return 0;
+  const intervalMs = Math.max(1, fingerprint.intervalSeconds * 1_000);
+  const offsetMs = Math.max(0, fingerprint.offsetSeconds * 1_000);
+  let inspected = 0;
+  let usable = 0;
+  for (let index = 0; index < fingerprint.hashes.length; index += 1) {
+    const frameMs = offsetMs + index * intervalMs;
+    if (frameMs >= endMs) break;
+    inspected += 1;
+    const hash = fingerprint.hashes[index];
+    if (!hash || /^0+$/.test(hash) || /^f+$/i.test(hash)) continue;
+    const quality = fingerprint.quality?.[index];
+    if (quality !== undefined && (!Number.isFinite(quality) || quality < 0.12)) continue;
+    usable += 1;
+  }
+  return inspected ? usable / inspected : 0;
 }
 
 async function syncAutomaticMarker(
@@ -361,7 +459,11 @@ async function mergeMarkerAnalysis(
   if (!asset) return;
   const manifest = jsonObject(asset.manifest);
   const existingAnalysis = jsonObject(manifest.analysis);
-  const nextAnalysis: Record<string, unknown> = { ...existingAnalysis, fingerprintVersion };
+  const nextAnalysis: Record<string, unknown> = {
+    ...existingAnalysis,
+    fingerprintVersion,
+    markerAnalysisVersion: playbackMarkerAnalysisVersion,
+  };
   for (const [kind, detection] of Object.entries(detections) as Array<['intro' | 'recap', MarkerDetection | undefined]>) {
     if (detection) nextAnalysis[kind] = withoutMarker(detection);
   }

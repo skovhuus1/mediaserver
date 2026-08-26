@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { imageSubtitleDescriptors } from '../src/playback/subtitle-stream.service';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { imageSubtitleDescriptors, SubtitleStreamService } from '../src/playback/subtitle-stream.service';
 
 describe('image subtitle descriptors', () => {
   it('exposes PGS and VobSub as burn-in tracks with stable stream ids', () => {
@@ -24,14 +27,14 @@ describe('image subtitle descriptors', () => {
     ).toEqual([
       {
         streamIndex: 4,
-        language: 'dan',
+        language: 'da',
         label: 'Dansk (hdmv_pgs_subtitle)',
         forced: true,
       },
       {
         streamIndex: 6,
-        language: 'eng',
-        label: 'ENG (dvd_subtitle)',
+        language: 'en',
+        label: 'Engelsk (dvd_subtitle)',
         forced: false,
       },
     ]);
@@ -46,5 +49,30 @@ describe('image subtitle descriptors', () => {
         ],
       }),
     ).toEqual([]);
+  });
+
+  it('discovers language-only sidecars in dedicated subtitle folders', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'bb-media-subtitles-'));
+    try {
+      await writeFile(join(root, 'Show.S01E01.mkv'), '');
+      await mkdir(join(root, 'Subtitles'));
+      await writeFile(join(root, 'Subtitles', 'Dansk.forced.srt'), '1\n00:00:00,000 --> 00:00:01,000\nHej\n');
+      const service = new SubtitleStreamService({} as never);
+      await expect(service.listForPlayback('session-1', 'token-1', {
+        relativePath: 'Show.S01E01.mkv',
+        probe: { streams: [] },
+        storageRoot: { mountPath: root },
+      }, false)).resolves.toEqual([
+        expect.objectContaining({
+          id: 'sidecar-0',
+          language: 'da',
+          label: 'Dansk (tvungen)',
+          forced: true,
+          src: '/api/v1/playback/sessions/session-1/subtitles/sidecar-0.vtt?token=token-1',
+        }),
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

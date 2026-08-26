@@ -104,7 +104,9 @@ class _TvDownloadsScreenState extends State<TvDownloadsScreen> {
         }
         return KeyEventResult.handled;
       case LogicalKeyboardKey.enter:
+      case LogicalKeyboardKey.numpadEnter:
       case LogicalKeyboardKey.select:
+      case LogicalKeyboardKey.space:
         unawaited(_activate());
         return KeyEventResult.handled;
       case LogicalKeyboardKey.escape:

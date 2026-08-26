@@ -125,6 +125,8 @@ class _TvProfileScreenState extends State<TvProfileScreen> {
       LogicalKeyboardKey.arrowDown => _moveVertical(1),
       LogicalKeyboardKey.arrowUp => _moveVertical(-1),
       LogicalKeyboardKey.enter ||
+      LogicalKeyboardKey.numpadEnter ||
+      LogicalKeyboardKey.space ||
       LogicalKeyboardKey.select => _activateFocused(),
       LogicalKeyboardKey.escape ||
       LogicalKeyboardKey.goBack ||
@@ -477,7 +479,10 @@ class _TvPinDialogState extends State<_TvPinDialog> {
       _removeDigit();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.select) {
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.space) {
       _submit();
       return KeyEventResult.handled;
     }

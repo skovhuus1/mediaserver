@@ -174,7 +174,10 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
   }
 
   bool _isSelectKey(LogicalKeyboardKey key) =>
-      key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.select;
+      key == LogicalKeyboardKey.enter ||
+      key == LogicalKeyboardKey.numpadEnter ||
+      key == LogicalKeyboardKey.select ||
+      key == LogicalKeyboardKey.space;
 
   bool _handleSelectKey(KeyEvent event) {
     final item = _focusedContextMedia();

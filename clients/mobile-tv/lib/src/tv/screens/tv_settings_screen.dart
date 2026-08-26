@@ -499,7 +499,9 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
         }
         return KeyEventResult.handled;
       case LogicalKeyboardKey.enter:
+      case LogicalKeyboardKey.numpadEnter:
       case LogicalKeyboardKey.select:
+      case LogicalKeyboardKey.space:
         if (!_inOptions) {
           setState(() => _inOptions = true);
         } else {

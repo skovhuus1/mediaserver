@@ -306,16 +306,11 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.escape) {
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.browserBack) {
       unawaited(_handleBack());
       return KeyEventResult.handled;
-    }
-    // Android TV dispatches remote Back through the route and may also expose
-    // it as a key event. PopScope is the single authority for system Back so
-    // one physical press cannot both hide the overlay and close the player.
-    if (key == LogicalKeyboardKey.goBack ||
-        key == LogicalKeyboardKey.browserBack) {
-      return KeyEventResult.ignored;
     }
     if (!_controlsVisible) {
       if (key == LogicalKeyboardKey.arrowLeft) {
@@ -338,6 +333,7 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter ||
           key == LogicalKeyboardKey.select ||
           key == LogicalKeyboardKey.space) {
         _showControls();
@@ -372,6 +368,10 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowLeft) {
+      if (_row == 0) {
+        _remoteSeek(const Duration(seconds: -10));
+        return KeyEventResult.handled;
+      }
       if (_row == -2 && state.activeMarker != null) {
         _row = -1;
       } else if (_row == 1 && _index == 0) {
@@ -385,6 +385,10 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowRight) {
+      if (_row == 0) {
+        _remoteSeek(Duration(seconds: widget.live ? 10 : 30));
+        return KeyEventResult.handled;
+      }
       if (_row == -1 && state.nextEpisodeCountdown != null) {
         _row = -2;
       } else if (_row == 0 && _index == _primaryNodes.length - 1) {
@@ -402,12 +406,11 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
 
   Future<void> _handleBack() async {
     if (_closing) return;
-    if (_controlsVisible && state.error == null) {
-      _hideControls();
-      return;
-    }
     _closing = true;
-    await widget.controller.finish();
+    _hideTimer?.cancel();
+    _seekFeedbackTimer?.cancel();
+    _setPlaybackAwake(false);
+    unawaited(widget.controller.finish());
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -679,7 +682,9 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
     return PopScope(
       key: const ValueKey('tv-player-pop-scope'),
       canPop: false,
-      onPopInvokedWithResult: (_, _) => unawaited(_handleBack()),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_handleBack());
+      },
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Focus(
@@ -1363,6 +1368,8 @@ class _TvPlayerButtonState extends State<_TvPlayerButton> {
       onKeyEvent: (_, event) {
         if (event is KeyDownEvent &&
             (event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                event.logicalKey == LogicalKeyboardKey.space ||
                 event.logicalKey == LogicalKeyboardKey.select)) {
           final action = widget.onPressed;
           if (action != null) unawaited(Future<void>.sync(action));

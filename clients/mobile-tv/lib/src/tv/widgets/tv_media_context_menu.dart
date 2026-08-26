@@ -19,13 +19,14 @@ Future<void> showTvMediaContextMenu({
   required TvMediaContextPlayHandler onPlay,
 }) async {
   final seriesLike = _isSeriesLike(media);
+  final episode = media.isEpisode;
   final hasProgress = media.progress != null && media.progress!.positionMs > 0;
   final action = await showDialog<TvMediaContextAction>(
     context: context,
     barrierColor: Colors.black.withValues(alpha: 0.58),
     builder: (_) => TvOptionOverlay<TvMediaContextAction>(
       playbackTitle: media.displayTitle,
-      playbackSubtitle: seriesLike ? 'Serie' : 'Film',
+      playbackSubtitle: episode ? 'Afsnit' : seriesLike ? 'Serie' : 'Film',
       panelTitle: 'Hurtigmenu',
       panelDescription:
           'Hold OK på en titel for hurtig adgang til de vigtigste handlinger uden at miste placeringen i rækken.',
@@ -36,6 +37,8 @@ Future<void> showTvMediaContextMenu({
           title: hasProgress ? 'Fortsæt' : 'Afspil',
           subtitle: hasProgress
               ? 'Start fra seneste position'
+              : episode
+              ? 'Start afsnittet'
               : seriesLike
               ? 'Start næste tilgængelige afsnit'
               : 'Start filmen',
@@ -51,8 +54,10 @@ Future<void> showTvMediaContextMenu({
         ),
         TvPlaybackChoice(
           value: TvMediaContextAction.open,
-          title: seriesLike ? 'Gå til serie' : 'Gå til film',
-          subtitle: seriesLike
+          title: episode || seriesLike ? 'Gå til serie' : 'Gå til film',
+          subtitle: episode
+              ? 'Åbn serien, sæsoner og afsnit'
+              : seriesLike
               ? 'Åbn sæsoner, afsnit og detaljer'
               : 'Åbn detaljer, lignende titler og handlinger',
           icon: Icons.info_outline_rounded,
@@ -98,6 +103,10 @@ Future<void> _playResolved(
   required TvMediaContextPlayHandler onPlay,
 }) async {
   if (!_isSeriesLike(media)) {
+    await onPlay(media, fromStart ? 0 : media.progress?.positionMs ?? 0);
+    return;
+  }
+  if (media.isEpisode) {
     await onPlay(media, fromStart ? 0 : media.progress?.positionMs ?? 0);
     return;
   }

@@ -31,8 +31,8 @@ class TvLiveGuideScreen extends StatefulWidget {
 }
 
 class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
-  static const double _channelWidth = 286;
-  static const double _rowHeight = 88;
+  static const double _channelWidth = 202;
+  static const double _rowHeight = 52;
 
   final FocusNode _root = FocusNode(debugLabel: 'tv-live-guide-root');
   final ScrollController _vertical = ScrollController();
@@ -230,7 +230,10 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
   }
 
   bool _isActivate(LogicalKeyboardKey key) =>
-      key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.select;
+      key == LogicalKeyboardKey.enter ||
+      key == LogicalKeyboardKey.numpadEnter ||
+      key == LogicalKeyboardKey.select ||
+      key == LogicalKeyboardKey.space;
 
   void _normalizeProgram() {
     final programs = _channels.elementAtOrNull(_row)?.programs ?? [];
@@ -367,129 +370,77 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: TvDesignTokens.background,
       body: Focus(
         focusNode: _root,
         autofocus: true,
         onKeyEvent: _handleKey,
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF111821),
+                Color(0xFF06090E),
+                TvDesignTokens.background,
+              ],
+            ),
+          ),
+          child: Stack(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  TvDesignTokens.pageHorizontalPadding,
-                  20,
-                  TvDesignTokens.pageHorizontalPadding,
-                  12,
+              Positioned(
+                left: -180,
+                top: -170,
+                width: 640,
+                height: 430,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      colors: [
+                        TvDesignTokens.cyan.withValues(alpha: 0.16),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
                 ),
-                child: Row(
+              ),
+              Positioned(
+                right: -220,
+                bottom: -180,
+                width: 640,
+                height: 420,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      colors: [
+                        TvDesignTokens.gold.withValues(alpha: 0.12),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              SafeArea(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: BoltColors.error.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: BoltColors.error.withValues(alpha: 0.32),
-                        ),
-                      ),
-                      child: const Text(
-                        'LIVE',
-                        style: TextStyle(
-                          color: Color(0xFFFF6A73),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
+                    _buildHeader(),
+                    _buildProgramInfo(),
+                    _buildFilters(),
+                    if (_error != null) _buildErrorBanner(),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: _loading && _guide == null
+                          ? _buildLoadingState()
+                          : _channels.isEmpty
+                          ? _buildEmptyState()
+                          : _buildGuide(),
                     ),
-                    const SizedBox(width: 12),
-                    const Text(
-                      'TV-guide',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${_guide?.availableTotal ?? 0} kanaler · ${_clock(DateTime.now())}',
-                      style: const TextStyle(color: Colors.white60),
-                    ),
+                    if ((_guide?.totalPages ?? 1) > 1) _buildPaging(),
                   ],
                 ),
               ),
-              SizedBox(
-                height: 52,
-                child: ListView.separated(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.pageHorizontalPadding,
-                  ),
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _filters.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 10),
-                  itemBuilder: (_, index) {
-                    final filter = _filters[index];
-                    final focused =
-                        _zone == _GuideZone.filters && index == _filterIndex;
-                    final selected =
-                        filter.group == _group &&
-                        filter.favoritesOnly == _favoritesOnly;
-                    return AnimatedContainer(
-                      duration: TvDesignTokens.focusAnimationDuration,
-                      padding: const EdgeInsets.symmetric(horizontal: 17),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: focused
-                            ? const Color(0xFF332A1A)
-                            : selected
-                            ? const Color(0x66332A1A)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: focused
-                              ? TvDesignTokens.goldSoft
-                              : selected
-                              ? Colors.white24
-                              : Colors.white12,
-                          width: focused ? 2 : 1,
-                        ),
-                      ),
-                      child: Text(
-                        filter.label,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.pageHorizontalPadding,
-                  ),
-                  child: Text(
-                    _error!,
-                    style: const TextStyle(color: BoltColors.error),
-                  ),
-                ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: _loading && _guide == null
-                    ? const Center(child: CircularProgressIndicator())
-                    : _channels.isEmpty
-                    ? const Center(
-                        child: Text('Ingen kanaler i denne visning.'),
-                      )
-                    : _buildGuide(),
-              ),
-              if ((_guide?.totalPages ?? 1) > 1) _buildPaging(),
-              _buildProgramInfo(),
             ],
           ),
         ),
@@ -497,26 +448,287 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
     );
   }
 
+  Widget _buildHeader() {
+    final activeFilter = _favoritesOnly
+        ? 'Favoritter'
+        : _group.isEmpty
+        ? 'Alle kanaler'
+        : _group;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(
+        TvDesignTokens.pageHorizontalPadding,
+        8,
+        TvDesignTokens.pageHorizontalPadding,
+        6,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xF20E151D), Color(0xE8070A0F)],
+        ),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: Colors.white10),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x59000000),
+            blurRadius: 18,
+            offset: Offset(0, 9),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Text(
+            'Live TV',
+            style: TextStyle(
+            color: TvDesignTokens.goldSoft,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.1,
+            ),
+          ),
+          const SizedBox(width: 10),
+          _toolbarChip('I dag'),
+          const SizedBox(width: 5),
+          _toolbarChip(activeFilter),
+          const SizedBox(width: 5),
+          _toolbarChip('${_guide?.availableTotal ?? 0} kanaler'),
+          const Spacer(),
+          Text(
+            _clock(DateTime.now()),
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Icon(Icons.chevron_left_rounded, color: Colors.white54),
+          const Icon(Icons.chevron_right_rounded, color: Colors.white54),
+        ],
+      ),
+    );
+  }
+
+  Widget _toolbarChip(String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: 0.055),
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+    ),
+    child: Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        color: Colors.white70,
+        fontSize: 10.5,
+        fontWeight: FontWeight.w800,
+      ),
+    ),
+  );
+
+  Widget _buildFilters() => SizedBox(
+    height: 32,
+    child: ListView.separated(
+      padding: const EdgeInsets.symmetric(
+        horizontal: TvDesignTokens.pageHorizontalPadding,
+      ),
+      scrollDirection: Axis.horizontal,
+      itemCount: _filters.length,
+      separatorBuilder: (_, _) => const SizedBox(width: 5),
+      itemBuilder: (_, index) {
+        final filter = _filters[index];
+        final focused = _zone == _GuideZone.filters && index == _filterIndex;
+        final selected =
+            filter.group == _group && filter.favoritesOnly == _favoritesOnly;
+        return AnimatedContainer(
+          duration: TvDesignTokens.focusAnimationDuration,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: focused
+                ? TvDesignTokens.goldSoft
+                : selected
+                ? Colors.white.withValues(alpha: 0.105)
+                : Colors.white.withValues(alpha: 0.035),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: focused
+                  ? Colors.white
+                  : selected
+                  ? TvDesignTokens.gold.withValues(alpha: 0.45)
+                  : Colors.white.withValues(alpha: 0.10),
+              width: focused ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                filter.favoritesOnly
+                    ? Icons.favorite_rounded
+                    : filter.group.isEmpty
+                    ? Icons.grid_view_rounded
+                    : Icons.label_rounded,
+                size: 12,
+                color: focused ? const Color(0xFF11100B) : Colors.white60,
+              ),
+              const SizedBox(width: 7),
+              Text(
+                filter.label,
+                style: TextStyle(
+                  color: focused ? const Color(0xFF11100B) : Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+
+  Widget _buildErrorBanner() => Container(
+    margin: const EdgeInsets.fromLTRB(
+      TvDesignTokens.pageHorizontalPadding,
+      8,
+      TvDesignTokens.pageHorizontalPadding,
+      0,
+    ),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: BoxDecoration(
+      color: BoltColors.error.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: BoltColors.error.withValues(alpha: 0.35)),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.warning_amber_rounded, color: BoltColors.error),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            _error!,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFFFFA3A8),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildLoadingState() => Center(
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+      decoration: BoxDecoration(
+        color: TvDesignTokens.surfaceGlass,
+        borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
+        border: Border.all(color: TvDesignTokens.panelBorderSoft),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2.5),
+          ),
+          SizedBox(width: 14),
+          Text(
+            'Indlæser TV-guide',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildEmptyState() => Center(
+    child: Container(
+      width: 470,
+      padding: const EdgeInsets.all(26),
+      decoration: BoxDecoration(
+        color: TvDesignTokens.surfaceGlass,
+        borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
+        border: Border.all(color: TvDesignTokens.panelBorderSoft),
+      ),
+      child: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.live_tv_rounded, color: TvDesignTokens.goldSoft, size: 42),
+          SizedBox(height: 12),
+          Text(
+            'Ingen kanaler i denne visning',
+            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+          ),
+          SizedBox(height: 6),
+          Text(
+            'Skift filter eller prøv igen når guiden er opdateret.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: TvDesignTokens.textMuted),
+          ),
+        ],
+      ),
+    ),
+  );
+
   Widget _buildGuide() {
-    return Column(
+    return Container(
+      margin: const EdgeInsets.symmetric(
+        horizontal: TvDesignTokens.pageHorizontalPadding,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xD80A0F15),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.075)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
       children: [
         SizedBox(
-          height: 48,
+          height: 30,
           child: Row(
             children: [
               Container(
                 width: _channelWidth,
-                padding: const EdgeInsets.only(
-                  left: TvDesignTokens.pageHorizontalPadding,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.045),
+                  border: Border(
+                    right: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.07),
+                    ),
+                  ),
                 ),
                 alignment: Alignment.centerLeft,
-                child: const Text(
-                  'KANALER',
-                  style: TextStyle(
-                    color: Colors.white54,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.6,
-                  ),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Channels',
+                      style: TextStyle(
+                        color: Colors.white60,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${_channels.length}',
+                      style: const TextStyle(
+                        color: TvDesignTokens.goldSoft,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Expanded(
@@ -527,6 +739,13 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
                     width: _timelineWidth,
                     child: Stack(
                       children: [
+                        Positioned.fill(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.026),
+                            ),
+                          ),
+                        ),
                         for (
                           var index = 0;
                           index <=
@@ -535,15 +754,16 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
                           index++
                         )
                           Positioned(
-                            left: index * TvDesignTokens.epgHalfHourWidth + 8,
-                            top: 14,
+                            left: index * TvDesignTokens.epgHalfHourWidth + 9,
+                            top: 7,
                             child: Text(
                               _clock(
                                 _windowStart.add(Duration(minutes: index * 30)),
                               ),
                               style: const TextStyle(
-                                color: Colors.white54,
-                                fontWeight: FontWeight.w700,
+                                color: Colors.white70,
+                                fontSize: 10.8,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),
@@ -564,6 +784,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
           ),
         ),
       ],
+      ),
     );
   }
 
@@ -576,51 +797,76 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
         AnimatedContainer(
           duration: TvDesignTokens.focusAnimationDuration,
           width: _channelWidth,
-          margin: const EdgeInsets.fromLTRB(
-            TvDesignTokens.pageHorizontalPadding,
-            1,
-            8,
-            1,
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 11),
+          margin: EdgeInsets.zero,
+          padding: const EdgeInsets.symmetric(horizontal: 9),
           decoration: BoxDecoration(
-            color: selectedRow && _program < 0
-                ? const Color(0xDD2B2417)
-                : Colors.white.withValues(alpha: 0.035),
-            borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
+            gradient: selectedRow && _program < 0
+                ? const LinearGradient(
+                    colors: [Color(0xFFFFE8A3), Color(0xFFFFC857)],
+                  )
+                : selectedRow
+                ? const LinearGradient(
+                    colors: [Color(0xCC162333), Color(0xAA0B1017)],
+                  )
+                : null,
+            color: selectedRow
+                ? null
+                : Colors.white.withValues(alpha: 0.032),
+            borderRadius: BorderRadius.zero,
             border: Border.all(
-              color: selectedRow && _program < 0
+              color: selectedRow
                   ? TvDesignTokens.goldSoft
-                  : Colors.transparent,
-              width: selectedRow && _program < 0 ? 2 : 0,
+                  : Colors.white.withValues(alpha: 0.055),
+              width: selectedRow ? 2 : 1,
             ),
+            boxShadow: selectedRow
+                ? const [
+                    BoxShadow(
+                      color: Color(0x3DFFC857),
+                      blurRadius: 16,
+                      offset: Offset(0, 7),
+                    ),
+                  ]
+                : const [],
           ),
           child: Row(
             children: [
               SizedBox(
-                width: 36,
+                width: 31,
                 child: Text(
                   '${channel.number ?? '•'}',
-                  style: const TextStyle(
-                    color: Color(0xFFF7C35F),
+                  style: TextStyle(
+                    color: selectedRow && _program < 0
+                        ? const Color(0xFF11100B)
+                        : const Color(0xFFF7C35F),
                     fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
               _ChannelLogo(channel: channel),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   channel.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                  style: TextStyle(
+                    color: selectedRow && _program < 0
+                        ? const Color(0xFF11100B)
+                        : Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
               Icon(
                 channel.favorite ? Icons.favorite : Icons.favorite_border,
                 size: 18,
-                color: channel.favorite ? BoltColors.error : Colors.white30,
+                color: selectedRow && _program < 0
+                    ? const Color(0xFF11100B)
+                    : channel.favorite
+                    ? BoltColors.error
+                    : Colors.white30,
               ),
             ],
           ),
@@ -634,6 +880,13 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
                 height: _rowHeight,
                 child: Stack(
                   children: [
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _GuideGridPainter(
+                          halfHourWidth: TvDesignTokens.epgHalfHourWidth,
+                        ),
+                      ),
+                    ),
                     for (
                       var programIndex = 0;
                       programIndex < channel.programs.length;
@@ -667,63 +920,110 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
     );
     return Positioned(
       left: left,
-      top: 4,
+      top: 0,
       width: width - 6,
-      height: _rowHeight - 8,
-      child: AnimatedContainer(
-        duration: TvDesignTokens.focusAnimationDuration,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: focused
-                ? const [Color(0xFF332A1A), Color(0xFF11151B)]
-                : program.isCurrent
-                ? const [Color(0xB8211A10), Color(0x8811161C)]
-                : [
-                    Colors.white.withValues(alpha: 0.055),
-                    Colors.white.withValues(alpha: 0.028),
+      height: _rowHeight,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(0, 2, 5, 2),
+        child: AnimatedContainer(
+          duration: TvDesignTokens.focusAnimationDuration,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: focused
+                  ? const [Color(0xFFFFF1B8), Color(0xFFFFC857)]
+                  : program.isCurrent
+                  ? const [Color(0xE036414B), Color(0xC9232B33)]
+                  : [
+                      Colors.white.withValues(alpha: 0.085),
+                      Colors.white.withValues(alpha: 0.045),
+                    ],
+            ),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(
+              color: focused
+                  ? Colors.white
+                  : program.isCurrent
+                  ? TvDesignTokens.gold.withValues(alpha: 0.28)
+                  : Colors.white.withValues(alpha: 0.035),
+              width: focused ? 2 : 1,
+            ),
+            boxShadow: focused
+                ? const [
+                    BoxShadow(
+                      color: Color(0x55FFC857),
+                      blurRadius: 20,
+                      offset: Offset(0, 8),
+                    ),
+                  ]
+                : const [],
+          ),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      program.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: focused ? const Color(0xFF11100B) : Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 10.8,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      '${_clock(program.startsAt)}-${_clock(program.endsAt)}',
+                      style: TextStyle(
+                        color: focused
+                            ? const Color(0xB311100B)
+                            : Colors.white54,
+                        fontSize: 9.8,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ],
-          ),
-          borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
-          border: Border.all(
-            color: focused
-                ? TvDesignTokens.goldSoft
-                : program.isCurrent
-                ? Colors.white24
-                : Colors.transparent,
-            width: focused ? 2 : 1,
-          ),
-          boxShadow: focused
-              ? const [
-                  BoxShadow(
-                    color: Color(0x44F7C35F),
-                    blurRadius: 18,
-                    offset: Offset(0, 7),
+                ),
+              ),
+              if (program.isCurrent)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      minHeight: 3,
+                      value: _programProgress(program),
+                      backgroundColor: focused
+                          ? const Color(0x3311100B)
+                          : Colors.white.withValues(alpha: 0.10),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        focused ? const Color(0xFF11100B) : TvDesignTokens.cyan,
+                      ),
+                    ),
                   ),
-                ]
-              : const [],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              program.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${_clock(program.startsAt)}–${_clock(program.endsAt)}',
-              style: const TextStyle(color: Colors.white54, fontSize: 12),
-            ),
-          ],
+                ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  double _programProgress(LiveTvProgram program) {
+    final total = program.endsAt.difference(program.startsAt).inMilliseconds;
+    if (total <= 0) return 0;
+    final elapsed = DateTime.now()
+        .difference(program.startsAt)
+        .inMilliseconds;
+    return (elapsed / total).clamp(0.0, 1.0).toDouble();
   }
 
   Widget _nowMarker() {
@@ -740,10 +1040,10 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
       top: 0,
       bottom: 0,
       child: Container(
-        width: 2,
+        width: 3,
         decoration: const BoxDecoration(
           color: Color(0xFFFF5964),
-          boxShadow: [BoxShadow(color: Color(0xAAFF5964), blurRadius: 8)],
+          boxShadow: [BoxShadow(color: Color(0xAAFF5964), blurRadius: 10)],
         ),
       ),
     );
@@ -752,7 +1052,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
   Widget _buildPaging() => Padding(
     padding: const EdgeInsets.symmetric(
       horizontal: TvDesignTokens.pageHorizontalPadding,
-      vertical: 8,
+      vertical: 6,
     ),
     child: Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -764,7 +1064,13 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Text('Side $_page af ${_guide?.totalPages ?? 1}'),
+          child: Text(
+            'Side $_page af ${_guide?.totalPages ?? 1}',
+            style: const TextStyle(
+              color: TvDesignTokens.textMuted,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ),
         _PageButton(
           label: 'Næste',
@@ -778,59 +1084,180 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
   Widget _buildProgramInfo() {
     final channel = _channels.elementAtOrNull(_row);
     final program = channel?.programs.elementAtOrNull(_program);
+    final isChannelAction = _program < 0 && channel != null;
     return Container(
-      height: 84,
-      padding: const EdgeInsets.symmetric(
-        horizontal: TvDesignTokens.pageHorizontalPadding,
+      height: 98,
+      margin: const EdgeInsets.fromLTRB(
+        TvDesignTokens.pageHorizontalPadding,
+        0,
+        TvDesignTokens.pageHorizontalPadding,
+        8,
       ),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xD9090B0E), TvDesignTokens.background],
+      padding: const EdgeInsets.all(9),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xF318222C), Color(0xF20A0F15)],
         ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 26,
+            offset: Offset(0, 14),
+          ),
+        ],
       ),
       child: Row(
         children: [
+          _FeaturedChannelLogo(channel: channel),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(
+                  children: [
+                    if (program?.isCurrent == true)
+                      Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: BoltColors.error.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: const Text(
+                          'LIVE NU',
+                          style: TextStyle(
+                            color: Color(0xFFFF8F8F),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.1,
+                          ),
+                        ),
+                      ),
+                    Flexible(
+                      child: Text(
+                        program?.title ?? channel?.name ?? 'Live TV',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
                 Text(
-                  program?.title ?? channel?.name ?? 'Live TV',
+                  program == null
+                      ? channel?.name ?? 'Guide'
+                      : '${_clock(program.startsAt)} til ${_clock(program.endsAt)} · ${_programDuration(program)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.w900,
+                    color: TvDesignTokens.textMuted,
+                    fontSize: 11.2,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 5),
                 Text(
                   program?.subtitle ??
-                      (program?.isFuture == true
-                          ? 'Tryk OK for programdetaljer'
-                          : _program < 0
-                          ? 'Tryk OK for at skifte favoritstatus'
-                          : 'Tryk OK for at se kanalen'),
-                  maxLines: 1,
+                      (isChannelAction
+                          ? 'Tryk OK for at skifte favoritstatus.'
+                          : program?.isFuture == true
+                          ? 'Tryk OK for programdetaljer.'
+                          : 'Tryk OK for at se kanalen. Brug pilene til at skifte program og kanal.'),
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white60),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    height: 1.25,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
           ),
-          const Text(
-            '↑↓ Kanal   ←→ Program   OK Vælg',
-            style: TextStyle(
-              color: TvDesignTokens.textMuted,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
+          const SizedBox(width: 12),
+          _FeaturedProgramPlate(
+            channel: channel,
+            program: program,
+            progress: program?.isCurrent == true
+                ? _programProgress(program!)
+                : null,
+          ),
+          const SizedBox(width: 10),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _hintChip('↑↓', 'Kanal'),
+              const SizedBox(height: 4),
+              _hintChip('←→', 'Program'),
+              const SizedBox(height: 4),
+              _hintChip('OK', 'Vælg'),
+            ],
           ),
         ],
       ),
     );
   }
+
+  String _programDuration(LiveTvProgram program) {
+    final minutes = program.endsAt.difference(program.startsAt).inMinutes;
+    if (minutes <= 0) return 'Live';
+    final remaining = program.endsAt.difference(DateTime.now()).inMinutes;
+    if (program.isCurrent && remaining > 0) return '$remaining min tilbage';
+    if (minutes >= 60) {
+      final hours = minutes ~/ 60;
+      final rest = minutes % 60;
+      return rest == 0 ? '$hours t' : '$hours t $rest min';
+    }
+    return '$minutes min';
+  }
+
+  Widget _hintChip(String key, String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: 0.055),
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          key,
+          style: const TextStyle(
+            color: TvDesignTokens.goldSoft,
+            fontSize: 10.5,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: const TextStyle(
+            color: TvDesignTokens.textMuted,
+            fontSize: 10.5,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    ),
+  );
+
 }
 
 class TvLivePlayerScreen extends StatefulWidget {
@@ -895,18 +1322,219 @@ class _GuideFilter {
   final bool favoritesOnly;
 }
 
+class _GuideGridPainter extends CustomPainter {
+  const _GuideGridPainter({required this.halfHourWidth});
+
+  final double halfHourWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final horizontal = Paint()
+      ..color = Colors.white.withValues(alpha: 0.035)
+      ..strokeWidth = 1;
+    final vertical = Paint()
+      ..color = Colors.white.withValues(alpha: 0.045)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset.zero, Offset(size.width, 0), horizontal);
+    canvas.drawLine(
+      Offset(0, size.height),
+      Offset(size.width, size.height),
+      horizontal,
+    );
+    for (double x = 0; x <= size.width; x += halfHourWidth) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), vertical);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _GuideGridPainter oldDelegate) =>
+      oldDelegate.halfHourWidth != halfHourWidth;
+}
+
+class _FeaturedChannelLogo extends StatelessWidget {
+  const _FeaturedChannelLogo({required this.channel});
+
+  final LiveTvChannel? channel;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 80,
+    height: 80,
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF26313C), Color(0xFF111820)],
+      ),
+      borderRadius: BorderRadius.circular(9),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x66000000),
+          blurRadius: 18,
+          offset: Offset(0, 9),
+        ),
+      ],
+    ),
+    child: channel?.logoUrl == null
+        ? const Icon(Icons.live_tv_rounded, color: TvDesignTokens.gold, size: 38)
+        : Image.network(
+            channel!.logoUrl!,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => const Icon(
+              Icons.live_tv_rounded,
+              color: TvDesignTokens.gold,
+              size: 38,
+            ),
+          ),
+  );
+}
+
+class _FeaturedProgramPlate extends StatelessWidget {
+  const _FeaturedProgramPlate({
+    required this.channel,
+    required this.program,
+    required this.progress,
+  });
+
+  final LiveTvChannel? channel;
+  final LiveTvProgram? program;
+  final double? progress;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 226,
+    height: 80,
+    clipBehavior: Clip.antiAlias,
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(9),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x66000000),
+          blurRadius: 18,
+          offset: Offset(0, 9),
+        ),
+      ],
+    ),
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                TvDesignTokens.gold.withValues(alpha: 0.30),
+                TvDesignTokens.cyan.withValues(alpha: 0.14),
+                const Color(0xFF0A0F15),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          right: -18,
+          top: -18,
+          width: 112,
+          height: 112,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.060),
+            ),
+          ),
+        ),
+        Center(
+          child: Opacity(
+            opacity: 0.34,
+            child: channel?.logoUrl == null
+                ? const Icon(Icons.play_circle_outline_rounded, size: 54)
+                : Image.network(
+                    channel!.logoUrl!,
+                    width: 80,
+                    height: 46,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) =>
+                        const Icon(Icons.play_circle_outline_rounded, size: 54),
+                  ),
+          ),
+        ),
+        Positioned(
+          left: 10,
+          right: 10,
+          bottom: 8,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                channel?.name ?? 'Live TV',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10.8,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 3),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  minHeight: 3,
+                  value: progress ?? 0,
+                  backgroundColor: Colors.white.withValues(alpha: 0.14),
+                  valueColor: const AlwaysStoppedAnimation<Color>(
+                    TvDesignTokens.goldSoft,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (program?.isCurrent == true)
+          Positioned(
+            top: 7,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: BoltColors.error.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: BoltColors.error.withValues(alpha: 0.34),
+                ),
+              ),
+              child: const Text(
+                'LIVE',
+                style: TextStyle(
+                  color: Color(0xFFFFA3A8),
+                  fontSize: 8.8,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 class _ChannelLogo extends StatelessWidget {
   const _ChannelLogo({required this.channel});
   final LiveTvChannel channel;
 
   @override
   Widget build(BuildContext context) => Container(
-    width: 42,
-    height: 42,
-    padding: const EdgeInsets.all(5),
+    width: 28,
+    height: 28,
+    padding: const EdgeInsets.all(3),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
+      borderRadius: BorderRadius.circular(7),
     ),
     child: channel.logoUrl == null
         ? const Icon(Icons.live_tv, color: Color(0xFF17130D))

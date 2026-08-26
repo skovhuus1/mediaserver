@@ -11,6 +11,7 @@ import '../../shared_core/ui_tokens/tv_design_tokens.dart';
 import '../../widgets/media_card.dart';
 import '../tv_focus_controller.dart';
 import 'tv_player_screen.dart';
+import '../widgets/tv_media_context_menu.dart';
 
 typedef TvPlayHandler =
     Future<void> Function(MediaItem media, int resumePositionMs);
@@ -58,6 +59,10 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
   String? _error;
   int _focusRequestEpoch = 0;
   int _loadGeneration = 0;
+  bool _selectHoldFired = false;
+  bool _selectHoldTracking = false;
+  Timer? _selectHoldTimer;
+  MediaItem? _selectHoldMedia;
 
   @override
   void initState() {
@@ -93,6 +98,7 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
 
   @override
   void dispose() {
+    _resetSelectHold();
     for (final node in [
       ..._actionNodes,
       ..._seasonNodes,
@@ -381,20 +387,87 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (_isSelectKey(event.logicalKey)) {
+      return _handleSelectKey(event)
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    _resetSelectHold();
     final handled = switch (event.logicalKey) {
       LogicalKeyboardKey.arrowLeft => _moveHorizontal(-1),
       LogicalKeyboardKey.arrowRight => _moveHorizontal(1),
       LogicalKeyboardKey.arrowDown => _moveVertical(1),
       LogicalKeyboardKey.arrowUp => _moveVertical(-1),
-      LogicalKeyboardKey.enter ||
-      LogicalKeyboardKey.select => _activateFocused(),
       LogicalKeyboardKey.escape ||
       LogicalKeyboardKey.goBack ||
       LogicalKeyboardKey.browserBack => _goBack(),
       _ => false,
     };
     return handled ? KeyEventResult.handled : KeyEventResult.ignored;
+  }
+
+  bool _isSelectKey(LogicalKeyboardKey key) =>
+      key == LogicalKeyboardKey.enter ||
+      key == LogicalKeyboardKey.numpadEnter ||
+      key == LogicalKeyboardKey.select ||
+      key == LogicalKeyboardKey.space;
+
+  bool _handleSelectKey(KeyEvent event) {
+    final media = _focusedContextMedia();
+    if (media == null) {
+      if (event is KeyDownEvent) return _activateFocused();
+      return event is KeyUpEvent || event is KeyRepeatEvent;
+    }
+    if (event is KeyDownEvent) {
+      if (_selectHoldTracking) return true;
+      _selectHoldTracking = true;
+      _selectHoldFired = false;
+      _selectHoldMedia = media;
+      _selectHoldTimer = Timer(const Duration(milliseconds: 560), () {
+        final heldMedia = _selectHoldMedia;
+        if (!mounted || !_selectHoldTracking || heldMedia == null) return;
+        _selectHoldFired = true;
+        _selectHoldTracking = false;
+        _selectHoldMedia = null;
+        _selectHoldTimer = null;
+        unawaited(_openContextMenu(heldMedia));
+      });
+      return true;
+    }
+    if (event is KeyRepeatEvent) return true;
+    if (event is KeyUpEvent) {
+      final fired = _selectHoldFired;
+      _resetSelectHold();
+      if (!fired) return _activateFocused();
+      return true;
+    }
+    return false;
+  }
+
+  void _resetSelectHold() {
+    _selectHoldTimer?.cancel();
+    _selectHoldTimer = null;
+    _selectHoldTracking = false;
+    _selectHoldFired = false;
+    _selectHoldMedia = null;
+  }
+
+  MediaItem? _focusedContextMedia() {
+    final state = _focusController.state;
+    final data = _experience;
+    if (state.isTopRow) return data?.title ?? widget.media;
+    if (state.sectionIndex == _relatedSection &&
+        data != null &&
+        state.itemIndex >= 0 &&
+        state.itemIndex < data.related.length) {
+      return data.related[state.itemIndex];
+    }
+    final episodeIndex = state.sectionIndex - _episodeSectionBase;
+    if (episodeIndex >= 0 && episodeIndex < _selectedEpisodes.length) {
+      return _selectedEpisodes[episodeIndex].media;
+    }
+    return null;
   }
 
   bool _moveHorizontal(int delta) {
@@ -768,6 +841,29 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
           onPlay: widget.onPlay,
         ),
       ),
+    );
+    if (mounted) _focusController.requestCurrentFocus();
+  }
+
+  Future<void> _openContextMenu(MediaItem media) async {
+    await showTvMediaContextMenu(
+      context: context,
+      api: widget.api,
+      media: media,
+      onOpen: (item) async {
+        final data = _experience;
+        final sameTitle = data != null && item.id == data.title.id;
+        final sameSeriesFromEpisode =
+            data != null &&
+            item.isEpisode &&
+            (data.title.isSeries || data.mode == 'series');
+        if (sameTitle || sameSeriesFromEpisode) {
+          _focusController.requestCurrentFocus();
+          return;
+        }
+        await _openRelated(item);
+      },
+      onPlay: (item, resumePositionMs) => _openPlayer(item, resumePositionMs),
     );
     if (mounted) _focusController.requestCurrentFocus();
   }

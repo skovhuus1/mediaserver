@@ -81,7 +81,9 @@ class _TvNotificationScreenState extends State<TvNotificationScreen> {
         }
         return KeyEventResult.handled;
       case LogicalKeyboardKey.enter:
+      case LogicalKeyboardKey.numpadEnter:
       case LogicalKeyboardKey.select:
+      case LogicalKeyboardKey.space:
         if (_actionFocused) {
           unawaited(_markAllRead());
         } else {
