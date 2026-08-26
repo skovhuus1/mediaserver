@@ -791,8 +791,9 @@ class PlaybackSessionController extends ChangeNotifier
         !controller.value.isInitialized) {
       return false;
     }
-    if (controller.value.isCompleted)
+    if (controller.value.isCompleted) {
       return !_isPrematurePlaybackEnd(controller);
+    }
     final streamDuration = controller.value.duration;
     final streamPosition = controller.value.position;
     if (streamDuration <= Duration.zero) return false;
