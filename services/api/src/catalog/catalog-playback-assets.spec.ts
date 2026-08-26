@@ -1,3 +1,4 @@
+import { playbackMarkerAnalysisVersion } from '@boltbytes/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import { CatalogService } from './catalog.service';
 
@@ -11,7 +12,7 @@ describe('catalog playback assets', () => {
         intervalSeconds: 10, tileWidth: 320, tileHeight: 180, columns: 5, rows: 5,
         frameCount: 12, sheetCount: 1, durationMs: 120_000,
         manifest: {
-          analysis: { markerAnalysisVersion: 3 },
+          analysis: { markerAnalysisVersion: playbackMarkerAnalysisVersion },
           cues: [{ startMs: 0, endMs: 10_000, sheet: 0, column: 0, row: 0 }],
         },
       }) },
@@ -57,7 +58,7 @@ describe('catalog playback assets', () => {
       mediaPlaybackAsset: {
         findUnique: vi.fn().mockResolvedValue({
           status: 'ready',
-          manifest: { analysis: { markerAnalysisVersion: 3 }, cues: [] },
+          manifest: { analysis: { markerAnalysisVersion: playbackMarkerAnalysisVersion }, cues: [] },
         }),
       },
       mediaTimelineMarker: { findMany: vi.fn().mockResolvedValue([]) },
@@ -76,8 +77,8 @@ describe('catalog playback assets', () => {
     const tx = {
       $queryRaw: vi.fn(),
       mediaItem: { findMany: vi.fn().mockResolvedValue([
-        { id: 'fresh', file: { modifiedAt: now }, playbackAsset: { status: 'ready', sourceModifiedAt: now, manifest: { analysis: { markerAnalysisVersion: 3 } } } },
-        { id: 'stale-analysis', file: { modifiedAt: now }, playbackAsset: { status: 'ready', sourceModifiedAt: now, manifest: { analysis: { markerAnalysisVersion: 2 } } } },
+        { id: 'fresh', file: { modifiedAt: now }, playbackAsset: { status: 'ready', sourceModifiedAt: now, manifest: { analysis: { markerAnalysisVersion: playbackMarkerAnalysisVersion } } } },
+        { id: 'stale-analysis', file: { modifiedAt: now }, playbackAsset: { status: 'ready', sourceModifiedAt: now, manifest: { analysis: { markerAnalysisVersion: playbackMarkerAnalysisVersion - 1 } } } },
         { id: 'missing', file: { modifiedAt: now }, playbackAsset: null },
         { id: 'active', file: { modifiedAt: now }, playbackAsset: null },
       ]) },
