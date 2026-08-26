@@ -31,6 +31,7 @@ class NativeVideoTelemetry {
     required this.bandwidthEstimate,
     required this.droppedFrames,
     required this.totalFrames,
+    required this.isLoading,
     this.height,
     this.width,
     this.bitrate,
@@ -41,6 +42,7 @@ class NativeVideoTelemetry {
   final int bandwidthEstimate;
   final int droppedFrames;
   final int totalFrames;
+  final bool isLoading;
   final int? height;
   final int? width;
   final int? bitrate;
@@ -56,6 +58,7 @@ class NativeVideoTelemetry {
       bandwidthEstimate: number('bandwidthEstimate') ?? 0,
       droppedFrames: number('droppedFrames') ?? 0,
       totalFrames: number('totalFrames') ?? 0,
+      isLoading: map['isLoading'] == true,
       height: number('height'),
       width: number('width'),
       bitrate: number('bitrate'),

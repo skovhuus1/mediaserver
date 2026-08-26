@@ -191,6 +191,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
             .buildUponParameters()
             .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
             .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
+            .setForceLowestBitrate(false)
             .setMaxVideoSize(Integer.MAX_VALUE, height)
             .build());
   }
@@ -364,7 +365,12 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
 
     // Clear video track override to enable adaptive streaming
     trackSelector.setParameters(
-        trackSelector.buildUponParameters().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build());
+        trackSelector
+            .buildUponParameters()
+            .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
+            .setForceLowestBitrate(false)
+            .build());
   }
 
   // TODO: Migrate to stable API, see https://github.com/flutter/flutter/issues/147039.

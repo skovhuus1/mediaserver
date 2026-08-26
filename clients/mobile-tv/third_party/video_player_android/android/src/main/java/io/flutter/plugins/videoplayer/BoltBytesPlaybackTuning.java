@@ -1,15 +1,45 @@
 package io.flutter.plugins.videoplayer;
 
+import android.content.Context;
 import androidx.annotation.NonNull;
 import androidx.media3.common.C;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection;
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 
 /** Media3 playback tuning selected by the BoltBytes client before player creation. */
 @UnstableApi
 public final class BoltBytesPlaybackTuning {
+  static final int AUTO_MIN_BUFFER_MS = 30_000;
+  static final int AUTO_MAX_BUFFER_MS = 120_000;
+  static final int AUTO_PLAYBACK_BUFFER_MS = 1_500;
+  static final int AUTO_REBUFFER_MS = 8_000;
+  static final int QUALITY_INCREASE_BUFFER_MS = 30_000;
+  static final int QUALITY_DECREASE_BUFFER_MS = 10_000;
+  static final int QUALITY_RETAIN_BUFFER_MS = 25_000;
+  static final float BANDWIDTH_FRACTION = 0.70f;
+
   private BoltBytesPlaybackTuning() {}
+
+  @NonNull
+  public static DefaultTrackSelector trackSelector(
+      @NonNull Context context, @NonNull VideoPlayerOptions options) {
+    AdaptiveTrackSelection.Factory factory = options.boltBytesTvMode
+        ? new AdaptiveTrackSelection.Factory(
+            QUALITY_INCREASE_BUFFER_MS,
+            QUALITY_DECREASE_BUFFER_MS,
+            QUALITY_RETAIN_BUFFER_MS,
+            BANDWIDTH_FRACTION)
+        : new AdaptiveTrackSelection.Factory();
+    DefaultTrackSelector selector = new DefaultTrackSelector(context, factory);
+    if (options.boltBytesTvMode) {
+      selector.setParameters(
+          selector.buildUponParameters().setForceLowestBitrate(true).build());
+    }
+    return selector;
+  }
 
   @NonNull
   public static DefaultLoadControl loadControl(@NonNull VideoPlayerOptions options) {
@@ -17,16 +47,23 @@ public final class BoltBytesPlaybackTuning {
       case "low_latency":
         return new DefaultLoadControl.Builder()
             .setBufferDurationsMs(5_000, 15_000, 750, 1_500)
+            .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(5_000, true)
             .build();
       case "stable":
         return new DefaultLoadControl.Builder()
             .setBufferDurationsMs(60_000, 180_000, 5_000, 10_000)
+            .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(60_000, true)
             .build();
       default:
         return new DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30_000, 120_000, 1_000, 2_000)
+            .setBufferDurationsMs(
+                AUTO_MIN_BUFFER_MS,
+                AUTO_MAX_BUFFER_MS,
+                AUTO_PLAYBACK_BUFFER_MS,
+                AUTO_REBUFFER_MS)
+            .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(30_000, true)
             .build();
     }

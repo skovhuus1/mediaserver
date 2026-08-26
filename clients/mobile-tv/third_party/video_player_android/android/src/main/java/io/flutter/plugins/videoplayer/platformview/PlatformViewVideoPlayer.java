@@ -78,7 +78,7 @@ public class PlatformViewVideoPlayer extends VideoPlayer {
             }
           }
           androidx.media3.exoplayer.trackselection.DefaultTrackSelector trackSelector =
-              new androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context);
+              BoltBytesPlaybackTuning.trackSelector(context, options);
           builder
               .setTrackSelector(trackSelector)
               .setMediaSourceFactory(asset.getMediaSourceFactory(context));

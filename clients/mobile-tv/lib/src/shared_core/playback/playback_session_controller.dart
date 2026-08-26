@@ -9,7 +9,9 @@ import '../../core/app_config.dart';
 import '../../core/models.dart';
 import '../../core/playback_platform.dart';
 import '../../core/webvtt.dart';
+import 'playback_maintenance_scheduler.dart';
 import 'playback_tuning.dart';
+import 'tv_adaptive_quality_policy.dart';
 
 const _stateUnset = Object();
 
@@ -335,8 +337,11 @@ class PlaybackSessionController extends ChangeNotifier
   List<VideoTrack> _videoTracks = const [];
   DateTime? _lastKeepAwakeAt;
   double? _estimatedDownlinkMbps;
-  Timer? _heartbeatTimer;
-  Timer? _progressTimer;
+  final PlaybackMaintenanceScheduler _maintenanceScheduler =
+      PlaybackMaintenanceScheduler();
+  final TvAdaptiveQualityPolicy _adaptiveQualityPolicy =
+      TvAdaptiveQualityPolicy();
+  Timer? _qualityTimer;
   Timer? _uiTimer;
   Timer? _keepAwakeTimer;
   Timer? _nextTimer;
@@ -353,6 +358,8 @@ class PlaybackSessionController extends ChangeNotifier
   bool _prematureEndRecovering = false;
   bool _qualityChanging = false;
   bool _audioChanging = false;
+  bool _qualityPolicyRunning = false;
+  int? _activeVideoHeight;
   int _prematureEndRetryCount = 0;
   int? _sessionFixedHeight;
   String? _sessionQualityMode;
@@ -609,13 +616,13 @@ class PlaybackSessionController extends ChangeNotifier
 
   void _startTimers() {
     _stopTimers();
-    _heartbeatTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => unawaited(_heartbeat()),
+    _maintenanceScheduler.start(
+      heartbeat: _heartbeat,
+      progress: () => saveProgress(),
     );
-    _progressTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => unawaited(saveProgress()),
+    _qualityTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(_evaluateAdaptiveQuality()),
     );
     _uiTimer = Timer.periodic(
       const Duration(milliseconds: 250),
@@ -629,13 +636,12 @@ class PlaybackSessionController extends ChangeNotifier
   }
 
   void _stopTimers() {
-    _heartbeatTimer?.cancel();
-    _progressTimer?.cancel();
+    _maintenanceScheduler.stop();
+    _qualityTimer?.cancel();
     _uiTimer?.cancel();
     _keepAwakeTimer?.cancel();
     _nextTimer?.cancel();
-    _heartbeatTimer = null;
-    _progressTimer = null;
+    _qualityTimer = null;
     _uiTimer = null;
     _keepAwakeTimer = null;
     _nextTimer = null;
@@ -761,6 +767,40 @@ class PlaybackSessionController extends ChangeNotifier
         },
       );
     } catch (_) {}
+  }
+
+  Future<void> _evaluateAdaptiveQuality() async {
+    if (_qualityPolicyRunning || _disposed || _released) return;
+    final auth = _authorization;
+    final controller = _video;
+    if (auth == null ||
+        controller == null ||
+        !auth.isHls ||
+        !controller.value.isInitialized ||
+        auth.renditions.length < 2) {
+      return;
+    }
+    _qualityPolicyRunning = true;
+    try {
+      final telemetry = await _platform.videoTelemetry();
+      if (telemetry == null) return;
+      _activeVideoHeight = telemetry.height ?? _activeVideoHeight;
+      final decision = _adaptiveQualityPolicy.evaluate(
+        TvAdaptiveQualitySample(
+          now: DateTime.now(),
+          bufferAheadMs: telemetry.bufferAheadMs,
+          bandwidthEstimate: telemetry.bandwidthEstimate,
+          isBuffering: controller.value.isBuffering,
+          isLoading: telemetry.isLoading,
+          currentHeight: telemetry.height,
+        ),
+      );
+      if (decision.changed && decision.maximumHeight > 0) {
+        await _platform.setAutoMaximumHeight(decision.maximumHeight);
+      }
+    } finally {
+      _qualityPolicyRunning = false;
+    }
   }
 
   int get _bufferAheadMs {
@@ -1168,44 +1208,29 @@ class PlaybackSessionController extends ChangeNotifier
         ),
       );
       if (directTrackSupported) {
-        if (mode == 'auto') {
-          await _platform.setAutoMaximumHeight(
-            currentUpscaleMode == 'server' ? 0 : sourceHeight,
-          );
-          await controller.selectVideoTrack(null);
-          _setState(
-            _state.copyWith(
-              status: 'Kvalitet: Automatisk',
-              loading: false,
-              buffering: controller.value.isBuffering,
-              qualityChanging: false,
-              error: null,
-              qualityLabel: _qualityLabel,
-              upscaleLabel: _upscaleLabel,
-            ),
-          );
-          _tick();
-          return;
-        }
-        if (preferredTarget != null) {
-          final track = _trackAtOrBelow(preferredTarget);
-          if (track != null) {
-            await controller.selectVideoTrack(track);
-            _setState(
-              _state.copyWith(
-                status: 'Kvalitet: $_qualitySelectionLabel',
-                loading: false,
-                buffering: controller.value.isBuffering,
-                qualityChanging: false,
-                error: null,
-                qualityLabel: _qualityLabel,
-                upscaleLabel: _upscaleLabel,
-              ),
-            );
-            _tick();
-            return;
-          }
-        }
+        final ceiling = mode == 'auto'
+            ? _maximumRenditionHeight(auth, fallback: sourceHeight)
+            : preferredTarget ?? sourceHeight;
+        final maximum = _adaptiveQualityPolicy.configure(
+          rungs: _qualityRungs(auth),
+          configuredMaximum: ceiling,
+          now: DateTime.now(),
+          currentHeight: _activeVideoHeight,
+        );
+        await _platform.setAutoMaximumHeight(maximum);
+        _setState(
+          _state.copyWith(
+            status: 'Kvalitet: $_qualitySelectionLabel',
+            loading: false,
+            buffering: controller.value.isBuffering,
+            qualityChanging: false,
+            error: null,
+            qualityLabel: _qualityLabel,
+            upscaleLabel: _upscaleLabel,
+          ),
+        );
+        _tick();
+        return;
       }
 
       await _reconfigure(
@@ -1400,32 +1425,46 @@ class PlaybackSessionController extends ChangeNotifier
         _videoTracks.where((track) => (track.height ?? 0) > 0).toList()
           ..sort((a, b) => (a.height ?? 0).compareTo(b.height ?? 0));
     final mode = _sessionQualityMode ?? authorization.preferences.qualityMode;
-    if (mode == 'auto') {
-      final sourceHeight =
-          authorization.sourceHeight ??
-          (_videoTracks.isEmpty ? null : _videoTracks.last.height) ??
-          1080;
-      await _platform.setAutoMaximumHeight(
-        currentUpscaleMode == 'server' ? 0 : sourceHeight,
-      );
-      await controller.selectVideoTrack(null);
-      return;
-    }
-    final target = mode == 'original'
+    final sourceHeight =
+        authorization.sourceHeight ??
+        (_videoTracks.isEmpty ? null : _videoTracks.last.height) ??
+        1080;
+    final target = mode == 'auto'
+        ? _maximumRenditionHeight(authorization, fallback: sourceHeight)
+        : mode == 'original'
         ? authorization.sourceHeight
         : _sessionFixedHeight;
-    final selected = _trackAtOrBelow(target);
-    if (selected != null) await controller.selectVideoTrack(selected);
+    final ceiling = target ?? sourceHeight;
+    final maximum = _adaptiveQualityPolicy.configure(
+      rungs: _qualityRungs(authorization),
+      configuredMaximum: ceiling,
+      now: DateTime.now(),
+      warmStart: true,
+    );
+    await _platform.setAutoMaximumHeight(maximum);
   }
 
-  VideoTrack? _trackAtOrBelow(int? height) {
-    if (_videoTracks.isEmpty) return null;
-    final target = height ?? _videoTracks.last.height ?? 1080;
-    return _videoTracks
-            .where((track) => (track.height ?? 0) <= target)
-            .lastOrNull ??
-        _videoTracks.first;
-  }
+  int _maximumRenditionHeight(
+    PlaybackAuthorization authorization, {
+    required int fallback,
+  }) => authorization.renditions
+      .map((rendition) => rendition.height)
+      .where((height) => height > 0)
+      .fold(fallback, (current, value) => math.max(current, value));
+
+  List<TvAdaptiveQualityRung> _qualityRungs(
+    PlaybackAuthorization authorization,
+  ) => authorization.renditions
+      .where((rendition) => rendition.height > 0)
+      .map(
+        (rendition) => TvAdaptiveQualityRung(
+          height: rendition.height,
+          bandwidth: rendition.bitrate > 0
+              ? (rendition.bitrate * 1.08).round()
+              : 0,
+        ),
+      )
+      .toList(growable: false);
 
   Map<String, dynamic> _playbackCapabilitiesPayload({
     required String upscaleMode,

@@ -1106,6 +1106,8 @@ public final class VideoPlayerTest {
     when(mockExoPlayer.getTrackSelector()).thenReturn(mockTrackSelector);
     when(mockTrackSelector.buildUponParameters()).thenReturn(mockBuilder);
     when(mockBuilder.clearOverridesOfType(C.TRACK_TYPE_VIDEO)).thenReturn(mockBuilder);
+    when(mockBuilder.setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)).thenReturn(mockBuilder);
+    when(mockBuilder.setForceLowestBitrate(false)).thenReturn(mockBuilder);
     when(mockBuilder.build()).thenReturn(mockParameters);
 
     VideoPlayer videoPlayer = createVideoPlayer();
@@ -1116,6 +1118,8 @@ public final class VideoPlayerTest {
     // Verify track selector cleared video overrides
     verify(mockTrackSelector).buildUponParameters();
     verify(mockBuilder).clearOverridesOfType(C.TRACK_TYPE_VIDEO);
+    verify(mockBuilder).setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false);
+    verify(mockBuilder).setForceLowestBitrate(false);
     verify(mockBuilder).build();
     verify(mockTrackSelector).setParameters(mockParameters);
 
