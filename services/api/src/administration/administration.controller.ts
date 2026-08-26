@@ -165,6 +165,18 @@ export class AdministrationController {
     return this.administration.resumePlaybackAnalysisQueue(actor);
   }
 
+  @Get('playback-analysis/schedule')
+  @Roles('admin', 'operator')
+  playbackAnalysisSchedule(@CurrentUser() actor: AuthenticatedUser) {
+    return this.administration.playbackAnalysisSchedule(actor);
+  }
+
+  @Put('playback-analysis/schedule')
+  @Roles('admin')
+  updatePlaybackAnalysisSchedule(@CurrentUser() actor: AuthenticatedUser, @Body() input: unknown) {
+    return this.administration.updatePlaybackAnalysisSchedule(actor, input);
+  }
+
   @Get('playback-analysis/:mediaId')
   @Roles('admin', 'operator')
   playbackAnalysisDetail(@CurrentUser() actor: AuthenticatedUser, @Param('mediaId') mediaId: string) {

@@ -1,21 +1,34 @@
 import type { PrismaClient } from '@prisma/client';
+import {
+  playbackAnalysisScheduleIsOpen,
+  playbackAnalysisScheduleSettingKey,
+  storedPlaybackAnalysisSchedule,
+} from './playback-analysis-schedule.js';
 
 export const playbackAnalysisQueuePauseSettingKey = 'runtime.playback-analysis.paused';
 
 export type PlaybackAnalysisQueueState = {
   paused: boolean;
+  effectivePaused: boolean;
+  pauseReason: 'manual' | 'schedule' | null;
   queued: number;
   running: number;
   pausedJobs: number;
+  scheduleEnabled: boolean;
+  scheduleOpen: boolean;
 };
 
 export async function playbackAnalysisQueueState(
   prisma: PrismaClient,
   accountId: string,
 ): Promise<PlaybackAnalysisQueueState> {
-  const [setting, grouped] = await Promise.all([
+  const [setting, scheduleSetting, grouped] = await Promise.all([
     prisma.systemSetting.findUnique({
       where: { accountId_key: { accountId, key: playbackAnalysisQueuePauseSettingKey } },
+      select: { value: true },
+    }),
+    prisma.systemSetting.findUnique({
+      where: { accountId_key: { accountId, key: playbackAnalysisScheduleSettingKey } },
       select: { value: true },
     }),
     prisma.systemJob.groupBy({
@@ -25,7 +38,20 @@ export async function playbackAnalysisQueueState(
     }),
   ]);
   const count = (status: string) => grouped.find((entry) => entry.status === status)?._count._all ?? 0;
-  return { paused: setting?.value === true, queued: count('queued'), running: count('running'), pausedJobs: count('paused') };
+  const paused = setting?.value === true;
+  const schedule = storedPlaybackAnalysisSchedule(scheduleSetting?.value);
+  const scheduleOpen = playbackAnalysisScheduleIsOpen(schedule);
+  const pauseReason = paused ? 'manual' : schedule.enabled && !scheduleOpen ? 'schedule' : null;
+  return {
+    paused,
+    effectivePaused: pauseReason !== null,
+    pauseReason,
+    queued: count('queued'),
+    running: count('running'),
+    pausedJobs: count('paused'),
+    scheduleEnabled: schedule.enabled,
+    scheduleOpen,
+  };
 }
 
 export async function setPlaybackAnalysisQueuePaused(

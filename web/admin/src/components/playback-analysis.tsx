@@ -15,6 +15,8 @@ type AnalysisDetail = AnalysisRow & { file: { status: string; durationMs: number
 type MarkerDraft = Record<Marker['kind'], { enabled: boolean; start: string; end: string }>;
 type BulkAction = 'rebuild' | 'reset';
 type BulkResult = { requested: number; queued: number; deduplicated: number; skipped: number; failed: Array<{ mediaId: string; title: string | null; reason: string }> };
+type PlaybackQueueState = { paused: boolean; effectivePaused: boolean; pauseReason: 'manual' | 'schedule' | null; queued: number; running: number; pausedJobs: number; scheduleEnabled: boolean; scheduleOpen: boolean };
+type PlaybackSchedule = { enabled: boolean; timezone: string; windows: Array<{ start: string; end: string }> };
 const emptyDraft = (): MarkerDraft => ({ intro: { enabled: false, start: '00:00', end: '00:00' }, recap: { enabled: false, start: '00:00', end: '00:00' }, credits: { enabled: false, start: '00:00', end: '00:00' } });
 
 export function PlaybackAnalysis() {
@@ -29,7 +31,8 @@ export function PlaybackAnalysis() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
-  const [queueState, setQueueState] = useState<{ paused: boolean; queued: number; running: number; pausedJobs: number } | null>(null);
+  const [queueState, setQueueState] = useState<PlaybackQueueState | null>(null);
+  const [schedule, setSchedule] = useState<PlaybackSchedule>({ enabled: false, timezone: 'Europe/Copenhagen', windows: [] });
   const [message, setMessage] = useState('');
   const [canWrite, setCanWrite] = useState(false);
 
@@ -38,7 +41,7 @@ export function PlaybackAnalysis() {
     if (query.trim()) params.set('q', query.trim());
     const [result, nextQueueState] = await Promise.all([
       api<AnalysisPage>(`/playback-analysis?${params}`),
-      api<{ paused: boolean; queued: number; running: number; pausedJobs: number }>('/playback-analysis/queue/status'),
+      api<PlaybackQueueState>('/playback-analysis/queue/status'),
     ]);
     setPage(result);
     setQueueState(nextQueueState);
@@ -57,6 +60,7 @@ export function PlaybackAnalysis() {
     setDraft(next);
   }, []);
   useEffect(() => { void api<SessionUser>('/auth/me').then((user) => setCanWrite(user.roles.includes('admin'))).catch(() => undefined); }, []);
+  useEffect(() => { void api<PlaybackSchedule>('/playback-analysis/schedule').then(setSchedule).catch((error) => setMessage(errorMessage(error))); }, []);
   useEffect(() => { setLoading(true); const timer = window.setTimeout(() => void loadRows().catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)), 220); return () => window.clearTimeout(timer); }, [loadRows]);
   useEffect(() => { if (!selectedId) { setDetail(null); return; } void loadDetail(selectedId).catch((error) => setMessage(errorMessage(error))); }, [selectedId, loadDetail]);
   const counts = useMemo(() => page.items.reduce((result, item) => ({ ...result, [item.status]: (result[item.status] ?? 0) + 1 }), {} as Record<string, number>), [page.items]);
@@ -69,7 +73,8 @@ export function PlaybackAnalysis() {
   async function perform(action: () => Promise<void>) { setBusy(true); setMessage(''); try { await action(); } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); } }
   async function rebuild() { if (!selectedId) return; await perform(async () => { await api(`/playback-analysis/${selectedId}/rebuild`, { method: 'POST' }); setMessage('Analysen er sat i kø.'); await Promise.all([loadRows(), loadDetail(selectedId)]); }); }
   async function rebuildMissing() { setBatchBusy(true); setMessage(''); try { const result = await api<{ queued: number; skipped: number }>('/media/playback-assets/jobs', { method: 'POST', body: JSON.stringify({ mode: 'missing', mediaType: 'all', analysisScope: 'marker_only' }) }); setMessage(`${result.queued} analyser sat i kø · ${result.skipped} allerede klar eller aktive.`); await loadRows(); } catch (error) { setMessage(errorMessage(error)); } finally { setBatchBusy(false); } }
-  async function toggleQueuePause() { const pause = !queueState?.paused; setBatchBusy(true); setMessage(''); try { const state = await api<{ paused: boolean; queued: number; running: number; pausedJobs: number }>(`/playback-analysis/queue/${pause ? 'pause' : 'resume'}`, { method: 'POST' }); setQueueState(state); setMessage(pause ? `Genereringen er pauset. ${state.running} igangværende analyse afsluttes sikkert.` : `${state.queued} analyser er genoptaget.`); await loadRows(); } catch (error) { setMessage(errorMessage(error)); } finally { setBatchBusy(false); } }
+  async function toggleQueuePause() { const pause = !queueState?.paused; setBatchBusy(true); setMessage(''); try { const state = await api<PlaybackQueueState>(`/playback-analysis/queue/${pause ? 'pause' : 'resume'}`, { method: 'POST' }); setQueueState(state); setMessage(pause ? `Genereringen er pauset. ${state.running} igangværende analyse afsluttes sikkert.` : state.pauseReason === 'schedule' ? `${state.queued} analyser venter på næste kørselsvindue.` : `${state.queued} analyser er genoptaget.`); await loadRows(); } catch (error) { setMessage(errorMessage(error)); } finally { setBatchBusy(false); } }
+  async function saveSchedule(event: FormEvent) { event.preventDefault(); setBatchBusy(true); setMessage(''); try { const result = await api<PlaybackSchedule>('/playback-analysis/schedule', { method: 'PUT', body: JSON.stringify(schedule) }); setSchedule(result); setMessage(result.enabled ? 'Tidsplanen er gemt. Nye analyser starter kun i de valgte tidsrum.' : 'Tidsplanen er deaktiveret. Køen kan køre hele døgnet.'); await loadRows(); } catch (error) { setMessage(errorMessage(error)); } finally { setBatchBusy(false); } }
   function toggleSelection(id: string, checked: boolean) { setSelectedIds((current) => { const next = new Set(current); if (checked) next.add(id); else next.delete(id); return next; }); }
   function toggleVisibleSelection() { setSelectedIds((current) => { const next = new Set(current); if (allVisibleSelected) page.items.forEach((item) => next.delete(item.id)); else page.items.forEach((item) => next.add(item.id)); return next; }); }
   async function runBulkAction() {
@@ -98,6 +103,12 @@ export function PlaybackAnalysis() {
   return <section className={styles.page}>
     <header className={styles.hero}><div><span>PLAYBACK LAB</span><h1>Playback-analyse</h1><p>Seek-preview, intro, recap og rulletekst samlet i en kontrolleret pipeline.</p></div><div className={styles.heroActions}><Link href="/?admin=tasks"><Layers3 size={16} />Se opgavekø</Link><button disabled={!canWrite || batchBusy} onClick={() => void toggleQueuePause()}>{queueState?.paused ? 'Genoptag generering' : 'Pause generering'}</button><button disabled={!canWrite || batchBusy || queueState?.paused} onClick={() => void rebuildMissing()}><WandSparkles size={16} />{batchBusy ? 'Arbejder...' : 'Analysér manglende'}</button></div></header>
     <div className={styles.overview}><Summary label="Titler" value={page.total} /><Summary label="Klar" value={counts.ready ?? 0} tone="ready" /><Summary label="Arbejder" value={(counts.queued ?? 0) + (counts.generating ?? 0)} tone="working" /><Summary label="Kræver handling" value={(counts.failed ?? 0) + (counts.missing ?? 0)} tone="failed" /></div>
+    <form className={styles.schedule} onSubmit={saveSchedule}>
+      <header><div><span>TIDSSTYRING</span><h2>Daglige kørselsvinduer</h2><p>Igangværende filer afsluttes sikkert. Kun starten af næste analyse bliver udsat.</p></div><strong data-state={queueState?.pauseReason ?? (queueState?.scheduleOpen ? 'open' : 'idle')}>{queueState?.paused ? 'Manuelt pauset' : queueState?.scheduleEnabled && !queueState.scheduleOpen ? 'Venter på kørselsvindue' : 'Kørsel tilladt'}</strong></header>
+      <div className={styles.scheduleControls}><label className={styles.scheduleToggle}><input type="checkbox" checked={schedule.enabled} onChange={(event) => setSchedule((current) => ({ ...current, enabled: event.target.checked }))} /><span>Aktivér tidsplan</span></label><label><span>Tidszone</span><input value={schedule.timezone} onChange={(event) => setSchedule((current) => ({ ...current, timezone: event.target.value }))} placeholder="Europe/Copenhagen" /></label></div>
+      <div className={styles.scheduleWindows}>{schedule.windows.map((window, index) => <div key={`${index}-${window.start}-${window.end}`}><span>Periode {index + 1}</span><label>Fra<input type="time" value={window.start} onChange={(event) => setSchedule((current) => ({ ...current, windows: current.windows.map((entry, entryIndex) => entryIndex === index ? { ...entry, start: event.target.value } : entry) }))} /></label><label>Til<input type="time" value={window.end} onChange={(event) => setSchedule((current) => ({ ...current, windows: current.windows.map((entry, entryIndex) => entryIndex === index ? { ...entry, end: event.target.value } : entry) }))} /></label><button type="button" onClick={() => setSchedule((current) => ({ ...current, windows: current.windows.filter((_, entryIndex) => entryIndex !== index) }))}>Fjern</button></div>)}</div>
+      <footer><button type="button" disabled={schedule.windows.length >= 8} onClick={() => setSchedule((current) => ({ ...current, windows: [...current.windows, { start: '06:00', end: '09:00' }] }))}>Tilføj periode</button><button type="submit" disabled={!canWrite || batchBusy}>Gem tidsplan</button></footer>
+    </form>
     <div className={styles.toolbar}><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Søg titel, serie eller episode" /></label><div>{['all', 'missing', 'queued', 'generating', 'ready', 'failed'].map((value) => <button className={status === value ? styles.activeFilter : ''} onClick={() => setStatus(value)} key={value}>{statusLabel(value)}</button>)}</div></div>
     <div className={styles.bulkBar} data-active={selectedCount > 0}><button type="button" onClick={toggleVisibleSelection} disabled={!page.items.length}><ListChecks size={16} />{allVisibleSelected ? 'Fjern markering på viste' : 'Markér alle viste'}</button><strong>{selectedCount ? `${selectedCount} valgt` : 'Ingen markeret'}</strong><select value={bulkAction} onChange={(event) => setBulkAction(event.target.value as BulkAction)} disabled={!selectedCount || batchBusy}><option value="rebuild">Genopbyg analyse</option><option value="reset">Nulstil markører + genanalyser</option></select><button type="button" disabled={!canWrite || !selectedCount || batchBusy} onClick={() => void runBulkAction()}><Check size={16} />{batchBusy ? 'Kører...' : 'Kør action'}</button>{selectedCount > 0 && <button className={styles.secondaryBulk} type="button" onClick={() => setSelectedIds(new Set())} disabled={batchBusy}>Ryd valg</button>}</div>
     {message && <p className={styles.message}>{message}</p>}

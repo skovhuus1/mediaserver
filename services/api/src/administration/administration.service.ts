@@ -785,6 +785,16 @@ export class AdministrationService {
     return state;
   }
 
+  playbackAnalysisSchedule(actor: AuthenticatedUser) {
+    return loadPlaybackAnalysisSchedule(this.prisma, actor.accountId);
+  }
+
+  async updatePlaybackAnalysisSchedule(actor: AuthenticatedUser, input: unknown) {
+    const schedule = await savePlaybackAnalysisSchedule(this.prisma, actor.accountId, input);
+    await this.audit(actor, 'playback_analysis.schedule_updated', actor.accountId, schedule);
+    return schedule;
+  }
+
   async queuePlaybackAnalysisBulk(actor: AuthenticatedUser, dto: PlaybackAnalysisBulkDto) {
     const mediaIds = [...new Set(dto.mediaIds)];
     if (!mediaIds.length) throw new BadRequestException({ code: 'playback_analysis_bulk_empty', message: 'Vælg mindst ét medie.' });
@@ -1024,3 +1034,4 @@ export class AdministrationService {
   }
 }
 import { playbackAnalysisQueueState, setPlaybackAnalysisQueuePaused } from './playback-analysis-queue.js';
+import { loadPlaybackAnalysisSchedule, savePlaybackAnalysisSchedule } from './playback-analysis-schedule.js';

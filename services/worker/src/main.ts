@@ -176,6 +176,39 @@ async function claimNextJob(allowedTypes: readonly WorkerJobType[]): Promise<Cla
               AND setting.value = 'true'::jsonb
           )
         )
+        AND (
+          type <> 'media.playback-assets'
+          OR NOT EXISTS (
+            SELECT 1
+            FROM system_settings AS schedule
+            WHERE schedule.account_id = system_jobs.account_id
+              AND schedule.key = 'runtime.playback-analysis.schedule'
+              AND schedule.value->>'enabled' = 'true'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM system_settings AS schedule
+            CROSS JOIN LATERAL jsonb_array_elements(schedule.value->'windows') AS window_entry(value)
+            WHERE schedule.account_id = system_jobs.account_id
+              AND schedule.key = 'runtime.playback-analysis.schedule'
+              AND schedule.value->>'enabled' = 'true'
+              AND (
+                (window_entry.value->>'start')::time = (window_entry.value->>'end')::time
+                OR (
+                  (window_entry.value->>'start')::time < (window_entry.value->>'end')::time
+                  AND (NOW() AT TIME ZONE schedule.value->>'timezone')::time >= (window_entry.value->>'start')::time
+                  AND (NOW() AT TIME ZONE schedule.value->>'timezone')::time < (window_entry.value->>'end')::time
+                )
+                OR (
+                  (window_entry.value->>'start')::time > (window_entry.value->>'end')::time
+                  AND (
+                    (NOW() AT TIME ZONE schedule.value->>'timezone')::time >= (window_entry.value->>'start')::time
+                    OR (NOW() AT TIME ZONE schedule.value->>'timezone')::time < (window_entry.value->>'end')::time
+                  )
+                )
+              )
+          )
+        )
         AND ${typeFilter}
         AND available_at <= NOW()
         AND attempt_count < max_attempts
