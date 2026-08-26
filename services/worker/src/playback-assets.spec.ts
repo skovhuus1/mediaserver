@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { fingerprintFrameQuality, playbackFingerprintMatchesSource, recapLeadInFromIntro } from './playback-assets.js';
+import { describe, expect, it, vi } from 'vitest';
+import { commitPlaybackAnalysis, fingerprintFrameQuality, playbackFingerprintMatchesSource, prioritizeTimelineMarkers } from './playback-assets.js';
 
 describe('playback fingerprint quality', () => {
   it('rejects flat black and white frames as visual evidence', () => {
@@ -12,54 +12,57 @@ describe('playback fingerprint quality', () => {
     expect(fingerprintFrameQuality(frame)).toBeGreaterThan(0.25);
   });
 
-  it('creates a conservative recap marker from the lead-in before a detected intro', () => {
-    const fingerprint = {
-      version: 3 as const,
-      intervalSeconds: 5,
-      offsetSeconds: 0,
-      hashes: Array.from({ length: 24 }, (_, index) => (0x1000n + BigInt(index * 131)).toString(16).padStart(16, '0')),
-      quality: Array(24).fill(0.7),
-    };
-    expect(recapLeadInFromIntro(fingerprint, {
-      kind: 'intro',
-      startMs: 75_000,
-      endMs: 135_000,
-      source: 'automatic',
-      confidence: 0.82,
-    }, 1)).toMatchObject({
-      state: 'detected',
-      marker: { kind: 'recap', startMs: 0, endMs: 75_000, source: 'automatic' },
-    });
-  });
-
-  it('does not create recap lead-in markers from empty or too-short evidence', () => {
-    const fingerprint = {
-      version: 3 as const,
-      intervalSeconds: 5,
-      offsetSeconds: 0,
-      hashes: Array(24).fill('0000000000000000'),
-      quality: Array(24).fill(0.01),
-    };
-    expect(recapLeadInFromIntro(fingerprint, {
-      kind: 'intro',
-      startMs: 75_000,
-      endMs: 135_000,
-      source: 'automatic',
-      confidence: 0.82,
-    }, 1)).toMatchObject({ state: 'not-detected', reason: 'low_information', marker: null });
-    expect(recapLeadInFromIntro(fingerprint, {
-      kind: 'intro',
-      startMs: 12_000,
-      endMs: 72_000,
-      source: 'automatic',
-      confidence: 0.82,
-    }, 1)).toMatchObject({ state: 'not-detected', reason: 'no_repeated_sequence', marker: null });
-  });
-
   it('only reuses sibling fingerprints from the same source file version', () => {
     const sourceModifiedAt = new Date('2026-08-26T10:00:00.000Z');
     expect(playbackFingerprintMatchesSource(sourceModifiedAt, new Date('2026-08-26T10:00:00.000Z'))).toBe(true);
     expect(playbackFingerprintMatchesSource(sourceModifiedAt, new Date('2026-08-26T10:01:00.000Z'))).toBe(false);
     expect(playbackFingerprintMatchesSource(null, sourceModifiedAt)).toBe(false);
+  });
+
+  it('preserves marker priority manual, chapter, external, then automatic', () => {
+    const marker = (kind: 'intro' | 'recap' | 'credits', source: 'manual' | 'chapter' | 'external' | 'automatic') => ({
+      kind, source, startMs: 0, endMs: 30_000, confidence: source === 'manual' || source === 'chapter' ? 1 : 0.9,
+    });
+    expect(prioritizeTimelineMarkers(
+      [marker('intro', 'manual')],
+      [marker('intro', 'chapter'), marker('recap', 'chapter')],
+      [marker('intro', 'external'), marker('recap', 'external'), marker('credits', 'external')],
+      [marker('intro', 'automatic'), marker('recap', 'automatic'), marker('credits', 'automatic')],
+    )).toEqual([
+      marker('intro', 'manual'), marker('recap', 'chapter'), marker('credits', 'external'),
+    ]);
+  });
+
+  it('commits diagnostics and generated markers atomically while preserving manual kinds', async () => {
+    const tx = {
+      mediaTimelineMarker: {
+        findMany: vi.fn().mockResolvedValue([{ kind: 'intro' }]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 2 }),
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      mediaPlaybackAsset: { update: vi.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (operation: (client: typeof tx) => Promise<void>) => operation(tx)),
+    };
+    await commitPlaybackAnalysis(prisma as never, {
+      accountId: 'account-1',
+      mediaId: 'episode-1',
+      markers: [
+        { kind: 'intro', startMs: 40_000, endMs: 90_000, source: 'automatic', confidence: 0.94 },
+        { kind: 'recap', startMs: 0, endMs: 35_000, source: 'automatic', confidence: 0.91 },
+      ],
+      assetData: { status: 'ready', manifest: { analysis: { markerAnalysisVersion: 5 } } },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+    expect(tx.mediaTimelineMarker.deleteMany).toHaveBeenCalledWith({
+      where: { accountId: 'account-1', mediaId: 'episode-1', source: { not: 'manual' } },
+    });
+    expect(tx.mediaTimelineMarker.createMany).toHaveBeenCalledWith({
+      data: [{ accountId: 'account-1', mediaId: 'episode-1', kind: 'recap', startMs: 0, endMs: 35_000, source: 'automatic', confidence: 0.91 }],
+    });
+    expect(tx.mediaPlaybackAsset.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { mediaId: 'episode-1' }, data: expect.objectContaining({ status: 'ready' }),
+    }));
   });
 });

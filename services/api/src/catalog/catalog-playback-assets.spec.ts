@@ -108,8 +108,8 @@ describe('catalog playback assets', () => {
     });
     expect(tx.systemJob.createMany).toHaveBeenCalledWith({
       data: [
-        expect.objectContaining({ payload: { mediaId: 'stale-analysis', force: true } }),
-        expect.objectContaining({ payload: { mediaId: 'missing', force: false } }),
+        expect.objectContaining({ payload: { mediaId: 'stale-analysis', force: true, analysisScope: 'marker_only' } }),
+        expect.objectContaining({ payload: { mediaId: 'missing', force: false, analysisScope: 'full' } }),
       ],
     });
   });

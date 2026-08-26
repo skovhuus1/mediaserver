@@ -695,7 +695,7 @@ export class AdministrationService {
         error: item.playbackAsset.error,
       } : null,
       introAnalysis: playbackIntroAnalysis(item.playbackAsset?.manifest),
-      markerAnalysis: playbackMarkerAnalysis(item.playbackAsset?.manifest),
+      markerAnalysis: playbackMarkerAnalysis(item.playbackAsset?.manifest, item.timelineMarkers),
       markers: item.timelineMarkers,
       updatedAt: item.playbackAsset?.updatedAt ?? item.updatedAt,
     }));
@@ -753,8 +753,8 @@ export class AdministrationService {
         error: media.playbackAsset.error,
       } : null,
       markers: media.timelineMarkers,
-      introAnalysis: playbackIntroAnalysis(media.playbackAsset?.manifest),
-      markerAnalysis: playbackMarkerAnalysis(media.playbackAsset?.manifest),
+      introAnalysis: playbackIntroAnalysis(media.playbackAsset?.manifest, media.timelineMarkers),
+      markerAnalysis: playbackMarkerAnalysis(media.playbackAsset?.manifest, media.timelineMarkers),
       latestJob,
       previewDataUrl: await this.playbackPreview(media.playbackAsset?.spriteDirectory ?? null),
     };
@@ -942,7 +942,7 @@ export class AdministrationService {
           accountId: actor.accountId,
           type: 'media.playback-assets',
           status: 'queued',
-          payload: { mediaId, force: true },
+          payload: { mediaId, force: true, analysisScope: 'marker_only' },
         },
         select: { id: true, status: true },
       });

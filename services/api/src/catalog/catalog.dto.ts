@@ -252,6 +252,10 @@ export class QueuePlaybackAssetsBatchDto {
   @IsOptional()
   @IsBoolean()
   replaceQueue?: boolean;
+
+  @IsOptional()
+  @IsIn(['marker_only', 'full'])
+  analysisScope?: 'marker_only' | 'full';
 }
 
 export class TimelineMarkerRangeDto {
