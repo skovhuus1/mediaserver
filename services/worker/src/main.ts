@@ -121,6 +121,8 @@ type ProbeMetadata = {
 };
 
 const mediaExtensions = new Set(['.avi', '.m2ts', '.m4v', '.mkv', '.mov', '.mp4', '.mpeg', '.mpg', '.ts', '.webm']);
+const staleWorkerLeaseSweepMs = 30_000;
+let lastStaleWorkerLeaseSweep = 0;
 
 async function claimNextJob(allowedTypes: readonly WorkerJobType[]): Promise<ClaimedJob | null> {
   if (allowedTypes.length === 0) return null;
@@ -1272,6 +1274,63 @@ async function expirePlaybackLeases(): Promise<number> {
   return expired;
 }
 
+async function recoverExpiredWorkerLeases(now = new Date()): Promise<number> {
+  return prisma.$transaction(async (tx) => {
+    const expired = await tx.systemJob.findMany({
+      where: {
+        status: 'running',
+        leaseExpiresAt: { lte: now },
+      },
+      orderBy: { leaseExpiresAt: 'asc' },
+      take: 100,
+      select: {
+        id: true,
+        attemptCount: true,
+        maxAttempts: true,
+      },
+    });
+    let recovered = 0;
+    for (const job of expired) {
+      const terminal = job.attemptCount >= job.maxAttempts;
+      await tx.jobAttempt.updateMany({
+        where: {
+          jobId: job.id,
+          number: job.attemptCount,
+          status: 'running',
+        },
+        data: {
+          status: 'failed',
+          error: 'Worker lease expired',
+          endedAt: now,
+        },
+      });
+      const updated = await tx.systemJob.updateMany({
+        where: {
+          id: job.id,
+          status: 'running',
+          leaseExpiresAt: { lte: now },
+        },
+        data: terminal
+          ? {
+              status: 'failed',
+              workerId: null,
+              lockedAt: null,
+              leaseExpiresAt: null,
+            }
+          : {
+              status: 'queued',
+              availableAt: now,
+              workerId: null,
+              lockedAt: null,
+              leaseExpiresAt: null,
+            },
+      });
+      recovered += updated.count;
+    }
+    return recovered;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
 async function finishJob(job: ClaimedJob): Promise<boolean> {
   return prisma.$transaction(async (tx) => {
     const completed = await tx.systemJob.updateMany({
@@ -1313,8 +1372,8 @@ async function failJob(job: ClaimedJob, error: unknown): Promise<void> {
       where: { jobId_number: { jobId: job.id, number: job.attemptNumber } },
       data: { status: 'failed', error: message.slice(0, 2_000), endedAt: new Date() },
     });
-    await tx.systemJob.update({
-      where: { id: job.id },
+    await tx.systemJob.updateMany({
+      where: { id: job.id, status: 'running', workerId },
       data: {
         status: terminal ? 'failed' : 'queued',
         availableAt: terminal ? job.availableAt : new Date(Date.now() + Math.min(300_000, 5_000 * 2 ** job.attemptNumber)),
@@ -1616,6 +1675,27 @@ async function loop(): Promise<void> {
           workerId,
           message: 'Unable to synchronize library watchers; scheduled scanning remains active',
           error: error instanceof Error ? error.message : 'Unknown watcher synchronization failure',
+        }));
+      }
+    }
+    if (Date.now() - lastStaleWorkerLeaseSweep >= staleWorkerLeaseSweepMs) {
+      lastStaleWorkerLeaseSweep = Date.now();
+      try {
+        const recovered = await recoverExpiredWorkerLeases();
+        if (recovered > 0) {
+          console.warn(JSON.stringify({
+            level: 'warn',
+            component: 'job-lease-recovery',
+            workerId,
+            recovered,
+          }));
+        }
+      } catch (error) {
+        console.error(JSON.stringify({
+          level: 'error',
+          component: 'job-lease-recovery',
+          workerId,
+          error: error instanceof Error ? error.message : 'Unknown stale job lease recovery failure',
         }));
       }
     }

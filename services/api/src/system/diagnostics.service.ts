@@ -119,7 +119,7 @@ export class DiagnosticsService {
 
     const effectivePublicUrl = process.env.BB_MEDIA_PUBLIC_URL?.trim() || account?.externalUrl?.trim() || null;
     const securePublicUrl = Boolean(effectivePublicUrl?.startsWith('https://') && !/localhost|127\.0\.0\.1/i.test(effectivePublicUrl));
-    const corsOrigins = readCorsOrigins(process.env.CORS_ORIGIN, process.env.BB_MEDIA_PUBLIC_URL);
+    const corsOrigins = readCorsOrigins(process.env.CORS_ORIGIN, process.env.BB_MEDIA_PUBLIC_URL, account?.externalUrl);
     const corsConfigured = corsAllowsPublicUrl(corsOrigins, effectivePublicUrl);
     checks.push({
       id: 'public-url',

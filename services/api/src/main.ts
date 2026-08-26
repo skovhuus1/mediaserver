@@ -5,17 +5,20 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ApiExceptionFilter, validationException } from './common/http';
+import { createCorsOriginDelegate } from './config/cors-origin';
 import { readEnvironment } from './config/environment';
+import { PrismaService } from './prisma/prisma.service';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   const environment = readEnvironment();
+  const prisma = app.get(PrismaService);
   app.setGlobalPrefix('api/v1');
   app.use(helmet());
   app.enableCors({
-    origin: environment.corsOrigins,
+    origin: createCorsOriginDelegate(environment.corsOrigins, prisma),
     credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   app.useGlobalPipes(new ValidationPipe({
     transform: true,

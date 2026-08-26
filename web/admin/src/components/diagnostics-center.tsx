@@ -1,7 +1,7 @@
 'use client';
 
 import { Activity, AlertTriangle, BellRing, CheckCircle2, Cloud, Database, Download, HardDrive, HeartPulse, MemoryStick, RadioTower, RefreshCw, ShieldCheck, Wrench, XCircle } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type ApiFailure } from '@/lib/api';
 import styles from './diagnostics-center.module.css';
 
@@ -13,39 +13,85 @@ type Telemetry = { range: string; from: string; to: string; points: MetricPoint[
 type Alert = { id: string; key: string; severity: 'warning' | 'error'; status: 'open' | 'acknowledged' | 'resolved'; title: string; message: string; firstSeenAt: string; lastSeenAt: string };
 
 const groupIcons: Record<string, ReactNode> = { 'Kernetjenester': <Database />, 'Workers og kø': <RadioTower />, Playback: <Activity />, Storage: <HardDrive />, 'Netværk og sikkerhed': <ShieldCheck />, Opdatering: <Wrench /> };
+const liveRefreshMs = 2_000;
+const telemetryRefreshMs = 15_000;
 
 export function DiagnosticsCenter() {
   const [data, setData] = useState<Diagnostics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [range, setRange] = useState('24h');
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const load = useCallback(async () => {
+  const [lastLiveAt, setLastLiveAt] = useState<Date | null>(null);
+  const liveInFlight = useRef(false);
+  const telemetryInFlight = useRef(false);
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
+
+  const loadLive = useCallback(async () => {
+    if (liveInFlight.current) return;
+    liveInFlight.current = true;
     try {
-      const [diagnostics, history, currentAlerts] = await Promise.all([
-        api<Diagnostics>('/system/diagnostics'), api<Telemetry>(`/system/telemetry?range=${range}`), api<Alert[]>('/system/alerts'),
+      const stamp = Date.now();
+      const [diagnostics, currentAlerts] = await Promise.all([
+        api<Diagnostics>(`/system/diagnostics?live=${stamp}`),
+        api<Alert[]>(`/system/alerts?live=${stamp}`),
       ]);
-      setData(diagnostics); setTelemetry(history); setAlerts(currentAlerts); setError('');
+      setData(diagnostics); setAlerts(currentAlerts); setLastLiveAt(new Date()); setError('');
     }
     catch (failure) { setError((failure as ApiFailure)?.message ?? 'Diagnostikken kunne ikke hentes.'); }
-    finally { setLoading(false); }
-  }, [range]);
+    finally { liveInFlight.current = false; setLoading(false); }
+  }, []);
+
+  const loadTelemetry = useCallback(async () => {
+    if (telemetryInFlight.current) return;
+    telemetryInFlight.current = true;
+    const activeRange = rangeRef.current;
+    try {
+      const history = await api<Telemetry>(`/system/telemetry?range=${encodeURIComponent(activeRange)}&live=${Date.now()}`);
+      if (rangeRef.current === activeRange) setTelemetry(history);
+    }
+    catch (failure) { setError((failure as ApiFailure)?.message ?? 'Historikken kunne ikke hentes.'); }
+    finally { telemetryInFlight.current = false; }
+  }, []);
+
+  const loadNow = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([loadLive(), loadTelemetry()]);
+    setRefreshing(false);
+  }, [loadLive, loadTelemetry]);
+
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 10_000);
+    void loadLive();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadLive();
+    }, liveRefreshMs);
+    const onVisible = () => { if (document.visibilityState === 'visible') void loadLive(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, [loadLive]);
+
+  useEffect(() => {
+    void loadTelemetry();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadTelemetry();
+    }, telemetryRefreshMs);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [loadTelemetry, range]);
+
   const groups = useMemo(() => [...new Set((data?.checks ?? []).map((check) => check.group))], [data]);
   const activeAlerts = alerts.filter((alert) => alert.status !== 'resolved');
-  const acknowledge = async (id: string) => { await api(`/system/alerts/${id}/acknowledge`, { method: 'PATCH' }); await load(); };
+  const liveAgeSeconds = lastLiveAt ? Math.max(0, Math.round((Date.now() - lastLiveAt.getTime()) / 1000)) : null;
+  const acknowledge = async (id: string) => { await api(`/system/alerts/${id}/acknowledge`, { method: 'PATCH' }); await loadLive(); };
   const exportDiagnostics = async () => { const payload = await api<unknown>('/system/diagnostics/export'); const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = `boltbytes-diagnostics-${new Date().toISOString().slice(0, 10)}.json`; link.click(); URL.revokeObjectURL(url); };
 
   return <section className={styles.page}>
     <header className={styles.hero} data-state={data?.state ?? 'warning'}><div><span>SYSTEMDIAGNOSTIK</span><h1>Hele serveren. Ét helhedsbillede.</h1><p>Aktive kontroller af services, mounts, workers, playback, sikkerhed og opdatering.</p></div><div className={styles.overall}>{stateIcon(data?.state)}<span>{stateLabel(data?.state)}</span><strong>{data ? `${data.counts.ok} af ${data.checks.length} grønne` : 'Måler...'}</strong></div></header>
     <section className={styles.metrics}><Metric icon={<CheckCircle2 />} label="Klar" value={data?.counts.ok ?? 0} state="ok" /><Metric icon={<AlertTriangle />} label="Advarsler" value={data?.counts.warning ?? 0} state="warning" /><Metric icon={<XCircle />} label="Fejl" value={data?.counts.error ?? 0} state="error" /><Metric icon={<MemoryStick />} label="RAM" value={data ? `${data.runtime.memoryPercent.toFixed(0)}%` : '...'} state={data && data.runtime.memoryPercent >= 85 ? 'warning' : 'ok'} /></section>
     {error && <p className={styles.error}><AlertTriangle />{error}</p>}
-    <div className={styles.toolbar}><span>{data ? `Målt ${new Date(data.sampledAt).toLocaleString('da-DK')} · oppetid ${duration(data.runtime.uptimeSeconds)}` : 'Forbinder til serveren...'}</span><button onClick={() => void exportDiagnostics()}><Download />Eksportér diagnostik</button><button disabled={loading} onClick={() => { setLoading(true); void load(); }}><RefreshCw className={loading ? styles.spin : ''} />{loading ? 'Måler...' : 'Kør igen'}</button></div>
+    <div className={styles.toolbar}><div className={styles.liveMeta}><span className={styles.liveBadge} data-state={error ? 'error' : 'ok'}><i />Live</span><span>{data ? `Målt ${new Date(data.sampledAt).toLocaleString('da-DK')} · oppetid ${duration(data.runtime.uptimeSeconds)} · ${liveAgeSeconds === null ? 'venter på første opdatering' : `sidst opdateret for ${liveAgeSeconds} sek. siden`}` : 'Forbinder til serveren...'}</span></div><div className={styles.toolbarActions}><button onClick={() => void exportDiagnostics()}><Download />Eksportér diagnostik</button><button disabled={loading || refreshing} onClick={() => void loadNow()}><RefreshCw className={loading || refreshing ? styles.spin : ''} />{loading || refreshing ? 'Måler...' : 'Kør igen'}</button></div></div>
     <section className={styles.history}><header><div><span>HISTORISK DRIFT</span><h2>Belastning og playback</h2></div><nav aria-label="Tidsinterval">{['1h', '6h', '24h', '7d', '30d'].map((value) => <button aria-pressed={range === value} key={value} onClick={() => setRange(value)}>{value}</button>)}</nav></header><div className={styles.charts}><TelemetryChart color="#54cfee" label="CPU" points={telemetry?.points ?? []} value={(point) => point.cpuPercent} suffix="%" /><TelemetryChart color="#e6b45f" label="RAM" points={telemetry?.points ?? []} value={(point) => point.memoryPercent} suffix="%" /><TelemetryChart color="#74d5aa" label="Aktive streams" points={telemetry?.points ?? []} value={(point) => point.activeSessions} /></div></section>
     <section className={styles.alerts}><header><BellRing /><div><span>DRIFTSALARMER</span><h2>{activeAlerts.length ? `${activeAlerts.length} kræver opmærksomhed` : 'Ingen aktive alarmer'}</h2></div></header>{activeAlerts.length ? <div>{activeAlerts.map((alert) => <article data-severity={alert.severity} key={alert.id}><span>{alert.severity === 'error' ? <XCircle /> : <AlertTriangle />}</span><div><strong>{alert.title}</strong><p>{alert.message}</p><small>Senest set {new Date(alert.lastSeenAt).toLocaleString('da-DK')}</small></div>{alert.status === 'open' && <button onClick={() => void acknowledge(alert.id)}>Kvittér</button>}</article>)}</div> : <p>CPU, RAM, disk, buffering og jobkø er inden for de definerede grænser.</p>}</section>
     <div className={styles.groups}>{groups.map((group) => <section className={styles.group} key={group}><header>{groupIcons[group] ?? <HeartPulse />}<h2>{group}</h2><span>{data?.checks.filter((check) => check.group === group && check.state === 'ok').length}/{data?.checks.filter((check) => check.group === group).length}</span></header><div>{data?.checks.filter((check) => check.group === group).map((check) => <CheckCard check={check} key={check.id} />)}</div></section>)}</div>

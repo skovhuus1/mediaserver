@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, Check, Clock3, Eye, Film, Layers3, PlayCircle, RefreshCw, RotateCcw, Search, Sparkles, WandSparkles } from 'lucide-react';
+import { AlertTriangle, Check, Clock3, Eye, Film, Layers3, ListChecks, PlayCircle, RefreshCw, RotateCcw, Search, Sparkles, WandSparkles } from 'lucide-react';
 import Link from 'next/link';
 import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, type ApiFailure, type SessionUser } from '@/lib/api';
@@ -13,6 +13,7 @@ type AnalysisRow = { id: string; title: string; episodeTitle: string | null; typ
 type AnalysisPage = { items: AnalysisRow[]; total: number; page: number; take: number };
 type AnalysisDetail = AnalysisRow & { file: { status: string; durationMs: number | null; width: number | null; height: number | null; videoCodec: string | null; audioCodec: string | null; container: string | null; bitrate: number | null } | null; asset: (AnalysisRow['asset'] & { intervalSeconds: number; tileWidth: number; tileHeight: number; columns: number; rows: number; manifest: unknown; updatedAt: string }) | null; latestJob: { id: string; status: string; attemptCount: number; maxAttempts: number; updatedAt: string; attempts: Array<{ number: number; status: string; error: string | null }> } | null; previewDataUrl: string | null };
 type MarkerDraft = Record<Marker['kind'], { enabled: boolean; start: string; end: string }>;
+type BulkAction = 'rebuild' | 'reset';
 const emptyDraft = (): MarkerDraft => ({ intro: { enabled: false, start: '00:00', end: '00:00' }, recap: { enabled: false, start: '00:00', end: '00:00' }, credits: { enabled: false, start: '00:00', end: '00:00' } });
 
 export function PlaybackAnalysis() {
@@ -20,6 +21,8 @@ export function PlaybackAnalysis() {
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState<AnalysisPage>({ items: [], total: 0, page: 1, take: 100 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkAction, setBulkAction] = useState<BulkAction>('rebuild');
   const [detail, setDetail] = useState<AnalysisDetail | null>(null);
   const [draft, setDraft] = useState<MarkerDraft>(emptyDraft);
   const [loading, setLoading] = useState(true);
@@ -33,6 +36,11 @@ export function PlaybackAnalysis() {
     if (query.trim()) params.set('q', query.trim());
     const result = await api<AnalysisPage>(`/playback-analysis?${params}`);
     setPage(result);
+    setSelectedIds((current) => {
+      const visible = new Set(result.items.map((item) => item.id));
+      const next = new Set([...current].filter((id) => visible.has(id)));
+      return next.size === current.size ? current : next;
+    });
     setSelectedId((current) => current && result.items.some((item) => item.id === current) ? current : result.items[0]?.id ?? null);
   }, [query, status]);
   const loadDetail = useCallback(async (id: string) => {
@@ -46,12 +54,37 @@ export function PlaybackAnalysis() {
   useEffect(() => { setLoading(true); const timer = window.setTimeout(() => void loadRows().catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)), 220); return () => window.clearTimeout(timer); }, [loadRows]);
   useEffect(() => { if (!selectedId) { setDetail(null); return; } void loadDetail(selectedId).catch((error) => setMessage(errorMessage(error))); }, [selectedId, loadDetail]);
   const counts = useMemo(() => page.items.reduce((result, item) => ({ ...result, [item.status]: (result[item.status] ?? 0) + 1 }), {} as Record<string, number>), [page.items]);
+  const selectedItems = useMemo(() => page.items.filter((item) => selectedIds.has(item.id)), [page.items, selectedIds]);
+  const selectedCount = selectedItems.length;
+  const allVisibleSelected = page.items.length > 0 && page.items.every((item) => selectedIds.has(item.id));
   const hasActiveWork = useMemo(() => page.items.some((item) => ['queued', 'generating'].includes(item.status)) || ['queued', 'running', 'processing', 'retrying'].includes(detail?.latestJob?.status ?? ''), [page.items, detail]);
   useEffect(() => { if (!hasActiveWork) return; const timer = window.setInterval(() => { void loadRows(); if (selectedId) void loadDetail(selectedId); }, 3_000); return () => window.clearInterval(timer); }, [hasActiveWork, loadRows, loadDetail, selectedId]);
 
   async function perform(action: () => Promise<void>) { setBusy(true); setMessage(''); try { await action(); } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); } }
   async function rebuild() { if (!selectedId) return; await perform(async () => { await api(`/playback-analysis/${selectedId}/rebuild`, { method: 'POST' }); setMessage('Analysen er sat i kø.'); await Promise.all([loadRows(), loadDetail(selectedId)]); }); }
   async function rebuildMissing() { setBatchBusy(true); setMessage(''); try { const result = await api<{ queued: number; skipped: number }>('/media/playback-assets/jobs', { method: 'POST', body: JSON.stringify({ mode: 'missing', mediaType: 'all' }) }); setMessage(`${result.queued} analyser sat i kø · ${result.skipped} allerede klar eller aktive.`); await loadRows(); } catch (error) { setMessage(errorMessage(error)); } finally { setBatchBusy(false); } }
+  function toggleSelection(id: string, checked: boolean) { setSelectedIds((current) => { const next = new Set(current); if (checked) next.add(id); else next.delete(id); return next; }); }
+  function toggleVisibleSelection() { setSelectedIds((current) => { const next = new Set(current); if (allVisibleSelected) page.items.forEach((item) => next.delete(item.id)); else page.items.forEach((item) => next.add(item.id)); return next; }); }
+  async function runBulkAction() {
+    if (!selectedCount) return;
+    if (bulkAction === 'reset' && !window.confirm(`Nulstil manuelle markører og genanalyser ${selectedCount} valgte titler?`)) return;
+    setBatchBusy(true);
+    setMessage('');
+    try {
+      for (const item of selectedItems) {
+        if (bulkAction === 'rebuild') await api(`/playback-analysis/${item.id}/rebuild`, { method: 'POST' });
+        else await api(`/playback-analysis/${item.id}/markers`, { method: 'DELETE' });
+      }
+      setMessage(bulkAction === 'rebuild' ? `${selectedCount} analyser er sat i kø.` : `${selectedCount} titler er nulstillet og sat til genanalyse.`);
+      setSelectedIds(new Set());
+      await loadRows();
+      if (selectedId) await loadDetail(selectedId);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBatchBusy(false);
+    }
+  }
   async function saveMarkers(event: FormEvent) { event.preventDefault(); if (!selectedId) return; const markers = (Object.entries(draft) as Array<[Marker['kind'], MarkerDraft[Marker['kind']]]>).flatMap(([kind, value]) => value.enabled ? [{ kind, startMs: parseTime(value.start), endMs: parseTime(value.end) }] : []); await perform(async () => { const result = await api<AnalysisDetail>(`/playback-analysis/${selectedId}/markers`, { method: 'PUT', body: JSON.stringify({ markers }) }); setDetail(result); setMessage('De manuelle markører er gemt.'); await loadRows(); }); }
   async function resetMarkers() { if (!selectedId || !window.confirm('Fjern manuelle markører og kør automatisk analyse igen?')) return; await perform(async () => { await api(`/playback-analysis/${selectedId}/markers`, { method: 'DELETE' }); setMessage('Markørerne er nulstillet, og analysen er sat i kø.'); await Promise.all([loadRows(), loadDetail(selectedId)]); }); }
 
@@ -59,9 +92,10 @@ export function PlaybackAnalysis() {
     <header className={styles.hero}><div><span>PLAYBACK LAB</span><h1>Playback-analyse</h1><p>Seek-preview, intro, recap og rulletekst samlet i en kontrolleret pipeline.</p></div><div className={styles.heroActions}><Link href="/?admin=tasks"><Layers3 size={16} />Se opgavekø</Link><button disabled={!canWrite || batchBusy} onClick={() => void rebuildMissing()}><WandSparkles size={16} />{batchBusy ? 'Sætter i kø...' : 'Analysér manglende'}</button></div></header>
     <div className={styles.overview}><Summary label="Titler" value={page.total} /><Summary label="Klar" value={counts.ready ?? 0} tone="ready" /><Summary label="Arbejder" value={(counts.queued ?? 0) + (counts.generating ?? 0)} tone="working" /><Summary label="Kræver handling" value={(counts.failed ?? 0) + (counts.missing ?? 0)} tone="failed" /></div>
     <div className={styles.toolbar}><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Søg titel, serie eller episode" /></label><div>{['all', 'missing', 'queued', 'generating', 'ready', 'failed'].map((value) => <button className={status === value ? styles.activeFilter : ''} onClick={() => setStatus(value)} key={value}>{statusLabel(value)}</button>)}</div></div>
+    <div className={styles.bulkBar} data-active={selectedCount > 0}><button type="button" onClick={toggleVisibleSelection} disabled={!page.items.length}><ListChecks size={16} />{allVisibleSelected ? 'Fjern markering på viste' : 'Markér alle viste'}</button><strong>{selectedCount ? `${selectedCount} valgt` : 'Ingen markeret'}</strong><select value={bulkAction} onChange={(event) => setBulkAction(event.target.value as BulkAction)} disabled={!selectedCount || batchBusy}><option value="rebuild">Genopbyg analyse</option><option value="reset">Nulstil markører + genanalyser</option></select><button type="button" disabled={!canWrite || !selectedCount || batchBusy} onClick={() => void runBulkAction()}><Check size={16} />{batchBusy ? 'Kører...' : 'Kør action'}</button>{selectedCount > 0 && <button className={styles.secondaryBulk} type="button" onClick={() => setSelectedIds(new Set())} disabled={batchBusy}>Ryd valg</button>}</div>
     {message && <p className={styles.message}>{message}</p>}
     <div className={styles.workspace}>
-      <section className={styles.master} aria-busy={loading}><header><strong>Medier</strong><span>{page.items.length} vist</span></header><div>{!page.items.length && <Empty icon={<Film />} title="Ingen titler matcher" text="Skift søgning eller statusfilter." />}{page.items.map((item) => <button className={selectedId === item.id ? styles.selectedRow : styles.row} key={item.id} onClick={() => setSelectedId(item.id)}><StatusIcon status={item.status} /><span><strong>{item.title}</strong><small>{episodeLabel(item)} · {item.libraryName}</small>{item.type === 'episode' && analysisSummary(item) && <small className={styles.introHint}>{analysisSummary(item)}</small>}</span><em data-status={item.status}>{statusLabel(item.status)}</em></button>)}</div></section>
+      <section className={styles.master} aria-busy={loading}><header><strong>Medier</strong><span>{page.items.length} vist</span></header><div>{!page.items.length && <Empty icon={<Film />} title="Ingen titler matcher" text="Skift søgning eller statusfilter." />}{page.items.map((item) => { const checked = selectedIds.has(item.id); const active = selectedId === item.id; return <div className={`${active ? styles.selectedRow : styles.row} ${checked ? styles.bulkSelected : ''}`} key={item.id}><label className={styles.rowCheck} title="Markér til bulk-action"><input type="checkbox" checked={checked} onChange={(event) => toggleSelection(item.id, event.target.checked)} /></label><button className={styles.rowMain} type="button" onClick={() => setSelectedId(item.id)}><StatusIcon status={item.status} /><span><strong>{item.title}</strong><small>{episodeLabel(item)} · {item.libraryName}</small>{item.type === 'episode' && analysisSummary(item) && <small className={styles.introHint}>{analysisSummary(item)}</small>}</span><em data-status={item.status}>{statusLabel(item.status)}</em></button></div>; })}</div></section>
       <section className={styles.detail}>{!detail ? <Empty icon={<Eye />} title="Vælg en titel" text="Preview, status og markører vises her." /> : <><header className={styles.detailHeader}><div><span>{episodeLabel(detail)}</span><h2>{detail.title}</h2>{detail.episodeTitle && <p>{detail.episodeTitle}</p>}</div><StatusPill status={detail.asset?.status ?? 'missing'} /></header><div className={styles.metrics}><Metric label="Varighed" value={duration(detail.file?.durationMs)} /><Metric label="Kilde" value={sourceLabel(detail.file)} /><Metric label="Frames" value={String(detail.asset?.frameCount ?? 0)} /><Metric label="Sprites" value={String(detail.asset?.sheetCount ?? 0)} /></div><section className={styles.preview}>{detail.previewDataUrl ? <img src={detail.previewDataUrl} alt="Repræsentativt billede fra mediet" /> : <div><Sparkles size={26} /><span>Intet seek-preview endnu</span></div>}<p>{detail.asset ? `Repræsentativt preview · ${detail.asset.columns} × ${detail.asset.rows} felter · ${detail.asset.intervalSeconds} sek. interval` : 'Kør analysen for at oprette billeder på tidslinjen.'}</p></section><MarkerDiagnostics analysis={markerAnalysis(detail)} mediaType={detail.type} /><MarkerTimeline markers={detail.markers} durationMs={detail.durationMs ?? detail.file?.durationMs ?? detail.asset?.durationMs ?? null} />{(detail.asset?.error || detail.latestJob?.attempts.some((attempt) => attempt.error)) && <section className={styles.error}><AlertTriangle /><div><strong>Seneste fejl</strong><p>{detail.asset?.error ?? detail.latestJob?.attempts.find((attempt) => attempt.error)?.error}</p></div></section>}{detail.latestJob && <section className={styles.job}><Clock3 /><div><strong>{statusLabel(detail.latestJob.status)}</strong><span>Forsøg {detail.latestJob.attemptCount}/{detail.latestJob.maxAttempts} · {new Date(detail.latestJob.updatedAt).toLocaleString('da-DK')}</span></div></section>}<form className={styles.markers} onSubmit={saveMarkers}><header><div><span>TIDSLINJE</span><h3>Manuelle markører</h3></div><small>Præcise værdier har forrang for automatisk analyse.</small></header>{(['intro', 'recap', 'credits'] as const).map((kind) => <div className={styles.markerRow} key={kind}><label><input type="checkbox" checked={draft[kind].enabled} onChange={(event) => setDraft((current) => ({ ...current, [kind]: { ...current[kind], enabled: event.target.checked } }))} />{markerLabel(kind)}</label><label>Start<input disabled={!draft[kind].enabled} value={draft[kind].start} onChange={(event) => setDraft((current) => ({ ...current, [kind]: { ...current[kind], start: event.target.value } }))} /></label><label>Slut<input disabled={!draft[kind].enabled} value={draft[kind].end} onChange={(event) => setDraft((current) => ({ ...current, [kind]: { ...current[kind], end: event.target.value } }))} /></label></div>)}<div className={styles.actions}><button disabled={!canWrite || busy}><Check size={16} />Gem markører</button><button className={styles.secondary} type="button" disabled={!canWrite || busy} onClick={() => void rebuild()}><RefreshCw size={16} />Genopbyg analyse</button><button className={styles.secondary} type="button" disabled={!canWrite || busy} onClick={() => void resetMarkers()}><RotateCcw size={16} />Nulstil</button></div></form></>}</section>
     </div>
   </section>;

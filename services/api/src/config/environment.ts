@@ -26,14 +26,19 @@ export function publicUrlOrigin(value: string | null | undefined): string | null
   }
 }
 
-export function readCorsOrigins(rawCorsOrigin: string | undefined, publicUrl: string | undefined): string[] {
+export function readCorsOrigins(
+  rawCorsOrigin: string | undefined,
+  ...publicUrls: Array<string | null | undefined>
+): string[] {
   const configured = rawCorsOrigin ?? 'http://localhost:5555';
   const origins = configured
     .split(',')
     .map((origin) => normalizeCorsOrigin(origin))
     .filter((origin): origin is string => Boolean(origin));
-  const publicOrigin = publicUrlOrigin(publicUrl);
-  if (publicOrigin) origins.push(publicOrigin);
+  for (const publicUrl of publicUrls) {
+    const publicOrigin = publicUrlOrigin(publicUrl);
+    if (publicOrigin) origins.push(publicOrigin);
+  }
   return [...new Set(origins)];
 }
 

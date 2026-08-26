@@ -14,4 +14,17 @@ describe('environment CORS origins', () => {
     expect(origins).toEqual(['https://media.boltbytes.com']);
     expect(corsAllowsPublicUrl(origins, 'https://media.boltbytes.com')).toBe(true);
   });
+
+  it('adds account-level public URLs to diagnostics CORS origins', () => {
+    const origins = readCorsOrigins(
+      'http://serverens-ip:6555',
+      undefined,
+      'https://media.boltbytes.com',
+    );
+    expect(origins).toEqual([
+      'http://serverens-ip:6555',
+      'https://media.boltbytes.com',
+    ]);
+    expect(corsAllowsPublicUrl(origins, 'https://media.boltbytes.com')).toBe(true);
+  });
 });

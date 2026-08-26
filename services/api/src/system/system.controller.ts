@@ -402,7 +402,7 @@ export class SystemController {
       publicUrlSource: environmentUrl ? 'environment' : account?.externalUrl ? 'account' : 'unset',
       httpsReady: effectivePublicUrl?.startsWith('https://') ?? false,
       castReady: Boolean(effectivePublicUrl?.startsWith('https://') && !/localhost|127\.0\.0\.1/i.test(effectivePublicUrl)),
-      corsOrigins: readCorsOrigins(process.env.CORS_ORIGIN, process.env.BB_MEDIA_PUBLIC_URL),
+      corsOrigins: readCorsOrigins(process.env.CORS_ORIGIN, process.env.BB_MEDIA_PUBLIC_URL, account?.externalUrl),
     };
   }
 
