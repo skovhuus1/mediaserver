@@ -23,6 +23,7 @@ import { importLiveTvEpg, importLiveTvPlaylist } from './live-tv.js';
 import { processLiveTvChannelVisibilityJob } from './live-tv-channel-visibility-job.js';
 import { processLiveTvRecordingJob } from './live-tv-recordings.js';
 import { processLiveTvStreamJobWithFailover } from './live-tv-stream-failover.js';
+import { withJobLeaseHeartbeat } from './job-lease.js';
 
 const prisma = new PrismaClient();
 const execFileAsync = promisify(execFile);
@@ -1594,7 +1595,11 @@ async function rescheduleRecurringJob(job: ClaimedJob): Promise<void> {
 
 async function executeClaimedJob(job: ClaimedJob): Promise<void> {
   try {
-    await processJob(job);
+    await withJobLeaseHeartbeat(
+      () => processJob(job),
+      () => renewJobLease(job.id),
+      { leaseMs },
+    );
     const completed = await finishJob(job);
     if (completed) await rescheduleRecurringJob(job);
   } catch (error) {
