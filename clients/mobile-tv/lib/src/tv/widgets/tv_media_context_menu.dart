@@ -26,7 +26,11 @@ Future<void> showTvMediaContextMenu({
     barrierColor: Colors.black.withValues(alpha: 0.58),
     builder: (_) => TvOptionOverlay<TvMediaContextAction>(
       playbackTitle: media.displayTitle,
-      playbackSubtitle: episode ? 'Afsnit' : seriesLike ? 'Serie' : 'Film',
+      playbackSubtitle: episode
+          ? 'Afsnit'
+          : seriesLike
+          ? 'Serie'
+          : 'Film',
       panelTitle: 'Hurtigmenu',
       panelDescription:
           'Hold OK på en titel for hurtig adgang til de vigtigste handlinger uden at miste placeringen i rækken.',

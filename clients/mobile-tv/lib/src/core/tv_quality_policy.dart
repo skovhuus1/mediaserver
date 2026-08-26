@@ -10,8 +10,7 @@ class TvQualityPolicy {
     required DateTime startedAt,
     required this.sourceHeight,
     this.allowUpscale = false,
-  })
-    : _stableSince = startedAt;
+  }) : _stableSince = startedAt;
 
   static const stabilityWindow = Duration(seconds: 45);
   static const cooldown = Duration(seconds: 120);

@@ -296,8 +296,7 @@ class TvPlaybackChoiceTileState<T> extends State<TvPlaybackChoiceTile<T>> {
           child: Shortcuts(
             shortcuts: const {
               SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-              SingleActivator(LogicalKeyboardKey.numpadEnter):
-                  ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
               SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
               SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
             },
