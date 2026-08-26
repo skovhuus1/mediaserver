@@ -66,7 +66,8 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
   KeyEventResult _handleRemoteKey(FocusNode node, KeyEvent event) {
     if (!widget.isTv) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    final select = key == LogicalKeyboardKey.enter ||
+    final select =
+        key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter ||
         key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.space;
@@ -192,280 +193,284 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
               highlightColor: Colors.transparent,
               splashColor: Colors.transparent,
               child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 170),
-                  curve: Curves.easeOutCubic,
-                  height: posterHeight,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(radius),
-                    border: widget.isTv
-                        ? Border.all(
-                            color: _focused
-                                ? Colors.white
-                                : TvDesignTokens.panelBorderSoft,
-                            width: _focused ? 2.2 : 1,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 170),
+                    curve: Curves.easeOutCubic,
+                    height: posterHeight,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(radius),
+                      border: widget.isTv
+                          ? Border.all(
+                              color: _focused
+                                  ? Colors.white
+                                  : TvDesignTokens.panelBorderSoft,
+                              width: _focused ? 2.2 : 1,
+                            )
+                          : null,
+                      boxShadow: widget.isTv ? focusRing : null,
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (image.isNotEmpty)
+                          Image.network(
+                            image,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => const _PosterFallback(),
                           )
-                        : null,
-                    boxShadow: widget.isTv ? focusRing : null,
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (image.isNotEmpty)
-                        Image.network(
-                          image,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const _PosterFallback(),
-                        )
-                      else
-                        const _PosterFallback(),
-                      if (media.is4k || media.isHdr || media.isEpisode)
-                        Positioned(
-                          left: 8,
-                          top: 8,
-                          child: Wrap(
-                            spacing: 6,
-                            children: [
-                              if (media.is4k) const _Badge('4K'),
-                              if (media.isHdr) const _Badge('HDR'),
-                              if (media.isEpisode) const _Badge('Sæson'),
-                            ],
+                        else
+                          const _PosterFallback(),
+                        if (media.is4k || media.isHdr || media.isEpisode)
+                          Positioned(
+                            left: 8,
+                            top: 8,
+                            child: Wrap(
+                              spacing: 6,
+                              children: [
+                                if (media.is4k) const _Badge('4K'),
+                                if (media.isHdr) const _Badge('HDR'),
+                                if (media.isEpisode) const _Badge('Sæson'),
+                              ],
+                            ),
                           ),
-                        ),
-                      if (widget.isTv &&
-                          media.badgeCount != null &&
-                          media.badgeCount! > 1)
-                        Positioned(
-                          right: 8,
-                          top: 8,
-                          child: _CountBadge(media.badgeCount!),
-                        ),
-                      if (_focused && !widget.isTv)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          top: 0,
-                          bottom: 0,
-                          child: Stack(
-                            children: [
-                              Container(
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Color(0x00090D12),
-                                      Color(0xCC090D12),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              Center(
-                                child: Container(
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.black.withValues(alpha: 0.55),
-                                  ),
-                                  child: const Icon(
-                                    Icons.play_circle_filled_rounded,
-                                    size: 46,
-                                    color: Colors.white,
-                                    shadows: [
-                                      Shadow(
-                                        color: Color(0x88000000),
-                                        blurRadius: 16,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                left: 0,
-                                right: 0,
-                                bottom: 10,
-                                child: BackdropFilter(
-                                  filter: ImageFilter.blur(
-                                    sigmaX: 8,
-                                    sigmaY: 8,
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
+                        if (widget.isTv &&
+                            media.badgeCount != null &&
+                            media.badgeCount! > 1)
+                          Positioned(
+                            right: 8,
+                            top: 8,
+                            child: _CountBadge(media.badgeCount!),
+                          ),
+                        if (_focused && !widget.isTv)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: Stack(
+                              children: [
+                                Container(
+                                  decoration: const BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Color(0x00090D12),
+                                        Color(0xCC090D12),
+                                      ],
                                     ),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            media.displayTitle,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w800,
-                                              height: 1.05,
-                                            ),
-                                          ),
-                                        ),
-                                        const Icon(
-                                          Icons.info_outline_rounded,
-                                          size: 16,
-                                          color: Colors.white70,
+                                  ),
+                                ),
+                                Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.black.withValues(
+                                        alpha: 0.55,
+                                      ),
+                                    ),
+                                    child: const Icon(
+                                      Icons.play_circle_filled_rounded,
+                                      size: 46,
+                                      color: Colors.white,
+                                      shadows: [
+                                        Shadow(
+                                          color: Color(0x88000000),
+                                          blurRadius: 16,
                                         ),
                                       ],
                                     ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      if (media.progress != null)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: SizedBox(
-                            height: 4.5,
-                            child: LinearProgressIndicator(
-                              value: progress / 100,
-                              backgroundColor: Colors.white10,
-                              valueColor: AlwaysStoppedAnimation(
-                                BoltColors.primary,
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (widget.isTv && _focused)
-                        Positioned(
-                          right: 10,
-                          bottom: 10,
-                          child: Container(
-                            width: 34,
-                            height: 34,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: const Color(0xD9040506),
-                              border: Border.all(
-                                color: TvDesignTokens.focusFill,
-                                width: 1.4,
-                              ),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Color(0x77000000),
-                                  blurRadius: 14,
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 10,
+                                  child: BackdropFilter(
+                                    filter: ImageFilter.blur(
+                                      sigmaX: 8,
+                                      sigmaY: 8,
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              media.displayTitle,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w800,
+                                                height: 1.05,
+                                              ),
+                                            ),
+                                          ),
+                                          const Icon(
+                                            Icons.info_outline_rounded,
+                                            size: 16,
+                                            color: Colors.white70,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
-                            child: const Icon(
-                              Icons.play_arrow_rounded,
-                              color: TvDesignTokens.focusFill,
-                              size: 22,
+                          ),
+                        if (media.progress != null)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: SizedBox(
+                              height: 4.5,
+                              child: LinearProgressIndicator(
+                                value: progress / 100,
+                                backgroundColor: Colors.white10,
+                                valueColor: AlwaysStoppedAnimation(
+                                  BoltColors.primary,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                    ],
+                        if (widget.isTv && _focused)
+                          Positioned(
+                            right: 10,
+                            bottom: 10,
+                            child: Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: const Color(0xD9040506),
+                                border: Border.all(
+                                  color: TvDesignTokens.focusFill,
+                                  width: 1.4,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x77000000),
+                                    blurRadius: 14,
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.play_arrow_rounded,
+                                color: TvDesignTokens.focusFill,
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-                if (widget.showMeta)
-                  Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        widget.isTv ? 1 : 2,
-                        widget.isTv ? 8 : 11,
-                        widget.isTv ? 1 : 2,
-                        4,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            media.displayTitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: titleStyle,
-                              fontSize: widget.isTv ? 13.2 : 14,
-                              height: 1.08,
-                              letterSpacing: widget.isTv ? -0.1 : 0,
+                  if (widget.showMeta)
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          widget.isTv ? 1 : 2,
+                          widget.isTv ? 8 : 11,
+                          widget.isTv ? 1 : 2,
+                          4,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              media.displayTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: titleStyle,
+                                fontSize: widget.isTv ? 13.2 : 14,
+                                height: 1.08,
+                                letterSpacing: widget.isTv ? -0.1 : 0,
+                              ),
                             ),
-                          ),
-                          SizedBox(height: widget.isTv ? 2 : 6),
-                          Text(
-                            [
-                              if (media.releaseYear != null)
-                                media.releaseYear.toString(),
-                              if (media.durationMs != null)
-                                _formatDuration(media.durationMs!),
-                              if (media.isEpisode &&
-                                  media.episodeLabel.isNotEmpty)
-                                media.episodeLabel,
-                            ].join(' · '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white60,
-                              fontSize: widget.isTv ? 10.5 : 11.5,
-                              fontWeight: FontWeight.w600,
+                            SizedBox(height: widget.isTv ? 2 : 6),
+                            Text(
+                              [
+                                if (media.releaseYear != null)
+                                  media.releaseYear.toString(),
+                                if (media.durationMs != null)
+                                  _formatDuration(media.durationMs!),
+                                if (media.isEpisode &&
+                                    media.episodeLabel.isNotEmpty)
+                                  media.episodeLabel,
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white60,
+                                fontSize: widget.isTv ? 10.5 : 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
-                          const Spacer(),
-                          if (media.progress != null)
-                            AnimatedOpacity(
-                              opacity: _focused ? 1 : 0.8,
-                              duration: const Duration(milliseconds: 140),
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 7),
-                                child: Row(
-                                  children: [
-                                    Text(
-                                      '${media.progress!.percent.round()}% set',
-                                      style: const TextStyle(
-                                        color: Colors.white60,
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Container(
-                                        height: 3,
-                                        decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(
-                                            99,
-                                          ),
-                                          color: Colors.white12,
+                            const Spacer(),
+                            if (media.progress != null)
+                              AnimatedOpacity(
+                                opacity: _focused ? 1 : 0.8,
+                                duration: const Duration(milliseconds: 140),
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 7),
+                                  child: Row(
+                                    children: [
+                                      Text(
+                                        '${media.progress!.percent.round()}% set',
+                                        style: const TextStyle(
+                                          color: Colors.white60,
+                                          fontSize: 10,
                                         ),
-                                        child: Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: FractionallySizedBox(
-                                            widthFactor:
-                                                media.progress!.percent / 100,
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                borderRadius:
-                                                    BorderRadius.circular(99),
-                                                color: const Color(0xFFF7C35F),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Container(
+                                          height: 3,
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(
+                                              99,
+                                            ),
+                                            color: Colors.white12,
+                                          ),
+                                          child: Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: FractionallySizedBox(
+                                              widthFactor:
+                                                  media.progress!.percent / 100,
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(99),
+                                                  color: const Color(
+                                                    0xFFF7C35F,
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
           ),
         ),
       ),

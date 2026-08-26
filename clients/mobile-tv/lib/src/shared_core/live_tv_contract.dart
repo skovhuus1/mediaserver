@@ -322,8 +322,7 @@ class LiveTvSession {
       heartbeatUrl: stringValue(json['heartbeatUrl']) ?? '',
       releaseUrl: stringValue(json['releaseUrl']) ?? '',
       contentType:
-          stringValue(json['contentType']) ??
-          'application/vnd.apple.mpegurl',
+          stringValue(json['contentType']) ?? 'application/vnd.apple.mpegurl',
     );
   }
 }
