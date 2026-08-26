@@ -50,8 +50,8 @@ export async function generatePlaybackAssets(prisma: PrismaClient, job: Playback
   if (!isWithin(transcodeRoot, assetDirectory)) throw new Error('Playback asset path escapes transcode root');
   await prisma.mediaPlaybackAsset.upsert({
     where: { mediaId },
-    create: { accountId: job.accountId, mediaId, status: 'generating', sourceModifiedAt: media.file.modifiedAt },
-    update: { status: 'generating', error: null, sourceModifiedAt: media.file.modifiedAt },
+    create: { accountId: job.accountId, mediaId, status: 'generating' },
+    update: { status: 'generating', error: null },
   });
 
   try {
@@ -148,20 +148,23 @@ async function discoverMarkers(
         accountId: media.accountId,
         type: 'episode',
         id: { not: media.id },
+        file: { is: { status: 'ready' } },
         ...(media.seriesMetadataProviderId
           ? { seriesMetadataProviderId: media.seriesMetadataProviderId }
           : media.seriesDisplayTitle
             ? { seriesDisplayTitle: { equals: media.seriesDisplayTitle, mode: 'insensitive' } }
             : { seriesTitle: { equals: media.seriesTitle ?? '', mode: 'insensitive' } }),
       },
-      select: { id: true },
+      select: { id: true, file: { select: { modifiedAt: true } } },
       take: 24,
     });
     const siblingAssets = siblings.length ? await prisma.mediaPlaybackAsset.findMany({
-      where: { mediaId: { in: siblings.map((sibling) => sibling.id) }, status: 'ready', fingerprint: { not: Prisma.JsonNull } },
-      select: { mediaId: true, fingerprint: true },
+      where: { mediaId: { in: siblings.map((sibling) => sibling.id) }, status: { in: ['ready', 'queued', 'generating'] }, fingerprint: { not: Prisma.JsonNull } },
+      select: { mediaId: true, fingerprint: true, sourceModifiedAt: true },
     }) : [];
+    const siblingModifiedAt = new Map(siblings.map((sibling) => [sibling.id, sibling.file?.modifiedAt ?? null]));
     const siblingFingerprints = siblingAssets.flatMap((asset) => {
+      if (!playbackFingerprintMatchesSource(asset.sourceModifiedAt, siblingModifiedAt.get(asset.mediaId) ?? null)) return [];
       const parsed = playbackFingerprint(asset.fingerprint);
       return parsed ? [{ mediaId: asset.mediaId, fingerprint: parsed }] : [];
     });
@@ -331,11 +334,16 @@ async function syncAutomaticMarker(
   detection: MarkerDetection,
 ): Promise<void> {
   if (detection.marker) await storeAutomaticMarker(prisma, accountId, mediaId, detection.marker);
+  else if (detection.state === 'pending') return;
   else {
     await prisma.mediaTimelineMarker.deleteMany({
       where: { accountId, mediaId, kind, source: 'automatic' },
     });
   }
+}
+
+export function playbackFingerprintMatchesSource(sourceModifiedAt: Date | null, fileModifiedAt: Date | null): boolean {
+  return Boolean(sourceModifiedAt && fileModifiedAt && sourceModifiedAt.getTime() === fileModifiedAt.getTime());
 }
 
 async function storeAutomaticMarker(

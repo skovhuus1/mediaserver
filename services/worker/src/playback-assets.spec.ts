@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fingerprintFrameQuality, recapLeadInFromIntro } from './playback-assets.js';
+import { fingerprintFrameQuality, playbackFingerprintMatchesSource, recapLeadInFromIntro } from './playback-assets.js';
 
 describe('playback fingerprint quality', () => {
   it('rejects flat black and white frames as visual evidence', () => {
@@ -54,5 +54,12 @@ describe('playback fingerprint quality', () => {
       source: 'automatic',
       confidence: 0.82,
     }, 1)).toMatchObject({ state: 'not-detected', reason: 'no_repeated_sequence', marker: null });
+  });
+
+  it('only reuses sibling fingerprints from the same source file version', () => {
+    const sourceModifiedAt = new Date('2026-08-26T10:00:00.000Z');
+    expect(playbackFingerprintMatchesSource(sourceModifiedAt, new Date('2026-08-26T10:00:00.000Z'))).toBe(true);
+    expect(playbackFingerprintMatchesSource(sourceModifiedAt, new Date('2026-08-26T10:01:00.000Z'))).toBe(false);
+    expect(playbackFingerprintMatchesSource(null, sourceModifiedAt)).toBe(false);
   });
 });

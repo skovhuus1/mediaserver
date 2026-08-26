@@ -269,3 +269,13 @@ export class UpdatePlaybackMarkersDto {
   @Type(() => PlaybackMarkerDto)
   markers!: PlaybackMarkerDto[];
 }
+
+export class PlaybackAnalysisBulkDto {
+  @IsIn(['rebuild', 'reset'])
+  action!: 'rebuild' | 'reset';
+
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('4', { each: true })
+  mediaIds!: string[];
+}

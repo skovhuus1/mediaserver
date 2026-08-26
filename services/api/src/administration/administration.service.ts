@@ -17,6 +17,7 @@ import {
   CreateUserDto,
   UpdateUserDto,
   UpdateProfileDto,
+  PlaybackAnalysisBulkDto,
   PlaybackAnalysisQueryDto,
   UpdatePlaybackMarkersDto,
 } from './administration.dto';
@@ -761,40 +762,78 @@ export class AdministrationService {
 
   async queuePlaybackAnalysis(actor: AuthenticatedUser, mediaId: string) {
     const media = await this.ownedPlaybackMedia(actor, mediaId);
-    if (!media.file || ['missing', 'error'].includes(String(media.file.status))) {
-      throw new BadRequestException({ code: 'media_file_unavailable', message: 'Mediet har ingen læsbar scannet fil.' });
-    }
-    const activeJobs = await this.prisma.systemJob.findMany({
-      where: {
-        accountId: actor.accountId,
-        type: 'media.playback-assets',
-        status: { in: ['queued', 'running', 'processing', 'retrying'] },
-      },
-      select: { id: true, status: true, payload: true },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
-    const existing = activeJobs.find((job) => playbackJobMediaId(job.payload) === media.id);
-    if (existing) return { jobId: existing.id, status: existing.status, deduplicated: true };
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      await tx.mediaPlaybackAsset.upsert({
-        where: { mediaId: media.id },
-        create: { accountId: actor.accountId, mediaId: media.id, status: 'queued' },
-        update: { status: 'queued', error: null },
-      });
-      return tx.systemJob.create({
-        data: {
-          accountId: actor.accountId,
-          type: 'media.playback-assets',
-          status: 'queued',
-          payload: { mediaId: media.id, force: true },
-        },
-        select: { id: true, status: true },
-      });
-    });
+    this.assertPlaybackMediaReady(media);
+    const activeJobs = await this.activePlaybackAnalysisJobs(actor.accountId);
+    const result = await this.enqueuePlaybackAnalysisJob(actor, media.id, activeJobs);
     await this.audit(actor, 'playback_analysis.rebuild_queued', media.id, { jobId: result.id });
-    return { jobId: result.id, status: result.status, deduplicated: false };
+    return { jobId: result.id, status: result.status, deduplicated: result.deduplicated };
+  }
+
+  async queuePlaybackAnalysisBulk(actor: AuthenticatedUser, dto: PlaybackAnalysisBulkDto) {
+    const mediaIds = [...new Set(dto.mediaIds)];
+    if (!mediaIds.length) throw new BadRequestException({ code: 'playback_analysis_bulk_empty', message: 'Vælg mindst ét medie.' });
+    const media = await this.prisma.mediaItem.findMany({
+      where: { id: { in: mediaIds }, accountId: actor.accountId },
+      select: {
+        id: true,
+        title: true,
+        seriesTitle: true,
+        seriesDisplayTitle: true,
+        type: true,
+        seasonNumber: true,
+        episodeNumber: true,
+        file: { select: { status: true } },
+      },
+    });
+    const byId = new Map(media.map((item) => [item.id, item]));
+    const activeJobs = await this.activePlaybackAnalysisJobs(actor.accountId);
+    const result = {
+      requested: mediaIds.length,
+      queued: 0,
+      deduplicated: 0,
+      skipped: 0,
+      failed: [] as Array<{ mediaId: string; title: string | null; reason: string }>,
+    };
+
+    for (const mediaId of mediaIds) {
+      const item = byId.get(mediaId);
+      if (!item) {
+        result.skipped += 1;
+        result.failed.push({ mediaId, title: null, reason: 'Mediet findes ikke på denne konto.' });
+        continue;
+      }
+      const unavailable = this.playbackMediaUnavailableReason(item);
+      if (unavailable) {
+        result.skipped += 1;
+        result.failed.push({ mediaId, title: this.playbackMediaTitle(item), reason: unavailable });
+        continue;
+      }
+      try {
+        if (dto.action === 'reset') {
+          await this.prisma.mediaTimelineMarker.deleteMany({
+            where: { accountId: actor.accountId, mediaId: item.id, kind: { in: ['intro', 'recap', 'credits'] } },
+          });
+        }
+        const queued = await this.enqueuePlaybackAnalysisJob(actor, item.id, activeJobs);
+        if (queued.deduplicated) result.deduplicated += 1;
+        else result.queued += 1;
+      } catch (error) {
+        result.skipped += 1;
+        result.failed.push({
+          mediaId,
+          title: this.playbackMediaTitle(item),
+          reason: error instanceof Error ? error.message : 'Ukendt fejl under genanalyse.',
+        });
+      }
+    }
+
+    await this.audit(actor, dto.action === 'reset' ? 'playback_analysis.bulk_reset_queued' : 'playback_analysis.bulk_rebuild_queued', 'bulk', {
+      requested: result.requested,
+      queued: result.queued,
+      deduplicated: result.deduplicated,
+      skipped: result.skipped,
+    });
+    return result;
   }
 
   async updatePlaybackMarkers(actor: AuthenticatedUser, mediaId: string, dto: UpdatePlaybackMarkersDto) {
@@ -827,6 +866,7 @@ export class AdministrationService {
 
   async resetPlaybackMarkers(actor: AuthenticatedUser, mediaId: string) {
     const media = await this.ownedPlaybackMedia(actor, mediaId);
+    this.assertPlaybackMediaReady(media);
     await this.prisma.mediaTimelineMarker.deleteMany({
       where: { accountId: actor.accountId, mediaId: media.id, kind: { in: ['intro', 'recap', 'credits'] } },
     });
@@ -869,6 +909,63 @@ export class AdministrationService {
     }).catch(() => {
       throw new NotFoundException({ code: 'media_not_found', message: 'Mediet findes ikke på denne konto.' });
     });
+  }
+
+  private async activePlaybackAnalysisJobs(accountId: string) {
+    return this.prisma.systemJob.findMany({
+      where: {
+        accountId,
+        type: 'media.playback-assets',
+        status: { in: ['queued', 'running', 'processing', 'retrying'] },
+      },
+      select: { id: true, status: true, payload: true },
+      orderBy: { createdAt: 'desc' },
+      take: 1_000,
+    });
+  }
+
+  private async enqueuePlaybackAnalysisJob(
+    actor: AuthenticatedUser,
+    mediaId: string,
+    activeJobs: Array<{ id: string; status: string; payload: Prisma.JsonValue }>,
+  ) {
+    const existing = activeJobs.find((job) => playbackJobMediaId(job.payload) === mediaId);
+    if (existing) return { id: existing.id, status: existing.status, deduplicated: true };
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.mediaPlaybackAsset.upsert({
+        where: { mediaId },
+        create: { accountId: actor.accountId, mediaId, status: 'queued' },
+        update: { status: 'queued', error: null },
+      });
+      return tx.systemJob.create({
+        data: {
+          accountId: actor.accountId,
+          type: 'media.playback-assets',
+          status: 'queued',
+          payload: { mediaId, force: true },
+        },
+        select: { id: true, status: true },
+      });
+    });
+    return { id: result.id, status: result.status, deduplicated: false };
+  }
+
+  private assertPlaybackMediaReady(media: { file: { status: string } | null }) {
+    const reason = this.playbackMediaUnavailableReason(media);
+    if (reason) throw new BadRequestException({ code: 'media_file_unavailable', message: reason });
+  }
+
+  private playbackMediaUnavailableReason(media: { file: { status: string } | null }) {
+    if (!media.file) return 'Mediet har ingen læsbar scannet fil.';
+    if (media.file.status !== 'ready') return `Mediets fil er ikke klar til analyse (${media.file.status}).`;
+    return null;
+  }
+
+  private playbackMediaTitle(media: { title: string; seriesTitle: string | null; seriesDisplayTitle: string | null; type: string; seasonNumber: number | null; episodeNumber: number | null }) {
+    const title = media.seriesDisplayTitle ?? media.seriesTitle ?? media.title;
+    return media.type === 'episode' && media.seasonNumber !== null && media.episodeNumber !== null
+      ? `${title} S${media.seasonNumber}E${media.episodeNumber}`
+      : title;
   }
 
   private async playbackPreview(spriteDirectory: string | null) {

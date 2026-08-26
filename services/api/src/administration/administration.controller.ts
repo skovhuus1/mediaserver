@@ -15,6 +15,7 @@ import {
   ChangeSubscriptionPlanDto,
   SuspendUserDto,
   PlaybackAnalysisQueryDto,
+  PlaybackAnalysisBulkDto,
   UpdatePlaybackMarkersDto,
 } from './administration.dto';
 import { AdministrationService } from './administration.service';
@@ -156,6 +157,12 @@ export class AdministrationController {
   @Roles('admin')
   rebuildPlaybackAnalysis(@CurrentUser() actor: AuthenticatedUser, @Param('mediaId') mediaId: string) {
     return this.administration.queuePlaybackAnalysis(actor, mediaId);
+  }
+
+  @Post('playback-analysis/bulk')
+  @Roles('admin')
+  rebuildPlaybackAnalysisBulk(@CurrentUser() actor: AuthenticatedUser, @Body() dto: PlaybackAnalysisBulkDto) {
+    return this.administration.queuePlaybackAnalysisBulk(actor, dto);
   }
 
   @Put('playback-analysis/:mediaId/markers')
