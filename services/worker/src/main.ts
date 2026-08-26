@@ -196,14 +196,14 @@ async function claimNextJob(allowedTypes: readonly WorkerJobType[]): Promise<Cla
                 (window_entry.value->>'start')::time = (window_entry.value->>'end')::time
                 OR (
                   (window_entry.value->>'start')::time < (window_entry.value->>'end')::time
-                  AND (NOW() AT TIME ZONE schedule.value->>'timezone')::time >= (window_entry.value->>'start')::time
-                  AND (NOW() AT TIME ZONE schedule.value->>'timezone')::time < (window_entry.value->>'end')::time
+                  AND (NOW() AT TIME ZONE (schedule.value->>'timezone'))::time >= (window_entry.value->>'start')::time
+                  AND (NOW() AT TIME ZONE (schedule.value->>'timezone'))::time < (window_entry.value->>'end')::time
                 )
                 OR (
                   (window_entry.value->>'start')::time > (window_entry.value->>'end')::time
                   AND (
-                    (NOW() AT TIME ZONE schedule.value->>'timezone')::time >= (window_entry.value->>'start')::time
-                    OR (NOW() AT TIME ZONE schedule.value->>'timezone')::time < (window_entry.value->>'end')::time
+                    (NOW() AT TIME ZONE (schedule.value->>'timezone'))::time >= (window_entry.value->>'start')::time
+                    OR (NOW() AT TIME ZONE (schedule.value->>'timezone'))::time < (window_entry.value->>'end')::time
                   )
                 )
               )
