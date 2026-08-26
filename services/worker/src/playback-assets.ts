@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 import { updateJobProgress } from './job-progress.js';
+import { lookupIntroDbMarkers, type TheIntroDbLookupSummary } from './theintrodb.js';
 
 type PlaybackAssetJob = { id?: string; accountId: string; payload: Prisma.JsonValue };
 type ProcessResult = { stdout: Buffer; stderr: string };
@@ -101,6 +102,9 @@ export async function generatePlaybackAssets(prisma: PrismaClient, job: Playback
             preview: 'preview.jpg',
             recap: markerResult.recapAnalysis,
             intro: markerResult.introAnalysis,
+            providers: {
+              theintrodb: markerResult.externalProvider,
+            },
           },
         } as unknown as Prisma.InputJsonValue,
         fingerprint: fingerprint ? fingerprint as unknown as Prisma.InputJsonValue : Prisma.JsonNull,
@@ -129,7 +133,18 @@ export async function generatePlaybackAssets(prisma: PrismaClient, job: Playback
 
 async function discoverMarkers(
   prisma: PrismaClient,
-  media: { id: string; accountId: string; type: string; seriesMetadataProviderId: string | null; seriesDisplayTitle: string | null; seriesTitle: string | null },
+  media: {
+    id: string;
+    accountId: string;
+    type: string;
+    metadataProvider: string | null;
+    metadataProviderId: string | null;
+    seriesMetadataProviderId: string | null;
+    seriesDisplayTitle: string | null;
+    seriesTitle: string | null;
+    seasonNumber: number | null;
+    episodeNumber: number | null;
+  },
   sourcePath: string,
   durationMs: number,
   chapters: MediaChapter[],
@@ -138,10 +153,23 @@ async function discoverMarkers(
   markers: TimelineMarker[];
   recapAnalysis: MarkerAnalysis;
   introAnalysis: MarkerAnalysis;
+  externalProvider: TheIntroDbLookupSummary;
 }> {
   const markers = chapterTimelineMarkers(chapters, durationMs);
   let recapAnalysis = chapterOrEmptyAnalysis('recap', markers);
   let introAnalysis = chapterOrEmptyAnalysis('intro', markers);
+  const hasChapterRecap = markers.some((marker) => marker.kind === 'recap');
+  const hasChapterIntro = markers.some((marker) => marker.kind === 'intro');
+  const externalLookup = await lookupIntroDbMarkers(media, durationMs);
+  for (const marker of externalLookup.markers) {
+    if (!markers.some((existing) => existing.kind === marker.kind)) markers.push(marker);
+  }
+  if (!hasChapterRecap && externalLookup.markers.some((marker) => marker.kind === 'recap')) {
+    recapAnalysis = externalMarkerAnalysis('recap', externalLookup);
+  }
+  if (!hasChapterIntro && externalLookup.markers.some((marker) => marker.kind === 'intro')) {
+    introAnalysis = externalMarkerAnalysis('intro', externalLookup);
+  }
   if (media.type === 'episode' && fingerprint && (!markers.some((marker) => marker.kind === 'recap') || !markers.some((marker) => marker.kind === 'intro'))) {
     const siblings = await prisma.mediaItem.findMany({
       where: {
@@ -241,7 +269,7 @@ async function discoverMarkers(
       });
     }
   }
-  return { markers, recapAnalysis, introAnalysis };
+  return { markers, recapAnalysis, introAnalysis, externalProvider: externalLookup.summary };
 }
 
 type MarkerDetection = ReturnType<typeof analyzeRepeatedIntro>;
@@ -256,6 +284,18 @@ function chapterOrEmptyAnalysis(kind: 'intro' | 'recap', markers: readonly Timel
 function withoutMarker(detection: MarkerDetection): MarkerAnalysis {
   const { marker: _marker, ...analysis } = detection;
   return analysis;
+}
+
+function externalMarkerAnalysis(kind: 'intro' | 'recap', lookup: { markers: TimelineMarker[]; summary: TheIntroDbLookupSummary }): MarkerAnalysis {
+  const marker = lookup.markers.find((candidate) => candidate.kind === kind);
+  return {
+    state: 'detected',
+    reason: 'external_provider',
+    referenceCount: 0,
+    supportCount: lookup.summary.segments[kind] ?? 1,
+    usableFrameRatio: 1,
+    confidence: marker?.confidence ?? 0.82,
+  };
 }
 
 export function recapLeadInFromIntro(
@@ -353,7 +393,7 @@ async function storeAutomaticMarker(
   marker: TimelineMarker,
 ): Promise<void> {
   const existing = await prisma.mediaTimelineMarker.findUnique({ where: { mediaId_kind: { mediaId, kind: marker.kind } } });
-  if (existing && existing.source !== 'automatic') return;
+  if (existing?.source === 'manual') return;
   await prisma.mediaTimelineMarker.upsert({
     where: { mediaId_kind: { mediaId, kind: marker.kind } },
     create: { accountId, mediaId, ...marker },

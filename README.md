@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.3.0**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.3.1**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -90,6 +90,13 @@ PUT    /api/v1/playback/playlists/:id/items/:mediaId
 DELETE /api/v1/playback/playlists/:id/items/:itemId
 PATCH  /api/v1/playback/playlists/:id/items/order
 ```
+
+## Playback-analyse og eksterne markorer
+
+- Workeren bruger indlejrede kapitler forst, slar derefter intro, recap og rulletekster op i TheIntroDB og bruger den lokale fingerprint-analyse som fallback for manglende markortyper.
+- Episodeopslag bruger seriens kanoniske TMDB- eller TVDB-id sammen med saeson- og episodenummer. Film bruger deres TMDB-, TVDB- eller IMDb-id. Medier uden disse metadata-id'er springer det eksterne opslag over uden at fejle jobbet.
+- TheIntroDB styres med `BB_MEDIA_THEINTRODB_ENABLED`, `BB_MEDIA_THEINTRODB_BASE_URL`, den valgfrie `BB_MEDIA_THEINTRODB_API_KEY` og `BB_MEDIA_THEINTRODB_TIMEOUT_MS`. Standard-timeout er 3500 ms, sa den eksterne tjeneste ikke kan blokere playback-analysen.
+- En ekstern markor gemmes med kilden `external` og erstatter ikke en manuel markor. Eksisterende faerdiganalyserede titler skal genanalyseres efter aktivering for at fa de nye opslag.
 
 ## Live TV fra M3U
 

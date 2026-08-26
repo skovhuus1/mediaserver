@@ -35,7 +35,7 @@ export function playbackJobMediaId(payload: unknown) {
 
 export type PlaybackIntroAnalysis = {
   state: 'detected' | 'pending' | 'not-detected';
-  reason: 'detected' | 'chapter_marker' | 'insufficient_references' | 'low_information' | 'no_repeated_sequence';
+  reason: 'detected' | 'external_provider' | 'chapter_marker' | 'insufficient_references' | 'low_information' | 'no_repeated_sequence';
   referenceCount: number;
   supportCount: number;
   usableFrameRatio: number;
@@ -66,7 +66,7 @@ function playbackAnalysisForKind(manifest: unknown, kind: 'intro' | 'recap'): Pl
   if (!markerAnalysis || typeof markerAnalysis !== 'object' || Array.isArray(markerAnalysis)) return null;
   const value = markerAnalysis as Record<string, unknown>;
   const states = ['detected', 'pending', 'not-detected'];
-  const reasons = ['detected', 'chapter_marker', 'insufficient_references', 'low_information', 'no_repeated_sequence'];
+  const reasons = ['detected', 'external_provider', 'chapter_marker', 'insufficient_references', 'low_information', 'no_repeated_sequence'];
   if (!states.includes(String(value.state)) || !reasons.includes(String(value.reason))) return null;
   return {
     state: value.state as PlaybackIntroAnalysis['state'],

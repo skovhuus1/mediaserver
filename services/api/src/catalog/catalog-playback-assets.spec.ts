@@ -10,7 +10,10 @@ describe('catalog playback assets', () => {
         status: 'ready', sourceModifiedAt: now, updatedAt: now, generatedAt: now, error: null,
         intervalSeconds: 10, tileWidth: 320, tileHeight: 180, columns: 5, rows: 5,
         frameCount: 12, sheetCount: 1, durationMs: 120_000,
-        manifest: { cues: [{ startMs: 0, endMs: 10_000, sheet: 0, column: 0, row: 0 }] },
+        manifest: {
+          analysis: { markerAnalysisVersion: 3 },
+          cues: [{ startMs: 0, endMs: 10_000, sheet: 0, column: 0, row: 0 }],
+        },
       }) },
       mediaTimelineMarker: { findMany: vi.fn().mockResolvedValue([
         { id: 'marker-1', kind: 'recap', startMs: 0, endMs: 25_000, source: 'manual', confidence: 1 },
@@ -51,7 +54,12 @@ describe('catalog playback assets', () => {
     const prisma = {
       mediaItem: { findFirst: vi.fn().mockResolvedValue({ id: 'media-1', file: { status: 'ready', modifiedAt: new Date(), durationMs: 180_000 } }) },
       $transaction: vi.fn(async (callback) => callback(tx)),
-      mediaPlaybackAsset: { findUnique: vi.fn().mockResolvedValue({ status: 'ready', manifest: { cues: [] } }) },
+      mediaPlaybackAsset: {
+        findUnique: vi.fn().mockResolvedValue({
+          status: 'ready',
+          manifest: { analysis: { markerAnalysisVersion: 3 }, cues: [] },
+        }),
+      },
       mediaTimelineMarker: { findMany: vi.fn().mockResolvedValue([]) },
     };
     const service = new CatalogService(prisma as never);

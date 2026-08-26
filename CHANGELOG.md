@@ -4,6 +4,13 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.1 - 2026-08-26
+
+- Tilfojer fail-soft TheIntroDB-opslag for intro, recap og rulletekster med TMDB-, TVDB- og IMDb-identitet, timeout og valgfri API-nogle.
+- Kombinerer eksterne markorer med kapitel- og fingerprint-analyse uden at overskrive manuelle markorer, og registrerer providerresultatet i playback-manifestet.
+- Opgraderer playback-markorkontrakten til analyseversion 3 og gor `external_provider` til en eksplicit, typed analysearsag.
+- Tilfojer worker-tests for episodeopslag, markorprioritering, credits-slutpunkt, 404-fallback og deaktiveret provider.
+
 ## 0.3.0 - 2026-08-25
 
 - Færdiggør den separate Android TV-app med faste mobile/TV-entrypoints, TV-shell, D-pad-navigation, offline/login/settings/downloads/notifications og produktionsrelease-gates.
