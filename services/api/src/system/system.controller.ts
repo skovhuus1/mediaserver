@@ -222,7 +222,7 @@ export class SystemController {
       };
     });
     const count = (status: string) => items.filter((item) => item.status === status).length;
-    return { summary: { total: items.length, queued: count('queued'), running: count('running'), completed: count('completed'), failed: count('failed') }, items, sampledAt: new Date().toISOString() };
+    return { summary: { total: items.length, queued: count('queued'), running: count('running'), paused: count('paused'), completed: count('completed'), failed: count('failed') }, items, sampledAt: new Date().toISOString() };
   }
 
   @Get('library-watcher/status')

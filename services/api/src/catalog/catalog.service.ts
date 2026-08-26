@@ -619,11 +619,11 @@ export class CatalogService {
           orderBy: { createdAt: 'asc' },
         }),
         tx.systemJob.findMany({
-          where: { accountId: actor.accountId, type: 'media.playback-assets', status: { in: ['queued', 'running'] } },
+          where: { accountId: actor.accountId, type: 'media.playback-assets', status: { in: ['queued', 'running', 'paused'] } },
           select: { id: true, status: true, payload: true },
         }),
       ]);
-      const queuedJobs = dto.replaceQueue ? activeJobs.filter((job) => job.status === 'queued') : [];
+      const queuedJobs = dto.replaceQueue ? activeJobs.filter((job) => job.status === 'queued' || job.status === 'paused') : [];
       if (queuedJobs.length) {
         await tx.systemJob.updateMany({
           where: { accountId: actor.accountId, id: { in: queuedJobs.map((job) => job.id) }, status: 'queued' },
@@ -656,7 +656,9 @@ export class CatalogService {
           && Boolean(item.playbackAsset.sourceModifiedAt && item.playbackAsset.sourceModifiedAt >= item.file.modifiedAt)
           && !markerAnalysisStale;
         if (dto.mode === 'missing' && fresh) return [];
-        return [{ accountId: actor.accountId, mediaId: item.id, force: dto.mode === 'all' || markerAnalysisStale }];
+        const sourceCurrent = Boolean(item.playbackAsset?.sourceModifiedAt && item.playbackAsset.sourceModifiedAt >= item.file.modifiedAt);
+        const analysisScope = dto.analysisScope ?? (markerAnalysisStale && sourceCurrent ? 'marker_only' : 'full');
+        return [{ accountId: actor.accountId, mediaId: item.id, force: dto.mode === 'all' || markerAnalysisStale, analysisScope }];
       });
       const replacement = dto.replaceQueue ? { cancelled: queuedJobs.length } : {};
       if (!candidates.length) return { inspected: items.length, queued: 0, skipped: items.length, limited: false, ...replacement };
@@ -674,14 +676,14 @@ export class CatalogService {
           accountId: candidate.accountId,
           type: 'media.playback-assets',
           status: 'queued',
-          payload: { mediaId: candidate.mediaId, force: candidate.force },
+          payload: { mediaId: candidate.mediaId, force: candidate.force, analysisScope: candidate.analysisScope },
           maxAttempts: 3,
           ...(dto.replaceQueue ? { availableAt: new Date(Date.now() + index) } : {}),
         })),
       });
       return { inspected: items.length, queued: candidates.length, skipped: items.length - candidates.length, limited: false, ...replacement };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
-    await this.prisma.auditLog.create({ data: { accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId, action: 'media.playback_assets.batch', outcome: 'allowed', code: 'playback_assets_batch_queued', details: { mode: dto.mode, mediaType: dto.mediaType, replaceQueue: dto.replaceQueue, ...result } } });
+    await this.prisma.auditLog.create({ data: { accountId: actor.accountId, userId: actor.sub, profileId: actor.profileId, action: 'media.playback_assets.batch', outcome: 'allowed', code: 'playback_assets_batch_queued', details: { mode: dto.mode, mediaType: dto.mediaType, replaceQueue: dto.replaceQueue, analysisScope: dto.analysisScope, ...result } } });
     return result;
   }
 
@@ -759,7 +761,7 @@ export class CatalogService {
         where: {
           accountId,
           type: 'media.playback-assets',
-          status: { in: ['queued', 'running'] },
+          status: { in: ['queued', 'running', 'paused'] },
           payload: { path: ['mediaId'], equals: mediaId },
         },
       });
@@ -774,12 +776,14 @@ export class CatalogService {
         create: { accountId, mediaId, status: 'queued', sourceModifiedAt: modifiedAt },
         update: { status: 'queued', error: null, sourceModifiedAt: modifiedAt },
       });
+      const markerAnalysisStale = current ? playbackMarkerAnalysisIsStale(current.manifest) : false;
+      const sourceCurrent = Boolean(current?.sourceModifiedAt && current.sourceModifiedAt >= modifiedAt);
       await tx.systemJob.create({
         data: {
           accountId,
           type: 'media.playback-assets',
           status: 'queued',
-          payload: { mediaId, force },
+          payload: { mediaId, force, analysisScope: markerAnalysisStale && sourceCurrent ? 'marker_only' : 'full' },
           maxAttempts: 3,
         },
       });

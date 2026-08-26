@@ -166,6 +166,49 @@ async function claimNextJob(allowedTypes: readonly WorkerJobType[]): Promise<Cla
           status = 'queued'
           OR (status = 'running' AND lease_expires_at <= NOW())
         )
+        AND (
+          type <> 'media.playback-assets'
+          OR NOT EXISTS (
+            SELECT 1
+            FROM system_settings AS setting
+            WHERE setting.account_id = system_jobs.account_id
+              AND setting.key = 'runtime.playback-analysis.paused'
+              AND setting.value = 'true'::jsonb
+          )
+        )
+        AND (
+          type <> 'media.playback-assets'
+          OR NOT EXISTS (
+            SELECT 1
+            FROM system_settings AS schedule
+            WHERE schedule.account_id = system_jobs.account_id
+              AND schedule.key = 'runtime.playback-analysis.schedule'
+              AND schedule.value->>'enabled' = 'true'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM system_settings AS schedule
+            CROSS JOIN LATERAL jsonb_array_elements(schedule.value->'windows') AS window_entry(value)
+            WHERE schedule.account_id = system_jobs.account_id
+              AND schedule.key = 'runtime.playback-analysis.schedule'
+              AND schedule.value->>'enabled' = 'true'
+              AND (
+                (window_entry.value->>'start')::time = (window_entry.value->>'end')::time
+                OR (
+                  (window_entry.value->>'start')::time < (window_entry.value->>'end')::time
+                  AND (NOW() AT TIME ZONE (schedule.value->>'timezone'))::time >= (window_entry.value->>'start')::time
+                  AND (NOW() AT TIME ZONE (schedule.value->>'timezone'))::time < (window_entry.value->>'end')::time
+                )
+                OR (
+                  (window_entry.value->>'start')::time > (window_entry.value->>'end')::time
+                  AND (
+                    (NOW() AT TIME ZONE (schedule.value->>'timezone'))::time >= (window_entry.value->>'start')::time
+                    OR (NOW() AT TIME ZONE (schedule.value->>'timezone'))::time < (window_entry.value->>'end')::time
+                  )
+                )
+              )
+          )
+        )
         AND ${typeFilter}
         AND available_at <= NOW()
         AND attempt_count < max_attempts

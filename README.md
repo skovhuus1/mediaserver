@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.3.5**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.3.6**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 

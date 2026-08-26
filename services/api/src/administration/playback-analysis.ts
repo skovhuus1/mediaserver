@@ -1,3 +1,5 @@
+import { playbackMarkerAnalysisVersion } from '@boltbytes/contracts';
+
 export type ManualPlaybackMarker = {
   kind: 'intro' | 'recap' | 'credits';
   startMs: number;
@@ -35,46 +37,63 @@ export function playbackJobMediaId(payload: unknown) {
 
 export type PlaybackIntroAnalysis = {
   state: 'detected' | 'pending' | 'not-detected';
-  reason: 'detected' | 'external_provider' | 'chapter_marker' | 'insufficient_references' | 'low_information' | 'no_repeated_sequence';
+  reason: 'detected' | 'external_provider' | 'chapter_marker' | 'manual_marker' | 'previous_episode_match' | 'no_intro_boundary' | 'insufficient_previous_episodes' | 'credits_tail_detected' | 'marker_missing' | 'explicit_evidence_required' | 'insufficient_references' | 'low_information' | 'no_repeated_sequence';
   referenceCount: number;
   supportCount: number;
   usableFrameRatio: number;
   confidence: number | null;
+  source: 'chapter' | 'automatic' | 'external' | 'manual' | null;
+  analysisVersion: number;
+  analyzedAt: string | null;
 };
 
 export type PlaybackMarkerAnalysis = {
   intro: PlaybackIntroAnalysis | null;
   recap: PlaybackIntroAnalysis | null;
+  credits: PlaybackIntroAnalysis | null;
 };
 
-export function playbackMarkerAnalysis(manifest: unknown): PlaybackMarkerAnalysis {
+export function playbackMarkerAnalysis(manifest: unknown, markers: Array<{ kind: string; source: string; confidence: number | null }> = []): PlaybackMarkerAnalysis {
   return {
-    intro: playbackAnalysisForKind(manifest, 'intro'),
-    recap: playbackAnalysisForKind(manifest, 'recap'),
+    intro: playbackAnalysisForKind(manifest, 'intro', markers),
+    recap: playbackAnalysisForKind(manifest, 'recap', markers),
+    credits: playbackAnalysisForKind(manifest, 'credits', markers),
   };
 }
 
-export function playbackIntroAnalysis(manifest: unknown): PlaybackIntroAnalysis | null {
-  return playbackAnalysisForKind(manifest, 'intro');
+export function playbackIntroAnalysis(manifest: unknown, markers: Array<{ kind: string; source: string; confidence: number | null }> = []): PlaybackIntroAnalysis | null {
+  return playbackAnalysisForKind(manifest, 'intro', markers);
 }
 
-function playbackAnalysisForKind(manifest: unknown, kind: 'intro' | 'recap'): PlaybackIntroAnalysis | null {
+function playbackAnalysisForKind(manifest: unknown, kind: 'intro' | 'recap' | 'credits', markers: Array<{ kind: string; source: string; confidence: number | null }>): PlaybackIntroAnalysis | null {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return null;
   const analysis = (manifest as Record<string, unknown>).analysis;
   if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)) return null;
-  const markerAnalysis = (analysis as Record<string, unknown>)[kind];
+  const root = analysis as Record<string, unknown>;
+  if (finiteNumber(root.markerAnalysisVersion) < playbackMarkerAnalysisVersion) return null;
+  const markerAnalysis = root[kind];
   if (!markerAnalysis || typeof markerAnalysis !== 'object' || Array.isArray(markerAnalysis)) return null;
   const value = markerAnalysis as Record<string, unknown>;
   const states = ['detected', 'pending', 'not-detected'];
-  const reasons = ['detected', 'external_provider', 'chapter_marker', 'insufficient_references', 'low_information', 'no_repeated_sequence'];
+  const reasons = ['detected', 'external_provider', 'chapter_marker', 'manual_marker', 'previous_episode_match', 'no_intro_boundary', 'insufficient_previous_episodes', 'credits_tail_detected', 'marker_missing', 'explicit_evidence_required', 'insufficient_references', 'low_information', 'no_repeated_sequence'];
   if (!states.includes(String(value.state)) || !reasons.includes(String(value.reason))) return null;
+  const marker = markers.find((candidate) => candidate.kind === kind);
+  const source = marker?.source === 'manual' || marker?.source === 'chapter' || marker?.source === 'external' || marker?.source === 'automatic'
+    ? marker.source
+    : null;
+  if (value.state === 'detected' && !marker) {
+    return { state: 'not-detected', reason: 'marker_missing', referenceCount: finiteNumber(value.referenceCount), supportCount: finiteNumber(value.supportCount), usableFrameRatio: finiteNumber(value.usableFrameRatio), confidence: null, source: null, analysisVersion: finiteNumber(root.markerAnalysisVersion), analyzedAt: typeof root.analyzedAt === 'string' ? root.analyzedAt : null };
+  }
   return {
     state: value.state as PlaybackIntroAnalysis['state'],
     reason: value.reason as PlaybackIntroAnalysis['reason'],
     referenceCount: finiteNumber(value.referenceCount),
     supportCount: finiteNumber(value.supportCount),
     usableFrameRatio: finiteNumber(value.usableFrameRatio),
-    confidence: value.confidence === null ? null : finiteNumber(value.confidence),
+    confidence: marker?.confidence ?? (value.confidence === null ? null : finiteNumber(value.confidence)),
+    source,
+    analysisVersion: finiteNumber(root.markerAnalysisVersion),
+    analyzedAt: typeof value.analyzedAt === 'string' ? value.analyzedAt : typeof root.analyzedAt === 'string' ? root.analyzedAt : null,
   };
 }
 

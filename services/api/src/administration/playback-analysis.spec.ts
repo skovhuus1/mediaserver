@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { playbackMarkerAnalysisVersion } from '@boltbytes/contracts';
 import { playbackIntroAnalysis, playbackJobMediaId, playbackMarkerAnalysis, validateManualPlaybackMarkers } from './playback-analysis';
+
+const analyzedAt = '2026-08-26T12:00:00.000Z';
 
 describe('playback analysis policy', () => {
   it('accepts ordered manual markers inside the media duration', () => {
@@ -31,13 +34,16 @@ describe('playback analysis policy', () => {
   });
 
   it('exposes only validated intro-analysis diagnostics from manifests', () => {
-    expect(playbackIntroAnalysis({ analysis: { intro: {
+    expect(playbackIntroAnalysis({ analysis: { markerAnalysisVersion: playbackMarkerAnalysisVersion, analyzedAt, intro: {
       state: 'pending',
       reason: 'insufficient_references',
       referenceCount: 1,
       supportCount: 0,
       usableFrameRatio: 0.74,
       confidence: null,
+      source: null,
+      analysisVersion: playbackMarkerAnalysisVersion,
+      analyzedAt,
     } } })).toEqual({
       state: 'pending',
       reason: 'insufficient_references',
@@ -45,12 +51,17 @@ describe('playback analysis policy', () => {
       supportCount: 0,
       usableFrameRatio: 0.74,
       confidence: null,
+      source: null,
+      analysisVersion: playbackMarkerAnalysisVersion,
+      analyzedAt,
     });
     expect(playbackIntroAnalysis({ analysis: { intro: { state: 'ready', reason: 'guessed' } } })).toBeNull();
   });
 
   it('exposes recap and intro diagnostics separately from manifests', () => {
     expect(playbackMarkerAnalysis({ analysis: {
+      markerAnalysisVersion: playbackMarkerAnalysisVersion,
+      analyzedAt,
       recap: {
         state: 'detected',
         reason: 'chapter_marker',
@@ -67,7 +78,7 @@ describe('playback analysis policy', () => {
         usableFrameRatio: 0.68,
         confidence: null,
       },
-    } })).toEqual({
+    } }, [{ kind: 'recap', source: 'chapter', confidence: 1 }])).toEqual({
       recap: {
         state: 'detected',
         reason: 'chapter_marker',
@@ -75,6 +86,9 @@ describe('playback analysis policy', () => {
         supportCount: 0,
         usableFrameRatio: 1,
         confidence: 1,
+        source: 'chapter',
+        analysisVersion: playbackMarkerAnalysisVersion,
+        analyzedAt,
       },
       intro: {
         state: 'not-detected',
@@ -83,7 +97,11 @@ describe('playback analysis policy', () => {
         supportCount: 0,
         usableFrameRatio: 0.68,
         confidence: null,
+        source: null,
+        analysisVersion: playbackMarkerAnalysisVersion,
+        analyzedAt,
       },
+      credits: null,
     });
   });
 });

@@ -695,7 +695,7 @@ export class AdministrationService {
         error: item.playbackAsset.error,
       } : null,
       introAnalysis: playbackIntroAnalysis(item.playbackAsset?.manifest),
-      markerAnalysis: playbackMarkerAnalysis(item.playbackAsset?.manifest),
+      markerAnalysis: playbackMarkerAnalysis(item.playbackAsset?.manifest, item.timelineMarkers),
       markers: item.timelineMarkers,
       updatedAt: item.playbackAsset?.updatedAt ?? item.updatedAt,
     }));
@@ -753,8 +753,8 @@ export class AdministrationService {
         error: media.playbackAsset.error,
       } : null,
       markers: media.timelineMarkers,
-      introAnalysis: playbackIntroAnalysis(media.playbackAsset?.manifest),
-      markerAnalysis: playbackMarkerAnalysis(media.playbackAsset?.manifest),
+      introAnalysis: playbackIntroAnalysis(media.playbackAsset?.manifest, media.timelineMarkers),
+      markerAnalysis: playbackMarkerAnalysis(media.playbackAsset?.manifest, media.timelineMarkers),
       latestJob,
       previewDataUrl: await this.playbackPreview(media.playbackAsset?.spriteDirectory ?? null),
     };
@@ -767,6 +767,32 @@ export class AdministrationService {
     const result = await this.enqueuePlaybackAnalysisJob(actor, media.id, activeJobs);
     await this.audit(actor, 'playback_analysis.rebuild_queued', media.id, { jobId: result.id });
     return { jobId: result.id, status: result.status, deduplicated: result.deduplicated };
+  }
+
+  playbackAnalysisQueueState(actor: AuthenticatedUser) {
+    return playbackAnalysisQueueState(this.prisma, actor.accountId);
+  }
+
+  async pausePlaybackAnalysisQueue(actor: AuthenticatedUser) {
+    const state = await setPlaybackAnalysisQueuePaused(this.prisma, actor.accountId, true);
+    await this.audit(actor, 'playback_analysis.queue_paused', actor.accountId, state);
+    return state;
+  }
+
+  async resumePlaybackAnalysisQueue(actor: AuthenticatedUser) {
+    const state = await setPlaybackAnalysisQueuePaused(this.prisma, actor.accountId, false);
+    await this.audit(actor, 'playback_analysis.queue_resumed', actor.accountId, state);
+    return state;
+  }
+
+  playbackAnalysisSchedule(actor: AuthenticatedUser) {
+    return loadPlaybackAnalysisSchedule(this.prisma, actor.accountId);
+  }
+
+  async updatePlaybackAnalysisSchedule(actor: AuthenticatedUser, input: unknown) {
+    const schedule = await savePlaybackAnalysisSchedule(this.prisma, actor.accountId, input);
+    await this.audit(actor, 'playback_analysis.schedule_updated', actor.accountId, schedule);
+    return schedule;
   }
 
   async queuePlaybackAnalysisBulk(actor: AuthenticatedUser, dto: PlaybackAnalysisBulkDto) {
@@ -916,7 +942,7 @@ export class AdministrationService {
       where: {
         accountId,
         type: 'media.playback-assets',
-        status: { in: ['queued', 'running', 'processing', 'retrying'] },
+        status: { in: ['queued', 'running', 'processing', 'retrying', 'paused'] },
       },
       select: { id: true, status: true, payload: true },
       orderBy: { createdAt: 'desc' },
@@ -942,7 +968,7 @@ export class AdministrationService {
           accountId: actor.accountId,
           type: 'media.playback-assets',
           status: 'queued',
-          payload: { mediaId, force: true },
+          payload: { mediaId, force: true, analysisScope: 'marker_only' },
         },
         select: { id: true, status: true },
       });
@@ -1007,3 +1033,5 @@ export class AdministrationService {
     });
   }
 }
+import { playbackAnalysisQueueState, setPlaybackAnalysisQueuePaused } from './playback-analysis-queue.js';
+import { loadPlaybackAnalysisSchedule, savePlaybackAnalysisSchedule } from './playback-analysis-schedule.js';

@@ -1,6 +1,6 @@
 export type TimelineMarkerKind = 'intro' | 'recap' | 'credits';
 
-export const playbackMarkerAnalysisVersion = 4;
+export const playbackMarkerAnalysisVersion = 5;
 
 export type TimelineMarker = {
   kind: TimelineMarkerKind;
@@ -19,7 +19,7 @@ export type TrickplayCue = {
 };
 
 export type FrameFingerprint = {
-  version?: 1 | 2 | 3;
+  version?: 1 | 2 | 3 | 4;
   intervalSeconds: number;
   offsetSeconds: number;
   hashes: string[];
@@ -32,6 +32,12 @@ export type MarkerDetectionReason =
   | 'detected'
   | 'external_provider'
   | 'chapter_marker'
+  | 'manual_marker'
+  | 'previous_episode_match'
+  | 'no_intro_boundary'
+  | 'insufficient_previous_episodes'
+  | 'credits_tail_detected'
+  | 'marker_missing'
   | 'explicit_evidence_required'
   | 'insufficient_references'
   | 'low_information'
@@ -45,6 +51,9 @@ export type MarkerDetectionDiagnostics = {
   usableFrameRatio: number;
   confidence: number | null;
   marker: TimelineMarker | null;
+  source?: TimelineMarker['source'] | null;
+  analysisVersion?: number;
+  analyzedAt?: string;
 };
 
 export type IntroDetectionReason = MarkerDetectionReason;
@@ -136,6 +145,7 @@ export type RepeatedSegmentOptions = {
   maximumHashDistance?: number;
   minimumReferences?: number;
   minimumFrameQuality?: number;
+  minimumConfidence?: number;
 };
 
 function analyzeRepeatedSegment(
@@ -151,6 +161,7 @@ function analyzeRepeatedSegment(
   const maximumHashDistance = options.maximumHashDistance ?? 12;
   const minimumReferences = Math.max(1, options.minimumReferences ?? 2);
   const minimumFrameQuality = options.minimumFrameQuality ?? 0.16;
+  const minimumConfidence = options.minimumConfidence ?? 0;
   const minimumFrames = Math.max(2, Math.ceil(minimumSeconds / primary.intervalSeconds));
   const compatible = candidates.filter((candidate) => (
     (candidate.version ?? 1) === (primary.version ?? 1)
@@ -215,7 +226,10 @@ function analyzeRepeatedSegment(
   const endMs = Math.round((primary.offsetSeconds + endIndex * primary.intervalSeconds) * 1_000);
   const supportRatio = supportCount / compatible.length;
   const durationScore = Math.min(0.1, (endMs - startMs) / 900_000);
-  const confidence = Math.min(0.98, 0.66 + supportRatio * 0.16 + durationScore + Math.min(0.06, usableFrameRatio * 0.06));
+  const confidence = Math.min(0.98, 0.7 + supportRatio * 0.16 + durationScore + Math.min(0.06, usableFrameRatio * 0.06));
+  if (confidence < minimumConfidence) {
+    return diagnostics('not-detected', 'no_repeated_sequence', compatible.length, supportCount, usableFrameRatio, null, null);
+  }
   const marker: TimelineMarker = {
     kind,
     startMs,
@@ -226,11 +240,109 @@ function analyzeRepeatedSegment(
   return diagnostics('detected', 'detected', compatible.length, supportCount, usableFrameRatio, confidence, marker);
 }
 
+export function analyzePreviousEpisodeRecap(
+  opening: FrameFingerprint,
+  previousEpisodes: readonly FrameFingerprint[],
+  intro: TimelineMarker | null,
+  options: {
+    maximumHashDistance?: number;
+    minimumFrameQuality?: number;
+    minimumMatchedFrames?: number;
+    minimumSupportRatio?: number;
+    minimumConfidence?: number;
+  } = {},
+): MarkerDetectionDiagnostics {
+  const introStartMs = intro?.kind === 'intro' ? intro.startMs : 0;
+  const candidateEndMs = Math.min(introStartMs, 240_000);
+  const usableOpening = opening.hashes.filter((_, index) => frameIsUsable(opening, index, options.minimumFrameQuality ?? 0.16)).length;
+  const usableFrameRatio = opening.hashes.length ? usableOpening / opening.hashes.length : 0;
+  if (candidateEndMs < 20_000) {
+    return diagnostics('not-detected', 'no_intro_boundary', previousEpisodes.length, 0, usableFrameRatio, null, null);
+  }
+  const references = previousEpisodes.filter((candidate) => candidate.hashes.length > 0);
+  if (!references.length) {
+    return diagnostics('pending', 'insufficient_previous_episodes', 0, 0, usableFrameRatio, null, null);
+  }
+  const maximumHashDistance = options.maximumHashDistance ?? 10;
+  const minimumFrameQuality = options.minimumFrameQuality ?? 0.16;
+  const candidateIndexes = opening.hashes.flatMap((_, index) => {
+    const frameMs = (opening.offsetSeconds + index * opening.intervalSeconds) * 1_000;
+    return frameMs < candidateEndMs && frameIsUsable(opening, index, minimumFrameQuality) ? [index] : [];
+  });
+  const matchedIndexes = candidateIndexes.filter((index) => references.some((reference) => reference.hashes.some((_, referenceIndex) => (
+    frameIsUsable(reference, referenceIndex, minimumFrameQuality)
+    && hammingDistance(opening.hashes[index]!, reference.hashes[referenceIndex]!) <= maximumHashDistance
+  ))));
+  const minimumMatchedFrames = options.minimumMatchedFrames ?? 3;
+  const supportRatio = candidateIndexes.length ? matchedIndexes.length / candidateIndexes.length : 0;
+  const firstMatchedMs = matchedIndexes.length
+    ? Math.round((opening.offsetSeconds + matchedIndexes[0]! * opening.intervalSeconds) * 1_000)
+    : Number.POSITIVE_INFINITY;
+  if (
+    firstMatchedMs > 5_000
+    || matchedIndexes.length < minimumMatchedFrames
+    || supportRatio < (options.minimumSupportRatio ?? 0.25)
+  ) {
+    return diagnostics('not-detected', 'no_repeated_sequence', references.length, matchedIndexes.length, usableFrameRatio, null, null);
+  }
+  const confidence = Math.min(0.98, 0.79 + supportRatio * 0.2 + Math.min(0.08, matchedIndexes.length / 25 * 0.08));
+  if (confidence < (options.minimumConfidence ?? 0.85)) {
+    return diagnostics('not-detected', 'no_repeated_sequence', references.length, matchedIndexes.length, usableFrameRatio, null, null);
+  }
+  const marker: TimelineMarker = {
+    kind: 'recap',
+    startMs: 0,
+    endMs: candidateEndMs,
+    source: 'automatic',
+    confidence,
+  };
+  return diagnostics('detected', 'previous_episode_match', references.length, matchedIndexes.length, usableFrameRatio, confidence, marker);
+}
+
+export type CreditsTailSample = {
+  atMs: number;
+  luma: number;
+  motion: number;
+  edgeDensity: number;
+};
+
+export function creditsMarkerFromTailEvidence(
+  samples: readonly CreditsTailSample[],
+  blackSegments: readonly { startMs: number; endMs: number }[],
+  durationMs: number,
+): TimelineMarker | null {
+  const earliest = Math.max(Math.round(durationMs * 0.7), durationMs - 12 * 60_000);
+  const eligible = samples.filter((sample) => sample.atMs >= earliest && sample.atMs <= durationMs);
+  let runStart: number | null = null;
+  let runLast: number | null = null;
+  let bestStart: number | null = null;
+  for (const sample of eligible) {
+    const creditLike = sample.edgeDensity >= 0.12 && sample.motion <= 0.35 && sample.luma <= 0.86;
+    if (creditLike) {
+      if (runStart === null || (runLast !== null && sample.atMs - runLast > 6_000)) runStart = sample.atMs;
+      runLast = sample.atMs;
+      if (runLast - runStart >= 30_000 && runLast >= durationMs - 90_000) bestStart = runStart;
+    } else if (runLast !== null && sample.atMs - runLast > 6_000) {
+      runStart = null;
+      runLast = null;
+    }
+  }
+  const blackMarker = creditsMarkerFromBlackSegments(blackSegments, durationMs);
+  if (bestStart === null) return blackMarker;
+  return {
+    kind: 'credits',
+    startMs: blackMarker ? Math.min(bestStart, blackMarker.startMs) : bestStart,
+    endMs: durationMs,
+    source: 'automatic',
+    confidence: blackMarker ? 0.82 : 0.72,
+  };
+}
+
 export function creditsMarkerFromBlackSegments(
   segments: readonly { startMs: number; endMs: number }[],
   durationMs: number,
 ): TimelineMarker | null {
-  const earliest = Math.max(0, durationMs - 12 * 60_000);
+  const earliest = Math.max(Math.round(durationMs * 0.7), durationMs - 12 * 60_000);
   const latest = Math.max(0, durationMs - 45_000);
   const candidate = segments
     .filter((segment) => segment.startMs >= earliest && segment.startMs <= latest && segment.endMs < durationMs - 30_000)
@@ -336,5 +448,5 @@ function diagnostics(
   confidence: number | null,
   marker: TimelineMarker | null,
 ): MarkerDetectionDiagnostics {
-  return { state, reason, referenceCount, supportCount, usableFrameRatio, confidence, marker };
+  return { state, reason, referenceCount, supportCount, usableFrameRatio, confidence, marker, source: marker?.source ?? null };
 }

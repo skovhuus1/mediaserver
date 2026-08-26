@@ -4,6 +4,14 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.6 - 2026-08-26
+
+- Tilfoejer daglige tidsvinduer for playback-analyse med IANA-tidszone, nattevinduer og manuel pause som hoejeste prioritet.
+- Playback-analysekøen kan nu pauses persistent og genoptages uden at afbryde et igangværende atomisk asset-commit eller nulstille jobforsøg.
+- Goer playback-markoertabellen autoritativ og gemmer markoerer, diagnostics og asset-resultat atomisk.
+- Tilfoejer taet version-5 opening-fingerprint, balanceret recap-match mod tidligere afsnit og staerkere lokal rulletekstdetektion.
+- Tilfoejer marker-only genanalyse, som genbruger eksisterende seek-preview, samt additive kilde- og versiondiagnostics.
+
 ## 0.3.5 - 2026-08-26
 
 - Adskiller intro og recap i playback-analysen: gentagne lokale fingerprints kan nu kun oprette intro-markorer, mens recap kraever eksplicit kapiteldata eller TheIntroDB-evidens.
