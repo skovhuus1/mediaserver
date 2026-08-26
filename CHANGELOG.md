@@ -6,6 +6,7 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## 0.3.6 - 2026-08-26
 
+- Playback-analysekøen kan nu pauses persistent og genoptages uden at afbryde et igangværende atomisk asset-commit eller nulstille jobforsøg.
 - Goer playback-markoertabellen autoritativ og gemmer markoerer, diagnostics og asset-resultat atomisk.
 - Tilfoejer taet version-5 opening-fingerprint, balanceret recap-match mod tidligere afsnit og staerkere lokal rulletekstdetektion.
 - Tilfoejer marker-only genanalyse, som genbruger eksisterende seek-preview, samt additive kilde- og versiondiagnostics.

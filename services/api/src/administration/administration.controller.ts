@@ -147,6 +147,24 @@ export class AdministrationController {
     return this.administration.listPlaybackAnalysis(actor, query);
   }
 
+  @Get('playback-analysis/queue/status')
+  @Roles('admin', 'operator')
+  playbackAnalysisQueueStatus(@CurrentUser() actor: AuthenticatedUser) {
+    return this.administration.playbackAnalysisQueueState(actor);
+  }
+
+  @Post('playback-analysis/queue/pause')
+  @Roles('admin')
+  pausePlaybackAnalysisQueue(@CurrentUser() actor: AuthenticatedUser) {
+    return this.administration.pausePlaybackAnalysisQueue(actor);
+  }
+
+  @Post('playback-analysis/queue/resume')
+  @Roles('admin')
+  resumePlaybackAnalysisQueue(@CurrentUser() actor: AuthenticatedUser) {
+    return this.administration.resumePlaybackAnalysisQueue(actor);
+  }
+
   @Get('playback-analysis/:mediaId')
   @Roles('admin', 'operator')
   playbackAnalysisDetail(@CurrentUser() actor: AuthenticatedUser, @Param('mediaId') mediaId: string) {

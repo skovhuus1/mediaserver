@@ -619,11 +619,11 @@ export class CatalogService {
           orderBy: { createdAt: 'asc' },
         }),
         tx.systemJob.findMany({
-          where: { accountId: actor.accountId, type: 'media.playback-assets', status: { in: ['queued', 'running'] } },
+          where: { accountId: actor.accountId, type: 'media.playback-assets', status: { in: ['queued', 'running', 'paused'] } },
           select: { id: true, status: true, payload: true },
         }),
       ]);
-      const queuedJobs = dto.replaceQueue ? activeJobs.filter((job) => job.status === 'queued') : [];
+      const queuedJobs = dto.replaceQueue ? activeJobs.filter((job) => job.status === 'queued' || job.status === 'paused') : [];
       if (queuedJobs.length) {
         await tx.systemJob.updateMany({
           where: { accountId: actor.accountId, id: { in: queuedJobs.map((job) => job.id) }, status: 'queued' },
@@ -761,7 +761,7 @@ export class CatalogService {
         where: {
           accountId,
           type: 'media.playback-assets',
-          status: { in: ['queued', 'running'] },
+          status: { in: ['queued', 'running', 'paused'] },
           payload: { path: ['mediaId'], equals: mediaId },
         },
       });

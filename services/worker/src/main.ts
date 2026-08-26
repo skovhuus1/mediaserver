@@ -166,6 +166,16 @@ async function claimNextJob(allowedTypes: readonly WorkerJobType[]): Promise<Cla
           status = 'queued'
           OR (status = 'running' AND lease_expires_at <= NOW())
         )
+        AND (
+          type <> 'media.playback-assets'
+          OR NOT EXISTS (
+            SELECT 1
+            FROM system_settings AS setting
+            WHERE setting.account_id = system_jobs.account_id
+              AND setting.key = 'runtime.playback-analysis.paused'
+              AND setting.value = 'true'::jsonb
+          )
+        )
         AND ${typeFilter}
         AND available_at <= NOW()
         AND attempt_count < max_attempts
