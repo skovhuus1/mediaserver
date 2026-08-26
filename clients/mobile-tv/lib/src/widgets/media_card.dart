@@ -65,7 +65,9 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
       imageSize: 'w500',
     );
     final progress = media.progress?.percent.clamp(0, 100) ?? 0;
-    final posterHeight = widget.width * (widget.isTv ? 1.42 : 1.48);
+    // Keep the TV metadata and progress row inside the fixed rail height.
+    // Mobile retains the taller poster ratio used by its existing cards.
+    final posterHeight = widget.width * (widget.isTv ? 1.36 : 1.48);
     final focusScale = _focused
         ? (widget.isTv ? TvDesignTokens.focusScale : 1.05)
         : 1.0;

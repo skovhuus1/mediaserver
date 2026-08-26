@@ -1465,6 +1465,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
         SizedBox(
           height: TvDesignTokens.cardHeight,
           child: ListView.separated(
+            clipBehavior: Clip.none,
             padding: const EdgeInsets.symmetric(
               horizontal: TvDesignTokens.pageHorizontalPadding,
             ),
@@ -1824,6 +1825,9 @@ class _TvHubScreenState extends State<TvHubScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final sidebarWidth = _focusController.state.isTopRow
+        ? TvDesignTokens.sidebarExpandedWidth
+        : TvDesignTokens.sidebarCollapsedWidth;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (_, _) => _handleBackAction(),
@@ -1852,8 +1856,13 @@ class _TvHubScreenState extends State<TvHubScreen> {
                     left: 80,
                     child: _TvAmbientGlow(size: 620, color: Color(0x181D4A5A)),
                   ),
-                  Positioned.fill(
-                    left: TvDesignTokens.sidebarCollapsedWidth,
+                  AnimatedPositioned(
+                    duration: TvDesignTokens.focusAnimationDuration,
+                    curve: Curves.easeOutCubic,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                    left: sidebarWidth,
                     child: _buildSections(),
                   ),
                   Align(
@@ -2103,6 +2112,7 @@ class _TvFocusAction extends StatelessWidget {
               ),
               textStyle: WidgetStatePropertyAll(
                 TextStyle(
+                  fontFamily: 'sans-serif-condensed',
                   fontSize: 13,
                   fontWeight: focused ? FontWeight.w900 : FontWeight.w700,
                   letterSpacing: -0.05,

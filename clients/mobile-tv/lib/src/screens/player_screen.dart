@@ -352,14 +352,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     Duration(milliseconds: state.activeMarker!.endMs),
                   ),
                   icon: const Icon(Icons.skip_next),
-                  label: Text(
-                    switch (state.activeMarker!.kind) {
-                      'intro' => 'Spring intro over',
-                      'recap' => 'Spring resumé over',
-                      'credits' => 'Spring rulletekster over',
-                      _ => 'Spring videre',
-                    },
-                  ),
+                  label: Text(switch (state.activeMarker!.kind) {
+                    'intro' => 'Spring intro over',
+                    'recap' => 'Spring resumé over',
+                    'credits' => 'Spring rulletekster over',
+                    _ => 'Spring videre',
+                  }),
                 ),
               ),
             if (state.nextEpisodeCountdown != null)

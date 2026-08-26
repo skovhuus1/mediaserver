@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:boltbytes_media/src/core/api_client.dart';
 import 'package:boltbytes_media/src/core/app_update_service.dart';
@@ -30,7 +29,6 @@ import 'package:boltbytes_media/src/tv/screens/tv_title_screen.dart';
 import 'package:boltbytes_media/src/tv/widgets/tv_option_overlay.dart';
 import 'package:boltbytes_media/src/tv/widgets/tv_cinematic_chrome.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -73,7 +71,6 @@ void main() {
       });
 
       final preview = _PreviewHarness(tester);
-      if (fileName == allFiles.first) preview.clear();
       await preview.pump(
         fileName,
         _previewWidget(fileName),
@@ -91,6 +88,21 @@ Future<void> _loadPreviewFonts() async {
   );
   await _loadFontFamily('sans-serif', r'C:\Windows\Fonts\segoeui.ttf');
   await _loadFontFamily('Courier New', r'C:\Windows\Fonts\consola.ttf');
+  final where = await Process.run('where.exe', ['flutter']);
+  if (where.exitCode == 0) {
+    final flutterPath = (where.stdout as String)
+        .split(RegExp(r'[\r\n]+'))
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .firstOrNull;
+    if (flutterPath != null) {
+      final flutterBin = File(flutterPath).parent.path;
+      await _loadFontFamily(
+        'MaterialIcons',
+        '$flutterBin${Platform.pathSeparator}cache${Platform.pathSeparator}artifacts${Platform.pathSeparator}material_fonts${Platform.pathSeparator}MaterialIcons-Regular.otf',
+      );
+    }
+  }
 }
 
 Future<void> _loadFontFamily(String family, String path) async {
@@ -198,19 +210,10 @@ class _PreviewHarness {
   GlobalKey _key = GlobalKey();
   final _directory = Directory('artifacts/tv-previews');
 
-  void clear() {
-    if (!_directory.existsSync()) return;
-    for (final entry in _directory.listSync()) {
-      if (entry is File && entry.path.endsWith('.png')) entry.deleteSync();
-    }
-  }
-
   Future<void> pump(String fileName, Widget child, {bool chrome = true}) async {
     // ignore: avoid_print
     print('TV_PREVIEW pump $fileName');
     _key = GlobalKey();
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
     await tester.pumpWidget(
       RepaintBoundary(
         key: _key,
@@ -234,20 +237,17 @@ class _PreviewHarness {
     for (var index = 0; index < 3; index++) {
       await tester.pump();
     }
+    await tester.pump(const Duration(milliseconds: 500));
   }
 
   Future<void> write(String fileName) async {
     // ignore: avoid_print
     print('TV_PREVIEW write $fileName');
     if (!_directory.existsSync()) _directory.createSync(recursive: true);
-    final boundary =
-        _key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-    final image = await boundary.toImage(pixelRatio: 1);
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    image.dispose();
-    File(
-      '${_directory.path}/$fileName',
-    ).writeAsBytesSync(byteData!.buffer.asUint8List(), flush: true);
+    await expectLater(
+      find.byKey(_key),
+      matchesGoldenFile('../artifacts/tv-previews/$fileName'),
+    );
     // ignore: avoid_print
     print('TV_PREVIEW wrote $fileName');
   }
@@ -315,7 +315,10 @@ ThemeData _theme() {
         backgroundColor: TvDesignTokens.gold,
         foregroundColor: Colors.black,
         elevation: 0,
-        textStyle: const TextStyle(fontWeight: FontWeight.w900),
+        textStyle: const TextStyle(
+          fontFamily: 'sans-serif-condensed',
+          fontWeight: FontWeight.w900,
+        ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
         ),
@@ -325,7 +328,10 @@ ThemeData _theme() {
       style: OutlinedButton.styleFrom(
         foregroundColor: Colors.white,
         side: const BorderSide(color: TvDesignTokens.panelBorder),
-        textStyle: const TextStyle(fontWeight: FontWeight.w800),
+        textStyle: const TextStyle(
+          fontFamily: 'sans-serif-condensed',
+          fontWeight: FontWeight.w800,
+        ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
         ),

@@ -243,8 +243,9 @@ class PlaybackAuthorizationRequest {
   }) : startPositionMs = startPositionMs.clamp(0, 2147483647).toInt(),
        screenHeight = screenHeight.round().clamp(240, 4320).toInt(),
        devicePixelRatio = devicePixelRatio.clamp(0.5, 4).toDouble(),
-       estimatedDownlinkMbps =
-           estimatedDownlinkMbps?.clamp(0.1, 1000).toDouble() {
+       estimatedDownlinkMbps = estimatedDownlinkMbps
+           ?.clamp(0.1, 1000)
+           .toDouble() {
     for (final entry in {
       'profileId': profileId,
       'mediaId': mediaId,
@@ -790,7 +791,9 @@ class PlaybackSessionController extends ChangeNotifier
         !controller.value.isInitialized) {
       return false;
     }
-    if (controller.value.isCompleted) return !_isPrematurePlaybackEnd(controller);
+    if (controller.value.isCompleted) {
+      return !_isPrematurePlaybackEnd(controller);
+    }
     final streamDuration = controller.value.duration;
     final streamPosition = controller.value.position;
     if (streamDuration <= Duration.zero) return false;
@@ -1460,7 +1463,8 @@ class PlaybackSessionController extends ChangeNotifier
     if (policy == null || currentQualityMode != 'auto') return;
     final now = DateTime.now();
     final previous = _lastQualityCapAt;
-    if (previous != null && now.difference(previous) < const Duration(seconds: 5)) {
+    if (previous != null &&
+        now.difference(previous) < const Duration(seconds: 5)) {
       return;
     }
     _lastQualityCapAt = now;
@@ -1490,15 +1494,16 @@ class PlaybackSessionController extends ChangeNotifier
 
   int? _serverUpscaleTarget(PlaybackAuthorization authorization) {
     final sourceHeight = authorization.sourceHeight ?? 0;
-    final upscaled = authorization.renditions
-        .where(
-          (rendition) =>
-              rendition.height > 0 &&
-              (rendition.upscaled || rendition.height > sourceHeight),
-        )
-        .map((rendition) => rendition.height)
-        .toList()
-      ..sort();
+    final upscaled =
+        authorization.renditions
+            .where(
+              (rendition) =>
+                  rendition.height > 0 &&
+                  (rendition.upscaled || rendition.height > sourceHeight),
+            )
+            .map((rendition) => rendition.height)
+            .toList()
+          ..sort();
     if (upscaled.isNotEmpty) return upscaled.last;
     return null;
   }
@@ -1541,11 +1546,12 @@ class PlaybackSessionController extends ChangeNotifier
   }
 
   int? _highestRenditionHeight(PlaybackAuthorization authorization) {
-    final heights = authorization.renditions
-        .where((rendition) => rendition.height > 0)
-        .map((rendition) => rendition.height)
-        .toList()
-      ..sort();
+    final heights =
+        authorization.renditions
+            .where((rendition) => rendition.height > 0)
+            .map((rendition) => rendition.height)
+            .toList()
+          ..sort();
     return heights.isEmpty ? null : heights.last;
   }
 
