@@ -33,7 +33,7 @@ class TvDesignTokens {
   static const double detailHeroHeight = 292;
   static const double detailContentWidth = 920;
   static const double cardWidth = 126;
-  static const double cardHeight = 226;
+  static const double cardHeight = 236;
   static const double cardGap = 9;
   static const double sectionGap = 12;
   static const double sectionTitleSize = 17;

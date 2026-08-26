@@ -406,6 +406,10 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
 
   Future<void> _handleBack() async {
     if (_closing) return;
+    if (_controlsVisible) {
+      _hideControls();
+      return;
+    }
     _closing = true;
     _hideTimer?.cancel();
     _seekFeedbackTimer?.cancel();
@@ -1187,15 +1191,16 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
   int? _serverUpscaleTarget(PlaybackAuthorization? authorization) {
     if (authorization == null) return null;
     final sourceHeight = authorization.sourceHeight ?? 0;
-    final upscaled = authorization.renditions
-        .where(
-          (rendition) =>
-              rendition.height > 0 &&
-              (rendition.upscaled || rendition.height > sourceHeight),
-        )
-        .map((rendition) => rendition.height)
-        .toList()
-      ..sort();
+    final upscaled =
+        authorization.renditions
+            .where(
+              (rendition) =>
+                  rendition.height > 0 &&
+                  (rendition.upscaled || rendition.height > sourceHeight),
+            )
+            .map((rendition) => rendition.height)
+            .toList()
+          ..sort();
     if (upscaled.isNotEmpty) return upscaled.last;
     return null;
   }

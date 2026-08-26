@@ -483,7 +483,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
           const Text(
             'Live TV',
             style: TextStyle(
-            color: TvDesignTokens.goldSoft,
+              color: TvDesignTokens.goldSoft,
               fontSize: 12.5,
               fontWeight: FontWeight.w900,
               letterSpacing: -0.1,
@@ -692,98 +692,100 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
-      children: [
-        SizedBox(
-          height: 30,
-          child: Row(
-            children: [
-              Container(
-                width: _channelWidth,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.045),
-                  border: Border(
-                    right: BorderSide(
-                      color: Colors.white.withValues(alpha: 0.07),
+        children: [
+          SizedBox(
+            height: 30,
+            child: Row(
+              children: [
+                Container(
+                  width: _channelWidth,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.045),
+                    border: Border(
+                      right: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.07),
+                      ),
                     ),
                   ),
-                ),
-                alignment: Alignment.centerLeft,
-                child: Row(
-                  children: [
-                    const Text(
-                      'Channels',
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${_channels.length}',
-                      style: const TextStyle(
-                        color: TvDesignTokens.goldSoft,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: _timeline,
-                  scrollDirection: Axis.horizontal,
-                  child: SizedBox(
-                    width: _timelineWidth,
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.026),
-                            ),
-                          ),
+                  alignment: Alignment.centerLeft,
+                  child: Row(
+                    children: [
+                      const Text(
+                        'Channels',
+                        style: TextStyle(
+                          color: Colors.white60,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.2,
                         ),
-                        for (
-                          var index = 0;
-                          index <=
-                              _windowEnd.difference(_windowStart).inMinutes ~/
-                                  30;
-                          index++
-                        )
-                          Positioned(
-                            left: index * TvDesignTokens.epgHalfHourWidth + 9,
-                            top: 7,
-                            child: Text(
-                              _clock(
-                                _windowStart.add(Duration(minutes: index * 30)),
-                              ),
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 10.8,
-                                fontWeight: FontWeight.w800,
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${_channels.length}',
+                        style: const TextStyle(
+                          color: TvDesignTokens.goldSoft,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: _timeline,
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: _timelineWidth,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.026),
                               ),
                             ),
                           ),
-                      ],
+                          for (
+                            var index = 0;
+                            index <=
+                                _windowEnd.difference(_windowStart).inMinutes ~/
+                                    30;
+                            index++
+                          )
+                            Positioned(
+                              left: index * TvDesignTokens.epgHalfHourWidth + 9,
+                              top: 7,
+                              child: Text(
+                                _clock(
+                                  _windowStart.add(
+                                    Duration(minutes: index * 30),
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 10.8,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            controller: _vertical,
-            itemCount: _channels.length,
-            itemExtent: _rowHeight,
-            itemBuilder: (_, index) => _buildChannelRow(index),
+          Expanded(
+            child: ListView.builder(
+              controller: _vertical,
+              itemCount: _channels.length,
+              itemExtent: _rowHeight,
+              itemBuilder: (_, index) => _buildChannelRow(index),
+            ),
           ),
-        ),
-      ],
+        ],
       ),
     );
   }
@@ -809,9 +811,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
                     colors: [Color(0xCC162333), Color(0xAA0B1017)],
                   )
                 : null,
-            color: selectedRow
-                ? null
-                : Colors.white.withValues(alpha: 0.032),
+            color: selectedRow ? null : Colors.white.withValues(alpha: 0.032),
             borderRadius: BorderRadius.zero,
             border: Border.all(
               color: selectedRow
@@ -1020,9 +1020,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
   double _programProgress(LiveTvProgram program) {
     final total = program.endsAt.difference(program.startsAt).inMilliseconds;
     if (total <= 0) return 0;
-    final elapsed = DateTime.now()
-        .difference(program.startsAt)
-        .inMilliseconds;
+    final elapsed = DateTime.now().difference(program.startsAt).inMilliseconds;
     return (elapsed / total).clamp(0.0, 1.0).toDouble();
   }
 
@@ -1228,7 +1226,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
   }
 
   Widget _hintChip(String key, String label) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
       color: Colors.white.withValues(alpha: 0.055),
       borderRadius: BorderRadius.circular(999),
@@ -1257,7 +1255,6 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
       ],
     ),
   );
-
 }
 
 class TvLivePlayerScreen extends StatefulWidget {
@@ -1378,7 +1375,11 @@ class _FeaturedChannelLogo extends StatelessWidget {
       ],
     ),
     child: channel?.logoUrl == null
-        ? const Icon(Icons.live_tv_rounded, color: TvDesignTokens.gold, size: 38)
+        ? const Icon(
+            Icons.live_tv_rounded,
+            color: TvDesignTokens.gold,
+            size: 38,
+          )
         : Image.network(
             channel!.logoUrl!,
             fit: BoxFit.contain,
