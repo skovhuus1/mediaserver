@@ -4,6 +4,12 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.3 - 2026-08-26
+
+- Fornyer system-job-leases periodisk omkring hele worker-korslen, sa langvarig playback-analyse ikke genudleveres eller fejler med `Worker lease expired`.
+- Forhindrer overlappende heartbeat-kald og afviser sikker afslutning, hvis workerens lease ikke laengere kan fornyes.
+- Udvider database-constraints til de allerede publicerede playback-markorer `recap` og provider-kilden `external`, sa TheIntroDB-resultater kan gemmes i produktion.
+
 ## 0.3.2 - 2026-08-26
 
 - Retter masse-genanalyse, sa foraldede markoranalyseversioner altid koes med `force` i stedet for fejlagtigt at blive betragtet som friske videofiler.
