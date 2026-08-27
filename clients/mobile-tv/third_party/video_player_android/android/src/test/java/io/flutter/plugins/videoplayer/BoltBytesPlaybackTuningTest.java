@@ -10,9 +10,11 @@ import androidx.test.core.app.ApplicationProvider;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
 @UnstableApi
 @RunWith(RobolectricTestRunner.class)
+@Config(sdk = 35)
 public class BoltBytesPlaybackTuningTest {
   @Test
   public void tvSelectorStartsAtLowestBitrate() {
@@ -24,6 +26,7 @@ public class BoltBytesPlaybackTuningTest {
 
     assertTrue(selector.getParameters().forceLowestBitrate);
     assertEquals(30_000, BoltBytesPlaybackTuning.QUALITY_INCREASE_BUFFER_MS);
+    assertEquals(0.55f, BoltBytesPlaybackTuning.BANDWIDTH_FRACTION, 0.0f);
     assertEquals(3_000, BoltBytesPlaybackTuning.AUTO_REBUFFER_MS);
     assertEquals(4_000, BoltBytesPlaybackTuning.STABLE_REBUFFER_MS);
   }

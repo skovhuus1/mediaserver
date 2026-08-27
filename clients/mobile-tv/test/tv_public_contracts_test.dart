@@ -53,6 +53,11 @@ void main() {
         'class PlaybackSessionController',
         'class PlaybackViewState',
       ],
+      'lib/src/shared_core/playback/playback_quality_coordinator.dart': [
+        'class PlaybackQualityCoordinator',
+        'class PlaybackQualitySelection',
+        'resolvePlaybackQualityTarget',
+      ],
     };
 
     for (final entry in contracts.entries) {

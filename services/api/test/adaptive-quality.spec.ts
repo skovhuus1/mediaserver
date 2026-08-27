@@ -31,7 +31,7 @@ describe('adaptive quality plan', () => {
     });
   });
 
-  it('caps automatic server upscaling to the safe network budget', () => {
+  it('keeps the complete ladder when the startup estimate is conservative', () => {
     const plan = buildAdaptiveQualityPlan({
       ...defaults,
       sourceHeight: 720,
@@ -40,10 +40,11 @@ describe('adaptive quality plan', () => {
       upscaleMode: 'server',
     });
 
-    expect(plan.effectiveMaxHeight).toBe(1080);
-    expect(plan.effectiveMaxBitrate).toBe(7_200_000);
+    expect(plan.effectiveMaxHeight).toBe(2160);
+    expect(plan.effectiveMaxBitrate).toBe(20_000_000);
+    expect(plan.estimatedBandwidth).toBe(10_000_000);
     expect(plan.renditions.at(-1)).toMatchObject({
-      height: 1080,
+      height: 2160,
       upscaled: true,
     });
   });

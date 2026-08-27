@@ -10,8 +10,8 @@ import '../../core/models.dart';
 import '../../core/playback_platform.dart';
 import '../../core/webvtt.dart';
 import 'playback_maintenance_scheduler.dart';
+import 'playback_quality_coordinator.dart';
 import 'playback_tuning.dart';
-import 'tv_adaptive_quality_policy.dart';
 
 const _stateUnset = Object();
 
@@ -335,13 +335,13 @@ class PlaybackSessionController extends ChangeNotifier
 
   PlaybackAuthorization? _authorization;
   List<WebVttCue> _cues = const [];
-  List<VideoTrack> _videoTracks = const [];
   double? _estimatedDownlinkMbps;
   final PlaybackMaintenanceScheduler _maintenanceScheduler =
       PlaybackMaintenanceScheduler();
-  final TvAdaptiveQualityPolicy _adaptiveQualityPolicy =
-      TvAdaptiveQualityPolicy();
-  Timer? _qualityTimer;
+  final PlaybackPlatform _platform = PlaybackPlatform.instance;
+  late final PlaybackQualityCoordinator _qualityCoordinator =
+      PlaybackQualityCoordinator(platform: _platform);
+  Timer? _autoQualityUnlockTimer;
   Timer? _uiTimer;
   Timer? _nextTimer;
   Future<void>? _initialization;
@@ -357,19 +357,14 @@ class PlaybackSessionController extends ChangeNotifier
   bool _prematureEndRecovering = false;
   bool _qualityChanging = false;
   bool _audioChanging = false;
-  bool _qualityPolicyRunning = false;
-  bool _adaptiveQualityLocked = false;
-  bool _adaptiveQualityRaised = false;
+  bool _autoQualityUnlockRunning = false;
   bool _keepScreenOnEnabled = false;
-  DateTime? _lastBufferingAt;
-  int? _lastAppliedMaximumHeight;
-  int? _activeVideoHeight;
+  int _autoQualityUnlockAttempts = 0;
   int _prematureEndRetryCount = 0;
   int? _sessionFixedHeight;
   String? _sessionQualityMode;
   bool? _sessionAllowUpscale;
   String? _sessionUpscaleMode;
-  final PlaybackPlatform _platform = PlaybackPlatform.instance;
 
   String get currentQualityMode =>
       _sessionQualityMode ?? _authorization?.preferences.qualityMode ?? 'auto';
@@ -566,7 +561,6 @@ class PlaybackSessionController extends ChangeNotifier
       await controller.seekTo(Duration(milliseconds: directPlaySeekMs));
     }
     await controller.setPlaybackSpeed(authorization.preferences.playbackRate);
-    _lastAppliedMaximumHeight = null;
     await _configureQuality(controller, authorization);
     controller.addListener(_onVideoChanged);
     await controller.play();
@@ -612,10 +606,6 @@ class PlaybackSessionController extends ChangeNotifier
     if (controller == null || _disposed) return;
     if (controller.value.isBuffering && !_lastBuffering) {
       _stallCount += 1;
-      _lastBufferingAt = DateTime.now();
-      if (_adaptiveQualityRaised && !_adaptiveQualityLocked) {
-        unawaited(_handleAdaptiveQualityRisk());
-      }
     }
     _lastBuffering = controller.value.isBuffering;
     if (_isPrematurePlaybackEnd(controller)) {
@@ -631,9 +621,9 @@ class PlaybackSessionController extends ChangeNotifier
       heartbeat: _heartbeat,
       progress: () => saveProgress(),
     );
-    _lastBufferingAt = null;
     _lastBuffering = _video?.value.isBuffering ?? false;
-    _scheduleAdaptiveQualityCheck(const Duration(seconds: 30));
+    _autoQualityUnlockAttempts = 0;
+    _scheduleAutoQualityUnlock(const Duration(seconds: 30));
     _uiTimer = Timer.periodic(
       const Duration(milliseconds: 250),
       (_) => _tick(),
@@ -643,10 +633,10 @@ class PlaybackSessionController extends ChangeNotifier
 
   void _stopTimers() {
     _maintenanceScheduler.stop();
-    _qualityTimer?.cancel();
+    _autoQualityUnlockTimer?.cancel();
     _uiTimer?.cancel();
     _nextTimer?.cancel();
-    _qualityTimer = null;
+    _autoQualityUnlockTimer = null;
     _uiTimer = null;
     _nextTimer = null;
   }
@@ -772,96 +762,57 @@ class PlaybackSessionController extends ChangeNotifier
     } catch (_) {}
   }
 
-  void _scheduleAdaptiveQualityCheck(Duration delay) {
-    _qualityTimer?.cancel();
-    if (_adaptiveQualityLocked || _disposed || _released) return;
-    _qualityTimer = Timer(delay, () => unawaited(_evaluateAdaptiveQuality()));
+  void _scheduleAutoQualityUnlock(Duration delay) {
+    _autoQualityUnlockTimer?.cancel();
+    if (_disposed ||
+        _released ||
+        currentQualityMode != 'auto' ||
+        !_qualityCoordinator.supportsLocalSelection) {
+      return;
+    }
+    _autoQualityUnlockTimer = Timer(
+      delay,
+      () => unawaited(_unlockAutomaticQuality()),
+    );
   }
 
-  Future<void> _evaluateAdaptiveQuality() async {
-    if (_qualityPolicyRunning || _disposed || _released) return;
+  Future<void> _unlockAutomaticQuality() async {
+    if (_autoQualityUnlockRunning || _disposed || _released) return;
     final auth = _authorization;
     final controller = _video;
     if (auth == null ||
         controller == null ||
         !auth.isHls ||
         !controller.value.isInitialized ||
-        auth.renditions.length < 2) {
+        currentQualityMode != 'auto' ||
+        !_qualityCoordinator.supportsLocalSelection) {
       return;
     }
-    _qualityPolicyRunning = true;
-    try {
-      final now = DateTime.now();
-      final recentBuffering = _lastBufferingAt;
-      if (recentBuffering != null &&
-          now.difference(recentBuffering) < const Duration(seconds: 30)) {
-        _adaptiveQualityLocked = true;
-        return;
+    final stable = !controller.value.isBuffering && _bufferAheadMs >= 15000;
+    if (!stable) {
+      _autoQualityUnlockAttempts += 1;
+      if (_autoQualityUnlockAttempts <= 18) {
+        _scheduleAutoQualityUnlock(const Duration(seconds: 5));
       }
-      final telemetry = await _platform.videoTelemetry();
-      if (telemetry == null) {
-        _adaptiveQualityLocked = true;
-        return;
-      }
-      _activeVideoHeight = telemetry.height ?? _activeVideoHeight;
-      final decision = _adaptiveQualityPolicy.evaluate(
-        TvAdaptiveQualitySample(
-          now: now,
-          bufferAheadMs: telemetry.bufferAheadMs,
-          bandwidthEstimate: telemetry.bandwidthEstimate,
-          isBuffering: controller.value.isBuffering,
-          isLoading: telemetry.isLoading,
-          currentHeight: telemetry.height,
-        ),
-      );
-      if (decision.changed && decision.maximumHeight > 0) {
-        await _applyAutoMaximumHeight(decision.maximumHeight);
-        _adaptiveQualityRaised = true;
-        _scheduleAdaptiveQualityCheck(const Duration(seconds: 90));
-      } else {
-        _adaptiveQualityLocked = true;
-      }
-    } finally {
-      _qualityPolicyRunning = false;
-    }
-  }
-
-  Future<void> _handleAdaptiveQualityRisk() async {
-    if (_qualityPolicyRunning ||
-        _adaptiveQualityLocked ||
-        !_adaptiveQualityRaised ||
-        _disposed ||
-        _released) {
       return;
     }
-    _qualityPolicyRunning = true;
+    _autoQualityUnlockRunning = true;
     try {
-      final telemetry = await _platform.videoTelemetry();
-      if (telemetry == null) return;
-      final decision = _adaptiveQualityPolicy.evaluate(
-        TvAdaptiveQualitySample(
-          now: DateTime.now(),
-          bufferAheadMs: telemetry.bufferAheadMs,
-          bandwidthEstimate: telemetry.bandwidthEstimate,
-          isBuffering: true,
-          isLoading: telemetry.isLoading,
-          currentHeight: telemetry.height,
+      await _qualityCoordinator.apply(
+        controller,
+        selection: const PlaybackQualitySelection.automatic(),
+        sourceHeight: auth.sourceHeight ?? 1080,
+        renditionHeights: auth.renditions.map((rendition) => rendition.height),
+      );
+      _setState(
+        _state.copyWith(
+          status: 'Auto · stabil kvalitet',
+          qualityLabel: _qualityLabel,
         ),
       );
-      if (decision.changed && decision.maximumHeight > 0) {
-        await _applyAutoMaximumHeight(decision.maximumHeight);
-      }
-      _adaptiveQualityLocked = true;
-      _qualityTimer?.cancel();
     } finally {
-      _qualityPolicyRunning = false;
+      _autoQualityUnlockRunning = false;
     }
-  }
-
-  Future<void> _applyAutoMaximumHeight(int height) async {
-    if (height <= 0 || _lastAppliedMaximumHeight == height) return;
-    await _platform.setAutoMaximumHeight(height);
-    _lastAppliedMaximumHeight = height;
   }
 
   int get _bufferAheadMs {
@@ -1222,6 +1173,8 @@ class PlaybackSessionController extends ChangeNotifier
       await _waitUntilReady(next.transcodeStatusUrl!);
     }
     await _openVideo(next);
+    _autoQualityUnlockAttempts = 0;
+    _scheduleAutoQualityUnlock(const Duration(seconds: 30));
     if (burnInTrack != null) {
       _cues = const [];
       _setState(_state.copyWith(selectedSubtitle: burnInTrack));
@@ -1235,20 +1188,14 @@ class PlaybackSessionController extends ChangeNotifier
     if (controller == null || auth == null) return;
     _qualityChanging = true;
     try {
+      final selection = PlaybackQualitySelection.fromValue(value);
       final sourceHeight = auth.sourceHeight ?? 1080;
-      final mode = value == 'auto'
-          ? 'auto'
-          : value == 'original'
-          ? 'original'
-          : 'fixed';
-      final fixedHeight = mode == 'fixed' ? int.tryParse(value) : null;
+      final mode = selection.mode;
+      final fixedHeight = selection.fixedHeight;
       _sessionQualityMode = mode;
       _sessionFixedHeight = mode == 'original' ? null : fixedHeight;
-      final preferredTarget = mode == 'original' ? sourceHeight : fixedHeight;
       final directTrackSupported =
-          AppConfig.isTvBuild &&
-          _videoTracks.isNotEmpty &&
-          controller.isVideoTrackSupportAvailable();
+          AppConfig.isTvBuild && _qualityCoordinator.supportsLocalSelection;
       _setState(
         _state.copyWith(
           loading: !directTrackSupported,
@@ -1259,32 +1206,30 @@ class PlaybackSessionController extends ChangeNotifier
         ),
       );
       if (directTrackSupported) {
-        final ceiling = mode == 'auto'
-            ? _maximumRenditionHeight(auth, fallback: sourceHeight)
-            : preferredTarget ?? sourceHeight;
-        final maximum = _adaptiveQualityPolicy.configure(
-          rungs: _qualityRungs(auth),
-          configuredMaximum: ceiling,
-          now: DateTime.now(),
-          currentHeight: _activeVideoHeight,
-        );
-        _adaptiveQualityLocked = false;
-        _adaptiveQualityRaised = false;
-        await _applyAutoMaximumHeight(maximum);
-        _scheduleAdaptiveQualityCheck(const Duration(seconds: 30));
-        _setState(
-          _state.copyWith(
-            status: 'Kvalitet: $_qualitySelectionLabel',
-            loading: false,
-            buffering: controller.value.isBuffering,
-            qualityChanging: false,
-            error: null,
-            qualityLabel: _qualityLabel,
-            upscaleLabel: _upscaleLabel,
+        _autoQualityUnlockTimer?.cancel();
+        final applied = await _qualityCoordinator.apply(
+          controller,
+          selection: selection,
+          sourceHeight: sourceHeight,
+          renditionHeights: auth.renditions.map(
+            (rendition) => rendition.height,
           ),
         );
-        _tick();
-        return;
+        if (applied) {
+          _setState(
+            _state.copyWith(
+              status: 'Kvalitet: $_qualitySelectionLabel',
+              loading: false,
+              buffering: controller.value.isBuffering,
+              qualityChanging: false,
+              error: null,
+              qualityLabel: _qualityLabel,
+              upscaleLabel: _upscaleLabel,
+            ),
+          );
+          _tick();
+          return;
+        }
       }
 
       await _reconfigure(
@@ -1471,56 +1416,26 @@ class PlaybackSessionController extends ChangeNotifier
     VideoPlayerController controller,
     PlaybackAuthorization authorization,
   ) async {
-    if (!AppConfig.isTvBuild || !controller.isVideoTrackSupportAvailable()) {
-      return;
-    }
-    _videoTracks = await controller.getVideoTracks();
-    _videoTracks =
-        _videoTracks.where((track) => (track.height ?? 0) > 0).toList()
-          ..sort((a, b) => (a.height ?? 0).compareTo(b.height ?? 0));
-    final mode = _sessionQualityMode ?? authorization.preferences.qualityMode;
-    final sourceHeight =
-        authorization.sourceHeight ??
-        (_videoTracks.isEmpty ? null : _videoTracks.last.height) ??
-        1080;
-    final target = mode == 'auto'
-        ? _maximumRenditionHeight(authorization, fallback: sourceHeight)
-        : mode == 'original'
-        ? authorization.sourceHeight
-        : _sessionFixedHeight;
-    final ceiling = target ?? sourceHeight;
-    final maximum = _adaptiveQualityPolicy.configure(
-      rungs: _qualityRungs(authorization),
-      configuredMaximum: ceiling,
-      now: DateTime.now(),
-      warmStart: true,
+    final attached = await _qualityCoordinator.attach(
+      controller,
+      enabled: AppConfig.isTvBuild,
     );
-    _adaptiveQualityLocked = false;
-    _adaptiveQualityRaised = false;
-    await _applyAutoMaximumHeight(maximum);
+    if (!attached) return;
+    final mode = _sessionQualityMode ?? authorization.preferences.qualityMode;
+    final selection = PlaybackQualitySelection.fromState(
+      mode,
+      _sessionFixedHeight ?? authorization.preferences.fixedQualityHeight,
+    );
+    await _qualityCoordinator.apply(
+      controller,
+      selection: selection,
+      sourceHeight: authorization.sourceHeight ?? 1080,
+      renditionHeights: authorization.renditions.map(
+        (rendition) => rendition.height,
+      ),
+      deferAutomatic: selection.automatic,
+    );
   }
-
-  int _maximumRenditionHeight(
-    PlaybackAuthorization authorization, {
-    required int fallback,
-  }) => authorization.renditions
-      .map((rendition) => rendition.height)
-      .where((height) => height > 0)
-      .fold(fallback, (current, value) => math.max(current, value));
-
-  List<TvAdaptiveQualityRung> _qualityRungs(
-    PlaybackAuthorization authorization,
-  ) => authorization.renditions
-      .where((rendition) => rendition.height > 0)
-      .map(
-        (rendition) => TvAdaptiveQualityRung(
-          height: rendition.height,
-          bandwidth: rendition.bitrate > 0
-              ? (rendition.bitrate * 1.08).round()
-              : 0,
-        ),
-      )
-      .toList(growable: false);
 
   Map<String, dynamic> _playbackCapabilitiesPayload({
     required String upscaleMode,

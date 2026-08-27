@@ -23,7 +23,9 @@ public final class BoltBytesPlaybackTuning {
   static final int QUALITY_INCREASE_BUFFER_MS = 30_000;
   static final int QUALITY_DECREASE_BUFFER_MS = 25_000;
   static final int QUALITY_RETAIN_BUFFER_MS = 30_000;
-  static final float BANDWIDTH_FRACTION = 0.65f;
+  // Leave 45% headroom for Wi-Fi jitter and a transcoder that is still
+  // building the on-demand HLS ladder. Media3 remains the only ABR authority.
+  static final float BANDWIDTH_FRACTION = 0.55f;
 
   private BoltBytesPlaybackTuning() {}
 
