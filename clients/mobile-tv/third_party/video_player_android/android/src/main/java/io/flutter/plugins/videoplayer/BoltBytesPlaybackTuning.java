@@ -20,7 +20,11 @@ public final class BoltBytesPlaybackTuning {
   static final int STABLE_MAX_BUFFER_MS = 120_000;
   static final int STABLE_PLAYBACK_BUFFER_MS = 2_000;
   static final int STABLE_REBUFFER_MS = 4_000;
-  static final int QUALITY_INCREASE_BUFFER_MS = 30_000;
+  // The Flutter session keeps the lowest rendition forced for the first
+  // 30 seconds. Once Auto is unlocked, five seconds of playable media is
+  // enough for Media3 to consider an upgrade; the conservative bandwidth
+  // fraction below remains the primary protection against oscillation.
+  static final int QUALITY_INCREASE_BUFFER_MS = 5_000;
   static final int QUALITY_DECREASE_BUFFER_MS = 25_000;
   static final int QUALITY_RETAIN_BUFFER_MS = 30_000;
   // Leave 45% headroom for Wi-Fi jitter and a transcoder that is still

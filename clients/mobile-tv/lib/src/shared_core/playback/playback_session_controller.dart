@@ -354,13 +354,11 @@ class PlaybackSessionController extends ChangeNotifier
   bool _disposed = false;
   bool _completed = false;
   bool _nextLoading = false;
-  bool _prematureEndRecovering = false;
   bool _qualityChanging = false;
   bool _audioChanging = false;
   bool _autoQualityUnlockRunning = false;
   bool _keepScreenOnEnabled = false;
   int _autoQualityUnlockAttempts = 0;
-  int _prematureEndRetryCount = 0;
   int? _sessionFixedHeight;
   String? _sessionQualityMode;
   bool? _sessionAllowUpscale;
@@ -608,8 +606,19 @@ class PlaybackSessionController extends ChangeNotifier
       _stallCount += 1;
     }
     _lastBuffering = controller.value.isBuffering;
-    if (_isPrematurePlaybackEnd(controller)) {
-      unawaited(_recoverPrematurePlaybackEnd());
+    if (controller.value.hasError) {
+      final description = controller.value.errorDescription?.trim();
+      _setState(
+        _state.copyWith(
+          error: description == null || description.isEmpty
+              ? 'Afspilningen blev afbrudt af en reel playerfejl.'
+              : 'Afspilningen blev afbrudt: $description',
+          loading: false,
+          buffering: false,
+          playing: false,
+          nextEpisodeCountdown: null,
+        ),
+      );
       return;
     }
     if (_isTerminalPlayback(controller)) _completePlayback();
@@ -671,10 +680,6 @@ class PlaybackSessionController extends ChangeNotifier
         auth.preferences.autoplayNext &&
         _state.nextEpisodeCountdown == null) {
       _startNextCountdown();
-    }
-    if (_isPrematurePlaybackEnd(controller)) {
-      unawaited(_recoverPrematurePlaybackEnd());
-      return;
     }
     if (_isTerminalPlayback(controller)) {
       _completePlayback();
@@ -788,7 +793,7 @@ class PlaybackSessionController extends ChangeNotifier
         !_qualityCoordinator.supportsLocalSelection) {
       return;
     }
-    final stable = !controller.value.isBuffering && _bufferAheadMs >= 15000;
+    final stable = controller.value.isPlaying && !controller.value.isBuffering;
     if (!stable) {
       _autoQualityUnlockAttempts += 1;
       if (_autoQualityUnlockAttempts <= 18) {
@@ -806,7 +811,7 @@ class PlaybackSessionController extends ChangeNotifier
       );
       _setState(
         _state.copyWith(
-          status: 'Auto · stabil kvalitet',
+          status: 'Auto · Media3 styrer kvaliteten',
           qualityLabel: _qualityLabel,
         ),
       );
@@ -831,18 +836,11 @@ class PlaybackSessionController extends ChangeNotifier
   }
 
   bool _isTerminalPlayback(VideoPlayerController controller) {
-    if (_completed ||
-        _nextLoading ||
-        _prematureEndRecovering ||
-        !controller.value.isInitialized) {
+    if (_completed || _nextLoading || !controller.value.isInitialized) {
       return false;
-    }
-    if (controller.value.isCompleted) {
-      return !_isPrematurePlaybackEnd(controller);
     }
     final streamDuration = controller.value.duration;
     final streamPosition = controller.value.position;
-    if (streamDuration <= Duration.zero) return false;
     final remainingStreamMs =
         streamDuration.inMilliseconds - streamPosition.inMilliseconds;
     final knownDurationMs = _durationMs;
@@ -851,57 +849,17 @@ class PlaybackSessionController extends ChangeNotifier
         : knownDurationMs - _absolutePositionMs;
     final nearStreamEnd = remainingStreamMs <= 2500;
     final nearKnownEnd = remainingKnownMs <= 2500;
+    if (controller.value.isCompleted) {
+      // An EVENT HLS manifest grows while FFmpeg is producing it. Media3 may
+      // briefly report the current playlist edge as completed even though the
+      // known movie or episode has substantial time left. Never restart or
+      // complete the session from that transient edge.
+      return knownDurationMs > 0 ? nearKnownEnd : nearStreamEnd;
+    }
     if (!controller.value.isPlaying && !controller.value.isBuffering) {
-      return nearStreamEnd || nearKnownEnd;
+      return knownDurationMs > 0 ? nearKnownEnd : nearStreamEnd;
     }
     return false;
-  }
-
-  bool _isPrematurePlaybackEnd(VideoPlayerController controller) {
-    if (_completed ||
-        _nextLoading ||
-        _prematureEndRecovering ||
-        !controller.value.isInitialized ||
-        !controller.value.isCompleted) {
-      return false;
-    }
-    final knownDurationMs = _durationMs;
-    if (knownDurationMs <= 0) return false;
-    return knownDurationMs - _absolutePositionMs > 15_000;
-  }
-
-  Future<void> _recoverPrematurePlaybackEnd() async {
-    if (_prematureEndRecovering || _disposed || _released) return;
-    if (_prematureEndRetryCount >= 2) {
-      _setState(
-        _state.copyWith(
-          error:
-              'Streamen stoppede før afsnittet var færdigt. Prøv igen for at genoptage samme afsnit.',
-          loading: false,
-          buffering: false,
-          playing: false,
-          nextEpisodeCountdown: null,
-        ),
-      );
-      return;
-    }
-    _prematureEndRecovering = true;
-    _prematureEndRetryCount += 1;
-    _nextTimer?.cancel();
-    _setState(
-      _state.copyWith(
-        status: 'Streamen stoppede for tidligt - genoptager...',
-        loading: false,
-        buffering: true,
-        playing: false,
-        nextEpisodeCountdown: null,
-      ),
-    );
-    try {
-      await _restartAtCurrentPosition(manual: false);
-    } finally {
-      _prematureEndRecovering = false;
-    }
   }
 
   bool _canStartNextCountdown(PlaybackMarker marker, int absoluteMs) {
@@ -1631,14 +1589,10 @@ class PlaybackSessionController extends ChangeNotifier
   }
 
   @override
-  Future<void> retry() => _restartAtCurrentPosition(manual: true);
+  Future<void> retry() => _restartAtCurrentPosition();
 
-  Future<void> _restartAtCurrentPosition({required bool manual}) async {
+  Future<void> _restartAtCurrentPosition() async {
     final position = _absolutePositionMs;
-    if (manual) {
-      _prematureEndRetryCount = 0;
-      _prematureEndRecovering = false;
-    }
     _setState(
       _state.copyWith(
         status: 'Genoptager afspilningen...',

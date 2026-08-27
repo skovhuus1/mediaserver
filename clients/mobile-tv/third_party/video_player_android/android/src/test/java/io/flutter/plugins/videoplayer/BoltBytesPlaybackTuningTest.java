@@ -25,7 +25,7 @@ public class BoltBytesPlaybackTuningTest {
     DefaultTrackSelector selector = BoltBytesPlaybackTuning.trackSelector(context, options);
 
     assertTrue(selector.getParameters().forceLowestBitrate);
-    assertEquals(30_000, BoltBytesPlaybackTuning.QUALITY_INCREASE_BUFFER_MS);
+    assertEquals(5_000, BoltBytesPlaybackTuning.QUALITY_INCREASE_BUFFER_MS);
     assertEquals(0.55f, BoltBytesPlaybackTuning.BANDWIDTH_FRACTION, 0.0f);
     assertEquals(3_000, BoltBytesPlaybackTuning.AUTO_REBUFFER_MS);
     assertEquals(4_000, BoltBytesPlaybackTuning.STABLE_REBUFFER_MS);

@@ -59,7 +59,7 @@ void main() {
     },
   );
 
-  test('episode autoplay waits for real player completion near stream end', () {
+  test('episode autoplay ignores transient EVENT HLS playlist edges', () {
     final source = File(
       'lib/src/shared_core/playback/playback_session_controller.dart',
     ).readAsStringSync();
@@ -69,11 +69,31 @@ void main() {
     expect(source, contains('remainingKnownMs <= 2500'));
     expect(source, contains('_canStartNextCountdown(marker, absolute)'));
     expect(source, contains('markerRemainingMs <= 75_000'));
-    expect(source, contains('_isPrematurePlaybackEnd(controller)'));
-    expect(source, contains('_recoverPrematurePlaybackEnd()'));
-    expect(source, contains('Streamen stoppede for tidligt'));
-    expect(source, contains('knownDurationMs - _absolutePositionMs > 15_000'));
-    expect(source, contains('_prematureEndRecovering'));
+    expect(source, contains('controller.value.isCompleted'));
+    expect(
+      source,
+      contains('knownDurationMs > 0 ? nearKnownEnd : nearStreamEnd'),
+    );
+    expect(source, contains('controller.value.hasError'));
+    expect(source, isNot(contains('_isPrematurePlaybackEnd(controller)')));
+    expect(source, isNot(contains('_recoverPrematurePlaybackEnd()')));
+    expect(source, isNot(contains('Streamen stoppede for tidligt')));
+    expect(source, isNot(contains('_prematureEndRecovering')));
+  });
+
+  test('TV Auto unlock does not require an unreachable 15 second lead', () {
+    final source = File(
+      'lib/src/shared_core/playback/playback_session_controller.dart',
+    ).readAsStringSync();
+    expect(
+      source,
+      contains('_scheduleAutoQualityUnlock(const Duration(seconds: 30))'),
+    );
+    expect(
+      source,
+      contains('controller.value.isPlaying && !controller.value.isBuffering'),
+    );
+    expect(source, isNot(contains('_bufferAheadMs >= 15000')));
   });
 
   test(
