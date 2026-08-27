@@ -58,7 +58,10 @@ void main() {
     expect(player, contains('clearOverridesOfType(C.TRACK_TYPE_VIDEO)'));
     expect(player, contains('setForceLowestBitrate(false)'));
     expect(player, contains('boltBytesAutoMaximumHeight = height'));
-    expect(player, isNot(contains('if (boltBytesAutoMaximumHeight == height)')));
+    expect(
+      player,
+      isNot(contains('if (boltBytesAutoMaximumHeight == height)')),
+    );
     expect(coordinator, isNot(contains('selectVideoTrack(null)')));
   });
 
