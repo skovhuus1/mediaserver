@@ -47,12 +47,19 @@ void main() {
     expect(activity, contains('playbackBridge?.reapplyKeepScreenOn()'));
   });
 
-  test('TV quality ceiling updates are idempotent', () {
+  test('TV Auto quality clears stale track overrides atomically', () {
     final player = File(
       'third_party/video_player_android/android/src/main/java/io/flutter/plugins/videoplayer/VideoPlayer.java',
     ).readAsStringSync();
-    expect(player, contains('boltBytesAutoMaximumHeight == height'));
+    final coordinator = File(
+      'lib/src/shared_core/playback/playback_quality_coordinator.dart',
+    ).readAsStringSync();
+
+    expect(player, contains('clearOverridesOfType(C.TRACK_TYPE_VIDEO)'));
+    expect(player, contains('setForceLowestBitrate(false)'));
     expect(player, contains('boltBytesAutoMaximumHeight = height'));
+    expect(player, isNot(contains('if (boltBytesAutoMaximumHeight == height)')));
+    expect(coordinator, isNot(contains('selectVideoTrack(null)')));
   });
 
   test('CI always couples each flavor to its explicit Dart entrypoint', () {
