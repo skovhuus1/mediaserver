@@ -23,11 +23,7 @@ val requireProductionSigning = providers
     .environmentVariable("BB_MEDIA_REQUIRE_PRODUCTION_SIGNING")
     .getOrElse("false")
     .equals("true", ignoreCase = true)
-val releaseTaskRequested = gradle.startParameter.taskNames.any {
-    it.contains("release", ignoreCase = true)
-}
-
-if ((requireProductionSigning || releaseTaskRequested) && !hasReleaseSigning) {
+if (requireProductionSigning && !hasReleaseSigning) {
     throw GradleException("Production Android signing is required but the keystore configuration is incomplete")
 }
 

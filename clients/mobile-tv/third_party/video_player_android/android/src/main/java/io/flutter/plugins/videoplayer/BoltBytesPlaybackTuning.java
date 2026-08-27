@@ -15,7 +15,11 @@ public final class BoltBytesPlaybackTuning {
   static final int AUTO_MIN_BUFFER_MS = 30_000;
   static final int AUTO_MAX_BUFFER_MS = 120_000;
   static final int AUTO_PLAYBACK_BUFFER_MS = 1_500;
-  static final int AUTO_REBUFFER_MS = 8_000;
+  static final int AUTO_REBUFFER_MS = 3_000;
+  static final int STABLE_MIN_BUFFER_MS = 30_000;
+  static final int STABLE_MAX_BUFFER_MS = 120_000;
+  static final int STABLE_PLAYBACK_BUFFER_MS = 2_000;
+  static final int STABLE_REBUFFER_MS = 4_000;
   static final int QUALITY_INCREASE_BUFFER_MS = 30_000;
   static final int QUALITY_DECREASE_BUFFER_MS = 25_000;
   static final int QUALITY_RETAIN_BUFFER_MS = 30_000;
@@ -52,9 +56,13 @@ public final class BoltBytesPlaybackTuning {
             .build();
       case "stable":
         return new DefaultLoadControl.Builder()
-            .setBufferDurationsMs(60_000, 180_000, 5_000, 10_000)
+            .setBufferDurationsMs(
+                STABLE_MIN_BUFFER_MS,
+                STABLE_MAX_BUFFER_MS,
+                STABLE_PLAYBACK_BUFFER_MS,
+                STABLE_REBUFFER_MS)
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(60_000, true)
+            .setBackBuffer(30_000, true)
             .build();
       default:
         return new DefaultLoadControl.Builder()

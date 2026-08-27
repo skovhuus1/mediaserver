@@ -1,5 +1,5 @@
 import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
-import { buildDirectStreamHlsArguments, classifyMediaPath, detectVideoSignalProfile, resolveAccurateTranscodeSeek, resolveCpuTranscodeProfile, sortHlsRenditions } from '@boltbytes/contracts';
+import { HLS_SEGMENT_DURATION_SECONDS, buildDirectStreamHlsArguments, classifyMediaPath, detectVideoSignalProfile, resolveAccurateTranscodeSeek, resolveCpuTranscodeProfile, selectHlsRenditionsForCapacity, sortHlsRenditions } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -524,7 +524,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     240,
     Math.min(2160, finiteInteger(payload.maxVideoResolution) ?? 1080),
   );
-  const renditions = sortHlsRenditions((requestedRenditions.length > 0
+  const renditionCandidates = sortHlsRenditions((requestedRenditions.length > 0
     ? requestedRenditions
     : [{
         height: evenDimension(Math.min(file.height ?? fallbackHeight, fallbackHeight)),
@@ -539,6 +539,19 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
         ),
         hdr: payload.preserveHdr === true && sourceVideo.hdr !== null,
       }]).slice(0, 4));
+  const cpuProfile = resolveCpuTranscodeProfile({
+    availableThreads: availableParallelism(),
+    renditionCount: renditionCandidates.length,
+    configuredThreads: process.env.BB_MEDIA_CPU_TRANSCODE_THREADS,
+    configuredRenditions: process.env.BB_MEDIA_MAX_TRANSCODE_RENDITIONS,
+    configuredPreset: process.env.BB_MEDIA_CPU_TRANSCODE_PRESET,
+    configuredMaxHeight: process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT
+      ?? (/^(?:true|1|yes)$/i.test(process.env.BB_MEDIA_GPU_ENABLED?.trim() ?? '') ? 2160 : 1080),
+  });
+  const renditions = selectHlsRenditionsForCapacity(renditionCandidates, {
+    maxHeight: cpuProfile.maxHeight,
+    maxRenditions: cpuProfile.maxRenditions,
+  });
   const preserveHdrRequested =
     payload.preserveHdr === true
     && payload.hdrMode !== 'force_sdr'
@@ -708,15 +721,6 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     '-map', `[v${index}]`,
     ...(hasAudio ? ['-map', `[a${index}]`] : []),
   ]);
-  const cpuProfile = resolveCpuTranscodeProfile({
-    availableThreads: availableParallelism(),
-    renditionCount: renditions.length,
-    configuredThreads: process.env.BB_MEDIA_CPU_TRANSCODE_THREADS,
-    configuredRenditions: process.env.BB_MEDIA_MAX_TRANSCODE_RENDITIONS,
-    configuredPreset: process.env.BB_MEDIA_CPU_TRANSCODE_PRESET,
-    configuredMaxHeight: process.env.BB_MEDIA_MAX_TRANSCODE_HEIGHT
-      ?? (/^(?:true|1|yes)$/i.test(process.env.BB_MEDIA_GPU_ENABLED?.trim() ?? '') ? 2160 : 1080),
-  });
   const streamArguments = (videoEncoder: string) => renditions.flatMap((rendition, index) => {
     const bitrateKbps = Math.round(rendition.bitrate / 1_000);
     return [
@@ -730,7 +734,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
       `-bufsize:v:${index}`, `${bitrateKbps * 2}k`,
       `-pix_fmt:v:${index}`, videoColor.outputPixelFormat,
       ...buildSdrColorMetadataArguments(index, videoColor.toneMappedToSdr),
-      `-force_key_frames:v:${index}`, 'expr:gte(t,n_forced*4)',
+      `-force_key_frames:v:${index}`, `expr:gte(t,n_forced*${HLS_SEGMENT_DURATION_SECONDS})`,
       ...(hasAudio ? [
         `-c:a:${index}`, 'aac',
         `-b:a:${index}`, '160k',
@@ -754,7 +758,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     ...streamMaps,
     ...streamArguments(videoEncoder),
     '-f', 'hls',
-    '-hls_time', '4',
+    '-hls_time', String(HLS_SEGMENT_DURATION_SECONDS),
     '-hls_list_size', '0',
     '-hls_playlist_type', 'event',
     '-hls_flags', 'independent_segments+temp_file',

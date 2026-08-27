@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { AdaptiveQualityPlan } from '@boltbytes/contracts';
+import { HLS_SEGMENT_DURATION_SECONDS, type AdaptiveQualityPlan } from '@boltbytes/contracts';
 import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { access, readFile, realpath, stat } from 'node:fs/promises';
@@ -116,9 +116,7 @@ export class TranscodeStreamService {
     if (!job) return { state: 'failed', message: 'The HLS preparation job was not found' };
     const jobGeneration = hlsJobGeneration(job.id, job.payload);
     const startupPolicy = hlsStartupPolicy(job.payload);
-    const requiredStartupSegments = startupPolicy === 'baseline_first'
-      ? 1
-      : this.requiredStartupSegments;
+    const requiredStartupSegments = this.requiredStartupSegments;
     if (generation && generation !== jobGeneration) {
       return { state: 'failed', message: 'The requested HLS generation was not found' };
     }
@@ -168,7 +166,7 @@ export class TranscodeStreamService {
         message: session.method === 'direct_stream' ? 'Direct Stream HLS is ready' : 'Transcoded HLS is ready',
         readySegments: requiredStartupSegments,
         requiredSegments: requiredStartupSegments,
-        producerLeadMs: requiredStartupSegments * 4_000,
+        producerLeadMs: requiredStartupSegments * HLS_SEGMENT_DURATION_SECONDS * 1_000,
         startupPolicy,
         startupVariantIndex: 0,
         readyVariants,
@@ -188,7 +186,7 @@ export class TranscodeStreamService {
         : 'Waiting for an HLS worker',
       readySegments: Math.min(readySegments, requiredStartupSegments),
       requiredSegments: requiredStartupSegments,
-      producerLeadMs: readySegments * 4_000,
+      producerLeadMs: readySegments * HLS_SEGMENT_DURATION_SECONDS * 1_000,
       startupPolicy,
       startupVariantIndex: 0,
       readyVariants,

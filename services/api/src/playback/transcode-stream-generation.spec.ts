@@ -89,14 +89,20 @@ describe('HLS stream generations', () => {
     }
   });
 
-  it('starts baseline-first playback after the first lowest-rendition segment', async () => {
+  it('starts baseline-first playback after a safe lowest-rendition lead', async () => {
     const root = await mkdtemp(join(tmpdir(), 'boltbytes-hls-baseline-'));
     try {
       const generationRoot = join(root, 'session-1', generation);
       await mkdir(generationRoot, { recursive: true });
       await writeFile(join(generationRoot, 'master.m3u8'), '#EXTM3U\nstream_0.m3u8\nstream_1.m3u8\n');
-      await writeFile(join(generationRoot, 'stream_0.m3u8'), '#EXTM3U\nsegment_0_00000.ts\n');
-      await writeFile(join(generationRoot, 'segment_0_00000.ts'), 'baseline');
+      await writeFile(
+        join(generationRoot, 'stream_0.m3u8'),
+        '#EXTM3U\nsegment_0_00000.ts\nsegment_0_00001.ts\nsegment_0_00002.ts\n',
+      );
+      await Promise.all([0, 1, 2].map((index) => writeFile(
+        join(generationRoot, `segment_0_${String(index).padStart(5, '0')}.ts`),
+        'baseline',
+      )));
 
       const prisma = {
         systemJob: {
@@ -123,9 +129,9 @@ describe('HLS stream generations', () => {
       await expect(service.status('session-1', 'token', generation)).resolves.toEqual({
         state: 'ready',
         message: 'Transcoded HLS is ready',
-        readySegments: 1,
-        requiredSegments: 1,
-        producerLeadMs: 4_000,
+        readySegments: 3,
+        requiredSegments: 3,
+        producerLeadMs: 6_000,
         startupPolicy: 'baseline_first',
         startupVariantIndex: 0,
         readyVariants: 1,

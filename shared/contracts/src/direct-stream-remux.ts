@@ -1,5 +1,7 @@
 export type DirectStreamAudioMode = 'copy' | 'aac';
 
+export const HLS_SEGMENT_DURATION_SECONDS = 2;
+
 export type DirectStreamHlsInput = {
   inputPath: string;
   variantPlaylistPath: string;
@@ -38,7 +40,7 @@ export function buildDirectStreamHlsArguments(input: DirectStreamHlsInput): stri
     '-avoid_negative_ts', 'make_zero',
     '-max_muxing_queue_size', '4096',
     '-f', 'hls',
-    '-hls_time', '4',
+    '-hls_time', String(HLS_SEGMENT_DURATION_SECONDS),
     '-hls_list_size', '0',
     '-hls_playlist_type', 'event',
     '-hls_segment_type', 'fmp4',

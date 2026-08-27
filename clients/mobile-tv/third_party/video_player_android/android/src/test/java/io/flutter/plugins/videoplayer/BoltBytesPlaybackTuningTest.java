@@ -24,6 +24,7 @@ public class BoltBytesPlaybackTuningTest {
 
     assertTrue(selector.getParameters().forceLowestBitrate);
     assertEquals(30_000, BoltBytesPlaybackTuning.QUALITY_INCREASE_BUFFER_MS);
-    assertEquals(8_000, BoltBytesPlaybackTuning.AUTO_REBUFFER_MS);
+    assertEquals(3_000, BoltBytesPlaybackTuning.AUTO_REBUFFER_MS);
+    assertEquals(4_000, BoltBytesPlaybackTuning.STABLE_REBUFFER_MS);
   }
 }

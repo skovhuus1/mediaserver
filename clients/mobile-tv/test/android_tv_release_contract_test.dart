@@ -7,6 +7,11 @@ void main() {
     final gradle = File('android/app/build.gradle.kts').readAsStringSync();
     expect(gradle, contains('applicationId = "com.boltbytes.boltbytes_media"'));
     expect(gradle, contains('applicationIdSuffix = ".tv"'));
+    expect(
+      gradle,
+      contains('if (requireProductionSigning && !hasReleaseSigning)'),
+    );
+    expect(gradle, isNot(contains('releaseTaskRequested')));
   });
 
   test('TV manifest is a remote-first Leanback application', () {

@@ -29,6 +29,29 @@ export function sortHlsRenditions<T extends HlsRendition>(renditions: readonly T
   );
 }
 
+export function selectHlsRenditionsForCapacity<T extends HlsRendition>(
+  renditions: readonly T[],
+  capacity: { maxHeight: number; maxRenditions: number },
+): T[] {
+  const sorted = sortHlsRenditions(renditions);
+  if (sorted.length === 0) return [];
+  const maximumHeight = Number.isFinite(capacity.maxHeight)
+    ? Math.max(1, Math.trunc(capacity.maxHeight))
+    : sorted[0]!.height;
+  const withinHeight = sorted.filter((rendition) => rendition.height <= maximumHeight);
+  const eligible = withinHeight.length > 0 ? withinHeight : [sorted[0]!];
+  const maximumRenditions = Number.isFinite(capacity.maxRenditions)
+    ? Math.max(1, Math.trunc(capacity.maxRenditions))
+    : 1;
+  if (eligible.length <= maximumRenditions) return eligible;
+  if (maximumRenditions === 1) return [eligible[0]!];
+  const indexes = new Set<number>();
+  for (let slot = 0; slot < maximumRenditions; slot += 1) {
+    indexes.add(Math.round((slot * (eligible.length - 1)) / (maximumRenditions - 1)));
+  }
+  return [...indexes].sort((left, right) => left - right).map((index) => eligible[index]!);
+}
+
 export const entitlementActionSchema = z.enum(['playback', 'cast', 'offline_download']);
 export type EntitlementAction = z.infer<typeof entitlementActionSchema>;
 
