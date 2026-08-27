@@ -49,6 +49,10 @@ export class PlaybackCapabilitiesDto {
   @IsOptional()
   @IsIn(['low_latency', 'auto', 'stable'])
   bufferProfile?: 'low_latency' | 'auto' | 'stable';
+
+  @IsOptional()
+  @IsIn(['baseline_first', 'stable'])
+  startupPolicy?: 'baseline_first' | 'stable';
 }
 
 export class AuthorizePlaybackDto {

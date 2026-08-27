@@ -37,11 +37,11 @@ class TvAdaptiveQualityDecision {
 
 class TvAdaptiveQualityPolicy {
   static const minimumBufferForIncreaseMs = 30_000;
-  static const riskBufferMs = 8_000;
-  static const loadingRiskBufferMs = 12_000;
-  static const stablePeriod = Duration(seconds: 20);
-  static const increaseCooldown = Duration(seconds: 45);
-  static const increaseBandwidthMargin = 1.35;
+  static const riskBufferMs = 12_000;
+  static const loadingRiskBufferMs = 15_000;
+  static const stablePeriod = Duration(seconds: 30);
+  static const increaseCooldown = Duration(seconds: 90);
+  static const increaseBandwidthMargin = 1.50;
   static const safeBandwidthFraction = 0.70;
 
   List<TvAdaptiveQualityRung> _rungs = const [];

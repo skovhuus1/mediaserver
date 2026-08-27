@@ -18,6 +18,17 @@ export * from './live-tv-danish-channel-order.js';
 export * from './tv-login.js';
 export * from './release.js';
 
+export type HlsRendition = {
+  height: number;
+  bitrate: number;
+};
+
+export function sortHlsRenditions<T extends HlsRendition>(renditions: readonly T[]): T[] {
+  return [...renditions].sort(
+    (left, right) => left.height - right.height || left.bitrate - right.bitrate,
+  );
+}
+
 export const entitlementActionSchema = z.enum(['playback', 'cast', 'offline_download']);
 export type EntitlementAction = z.infer<typeof entitlementActionSchema>;
 

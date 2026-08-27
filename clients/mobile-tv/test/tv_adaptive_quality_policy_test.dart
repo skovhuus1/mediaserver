@@ -77,4 +77,26 @@ void main() {
     );
     expect(maximum, 720);
   });
+
+  test('quality does not rise without fifty percent bandwidth margin', () {
+    final policy = TvAdaptiveQualityPolicy();
+    final started = DateTime(2026);
+    policy.configure(
+      rungs: rungs,
+      configuredMaximum: 1080,
+      now: started,
+      warmStart: true,
+    );
+    final decision = policy.evaluate(
+      TvAdaptiveQualitySample(
+        now: started.add(const Duration(seconds: 30)),
+        bufferAheadMs: 40000,
+        bandwidthEstimate: 4800000,
+        isBuffering: false,
+        isLoading: false,
+      ),
+    );
+    expect(decision.changed, isFalse);
+    expect(decision.reason, 'bandwidth_not_ready');
+  });
 }

@@ -294,6 +294,7 @@ class PlaybackAuthorizationRequest {
         'supportedAudioCodecs': const <String>['aac', 'ac3', 'eac3'],
         'upscaleMode': upscaleMode,
         'bufferProfile': bufferProfile,
+        'startupPolicy': AppConfig.isTvBuild ? 'baseline_first' : 'stable',
       },
     },
   };
@@ -335,7 +336,6 @@ class PlaybackSessionController extends ChangeNotifier
   PlaybackAuthorization? _authorization;
   List<WebVttCue> _cues = const [];
   List<VideoTrack> _videoTracks = const [];
-  DateTime? _lastKeepAwakeAt;
   double? _estimatedDownlinkMbps;
   final PlaybackMaintenanceScheduler _maintenanceScheduler =
       PlaybackMaintenanceScheduler();
@@ -343,7 +343,6 @@ class PlaybackSessionController extends ChangeNotifier
       TvAdaptiveQualityPolicy();
   Timer? _qualityTimer;
   Timer? _uiTimer;
-  Timer? _keepAwakeTimer;
   Timer? _nextTimer;
   Future<void>? _initialization;
   Future<void>? _finishOperation;
@@ -359,6 +358,11 @@ class PlaybackSessionController extends ChangeNotifier
   bool _qualityChanging = false;
   bool _audioChanging = false;
   bool _qualityPolicyRunning = false;
+  bool _adaptiveQualityLocked = false;
+  bool _adaptiveQualityRaised = false;
+  bool _keepScreenOnEnabled = false;
+  DateTime? _lastBufferingAt;
+  int? _lastAppliedMaximumHeight;
   int? _activeVideoHeight;
   int _prematureEndRetryCount = 0;
   int? _sessionFixedHeight;
@@ -562,10 +566,11 @@ class PlaybackSessionController extends ChangeNotifier
       await controller.seekTo(Duration(milliseconds: directPlaySeekMs));
     }
     await controller.setPlaybackSpeed(authorization.preferences.playbackRate);
+    _lastAppliedMaximumHeight = null;
     await _configureQuality(controller, authorization);
     controller.addListener(_onVideoChanged);
     await controller.play();
-    _reassertKeepScreenOn(force: true);
+    _setKeepScreenOn(true);
     _authorization = authorization;
     final buffered = math.max(
       0,
@@ -605,7 +610,13 @@ class PlaybackSessionController extends ChangeNotifier
   void _onVideoChanged() {
     final controller = _video;
     if (controller == null || _disposed) return;
-    if (controller.value.isBuffering && !_lastBuffering) _stallCount += 1;
+    if (controller.value.isBuffering && !_lastBuffering) {
+      _stallCount += 1;
+      _lastBufferingAt = DateTime.now();
+      if (_adaptiveQualityRaised && !_adaptiveQualityLocked) {
+        unawaited(_handleAdaptiveQualityRisk());
+      }
+    }
     _lastBuffering = controller.value.isBuffering;
     if (_isPrematurePlaybackEnd(controller)) {
       unawaited(_recoverPrematurePlaybackEnd());
@@ -620,30 +631,23 @@ class PlaybackSessionController extends ChangeNotifier
       heartbeat: _heartbeat,
       progress: () => saveProgress(),
     );
-    _qualityTimer = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) => unawaited(_evaluateAdaptiveQuality()),
-    );
+    _lastBufferingAt = null;
+    _lastBuffering = _video?.value.isBuffering ?? false;
+    _scheduleAdaptiveQualityCheck(const Duration(seconds: 30));
     _uiTimer = Timer.periodic(
       const Duration(milliseconds: 250),
       (_) => _tick(),
     );
-    _keepAwakeTimer = Timer.periodic(
-      const Duration(seconds: 15),
-      (_) => _reassertKeepScreenOn(force: true),
-    );
-    _reassertKeepScreenOn(force: true);
+    _setKeepScreenOn(true);
   }
 
   void _stopTimers() {
     _maintenanceScheduler.stop();
     _qualityTimer?.cancel();
     _uiTimer?.cancel();
-    _keepAwakeTimer?.cancel();
     _nextTimer?.cancel();
     _qualityTimer = null;
     _uiTimer = null;
-    _keepAwakeTimer = null;
     _nextTimer = null;
   }
 
@@ -686,7 +690,6 @@ class PlaybackSessionController extends ChangeNotifier
       _completePlayback();
       return;
     }
-    _reassertKeepScreenOn();
     final durationMs = math.max(1, _durationMs);
     final bufferedMs = math.max(
       0,
@@ -769,6 +772,12 @@ class PlaybackSessionController extends ChangeNotifier
     } catch (_) {}
   }
 
+  void _scheduleAdaptiveQualityCheck(Duration delay) {
+    _qualityTimer?.cancel();
+    if (_adaptiveQualityLocked || _disposed || _released) return;
+    _qualityTimer = Timer(delay, () => unawaited(_evaluateAdaptiveQuality()));
+  }
+
   Future<void> _evaluateAdaptiveQuality() async {
     if (_qualityPolicyRunning || _disposed || _released) return;
     final auth = _authorization;
@@ -782,12 +791,22 @@ class PlaybackSessionController extends ChangeNotifier
     }
     _qualityPolicyRunning = true;
     try {
+      final now = DateTime.now();
+      final recentBuffering = _lastBufferingAt;
+      if (recentBuffering != null &&
+          now.difference(recentBuffering) < const Duration(seconds: 30)) {
+        _adaptiveQualityLocked = true;
+        return;
+      }
       final telemetry = await _platform.videoTelemetry();
-      if (telemetry == null) return;
+      if (telemetry == null) {
+        _adaptiveQualityLocked = true;
+        return;
+      }
       _activeVideoHeight = telemetry.height ?? _activeVideoHeight;
       final decision = _adaptiveQualityPolicy.evaluate(
         TvAdaptiveQualitySample(
-          now: DateTime.now(),
+          now: now,
           bufferAheadMs: telemetry.bufferAheadMs,
           bandwidthEstimate: telemetry.bandwidthEstimate,
           isBuffering: controller.value.isBuffering,
@@ -796,11 +815,53 @@ class PlaybackSessionController extends ChangeNotifier
         ),
       );
       if (decision.changed && decision.maximumHeight > 0) {
-        await _platform.setAutoMaximumHeight(decision.maximumHeight);
+        await _applyAutoMaximumHeight(decision.maximumHeight);
+        _adaptiveQualityRaised = true;
+        _scheduleAdaptiveQualityCheck(const Duration(seconds: 90));
+      } else {
+        _adaptiveQualityLocked = true;
       }
     } finally {
       _qualityPolicyRunning = false;
     }
+  }
+
+  Future<void> _handleAdaptiveQualityRisk() async {
+    if (_qualityPolicyRunning ||
+        _adaptiveQualityLocked ||
+        !_adaptiveQualityRaised ||
+        _disposed ||
+        _released) {
+      return;
+    }
+    _qualityPolicyRunning = true;
+    try {
+      final telemetry = await _platform.videoTelemetry();
+      if (telemetry == null) return;
+      final decision = _adaptiveQualityPolicy.evaluate(
+        TvAdaptiveQualitySample(
+          now: DateTime.now(),
+          bufferAheadMs: telemetry.bufferAheadMs,
+          bandwidthEstimate: telemetry.bandwidthEstimate,
+          isBuffering: true,
+          isLoading: telemetry.isLoading,
+          currentHeight: telemetry.height,
+        ),
+      );
+      if (decision.changed && decision.maximumHeight > 0) {
+        await _applyAutoMaximumHeight(decision.maximumHeight);
+      }
+      _adaptiveQualityLocked = true;
+      _qualityTimer?.cancel();
+    } finally {
+      _qualityPolicyRunning = false;
+    }
+  }
+
+  Future<void> _applyAutoMaximumHeight(int height) async {
+    if (height <= 0 || _lastAppliedMaximumHeight == height) return;
+    await _platform.setAutoMaximumHeight(height);
+    _lastAppliedMaximumHeight = height;
   }
 
   int get _bufferAheadMs {
@@ -901,21 +962,11 @@ class PlaybackSessionController extends ChangeNotifier
     return remainingMs <= 75_000 && markerRemainingMs <= 75_000;
   }
 
-  void _reassertKeepScreenOn({bool force = false}) {
-    if (!AppConfig.isTvBuild || _disposed || _released) return;
-    final controller = _video;
-    if (controller == null || !controller.value.isInitialized) return;
-    final now = DateTime.now();
-    final previous = _lastKeepAwakeAt;
-    if (!force &&
-        previous != null &&
-        now.difference(previous) < const Duration(seconds: 10)) {
-      return;
-    }
-    if (controller.value.isPlaying || controller.value.isBuffering) {
-      _lastKeepAwakeAt = now;
-      unawaited(_platform.setKeepScreenOn(true));
-    }
+  void _setKeepScreenOn(bool enabled, {bool force = false}) {
+    if (!AppConfig.isTvBuild || _disposed) return;
+    if (!force && _keepScreenOnEnabled == enabled) return;
+    _keepScreenOnEnabled = enabled;
+    unawaited(_platform.setKeepScreenOn(enabled));
   }
 
   void _completePlayback() {
@@ -1217,7 +1268,10 @@ class PlaybackSessionController extends ChangeNotifier
           now: DateTime.now(),
           currentHeight: _activeVideoHeight,
         );
-        await _platform.setAutoMaximumHeight(maximum);
+        _adaptiveQualityLocked = false;
+        _adaptiveQualityRaised = false;
+        await _applyAutoMaximumHeight(maximum);
+        _scheduleAdaptiveQualityCheck(const Duration(seconds: 30));
         _setState(
           _state.copyWith(
             status: 'Kvalitet: $_qualitySelectionLabel',
@@ -1441,7 +1495,9 @@ class PlaybackSessionController extends ChangeNotifier
       now: DateTime.now(),
       warmStart: true,
     );
-    await _platform.setAutoMaximumHeight(maximum);
+    _adaptiveQualityLocked = false;
+    _adaptiveQualityRaised = false;
+    await _applyAutoMaximumHeight(maximum);
   }
 
   int _maximumRenditionHeight(
@@ -1478,6 +1534,7 @@ class PlaybackSessionController extends ChangeNotifier
     'supportedAudioCodecs': const <String>['aac', 'ac3', 'eac3'],
     'upscaleMode': upscaleMode,
     'bufferProfile': bufferProfile,
+    'startupPolicy': AppConfig.isTvBuild ? 'baseline_first' : 'stable',
     if (_estimatedDownlinkMbpsForPayload != null)
       'estimatedDownlinkMbps': _estimatedDownlinkMbpsForPayload,
   };
@@ -1712,6 +1769,7 @@ class PlaybackSessionController extends ChangeNotifier
     if (_state.finishing) return;
     _setState(_state.copyWith(finishing: true));
     _stopTimers();
+    _setKeepScreenOn(false);
     await saveProgress();
     await _release();
     await _platform.clear().catchError((_) {});
@@ -1720,7 +1778,7 @@ class PlaybackSessionController extends ChangeNotifier
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _reassertKeepScreenOn(force: true);
+      _setKeepScreenOn(true, force: true);
     }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {

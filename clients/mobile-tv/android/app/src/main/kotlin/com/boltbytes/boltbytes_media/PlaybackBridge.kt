@@ -21,6 +21,7 @@ class PlaybackBridge(
     private var active = false
     private var playing = false
     private var keepScreenOnRequested = false
+    private var keepScreenOnApplied: Boolean? = null
     private var allowPictureInPicture = false
     private var videoWidth = 16
     private var videoHeight = 9
@@ -90,6 +91,7 @@ class PlaybackBridge(
     }
 
     fun reapplyKeepScreenOn() {
+        keepScreenOnApplied = null
         applyKeepScreenOn()
     }
 
@@ -121,6 +123,8 @@ class PlaybackBridge(
 
     private fun applyKeepScreenOn() {
         val enabled = active || keepScreenOnRequested
+        if (keepScreenOnApplied == enabled) return
+        keepScreenOnApplied = enabled
         if (enabled) {
             activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {

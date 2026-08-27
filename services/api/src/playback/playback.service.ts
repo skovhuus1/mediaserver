@@ -382,6 +382,7 @@ export class PlaybackService {
             ),
             adaptiveQuality: deliveryQuality,
             hdrMode: device.hdrMode,
+            startupPolicy: dto.capabilities.startupPolicy ?? 'stable',
             ...(selectedAudioTrack
               ? {
                   audioTrackId: selectedAudioTrack.id,
@@ -663,6 +664,7 @@ export class PlaybackService {
       ),
       adaptiveQuality,
       hdrMode: session.device.hdrMode,
+      startupPolicy: dto.capabilities?.startupPolicy ?? 'stable',
       subtitleTrackId: dto.burnIn ? dto.subtitleTrackId ?? null : null,
       ...(selectedAudioTrack
         ? {

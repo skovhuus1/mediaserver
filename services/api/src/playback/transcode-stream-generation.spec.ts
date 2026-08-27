@@ -24,6 +24,7 @@ describe('HLS stream generations', () => {
         renditions: [],
       },
       hdrMode: 'auto',
+      startupPolicy: 'baseline_first',
       startPositionMs: 1_200_000,
     });
 
@@ -31,7 +32,11 @@ describe('HLS stream generations', () => {
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id: createdGeneration,
-        payload: expect.objectContaining({ generationId: createdGeneration, startPositionMs: 1_200_000 }),
+        payload: expect.objectContaining({
+          generationId: createdGeneration,
+          startPositionMs: 1_200_000,
+          startupPolicy: 'baseline_first',
+        }),
       }),
     });
   });
@@ -74,6 +79,57 @@ describe('HLS stream generations', () => {
         readySegments: 0,
         requiredSegments: 3,
         producerLeadMs: 0,
+        startupPolicy: 'stable',
+        startupVariantIndex: 0,
+        readyVariants: 0,
+        variantCount: 0,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('starts baseline-first playback after the first lowest-rendition segment', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'boltbytes-hls-baseline-'));
+    try {
+      const generationRoot = join(root, 'session-1', generation);
+      await mkdir(generationRoot, { recursive: true });
+      await writeFile(join(generationRoot, 'master.m3u8'), '#EXTM3U\nstream_0.m3u8\nstream_1.m3u8\n');
+      await writeFile(join(generationRoot, 'stream_0.m3u8'), '#EXTM3U\nsegment_0_00000.ts\n');
+      await writeFile(join(generationRoot, 'segment_0_00000.ts'), 'baseline');
+
+      const prisma = {
+        systemJob: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: generation,
+            accountId: 'account-1',
+            status: 'running',
+            payload: {
+              sessionId: 'session-1',
+              generationId: generation,
+              streamMode: 'transcode',
+              startupPolicy: 'baseline_first',
+            },
+            attempts: [],
+          }),
+        },
+      };
+      const service = new TranscodeStreamService(prisma as never);
+      Object.defineProperty(service, 'transcodeRoot', { value: root });
+      Object.defineProperty(service, 'validSession', {
+        value: vi.fn().mockResolvedValue({ id: 'session-1', accountId: 'account-1', method: 'transcode' }),
+      });
+
+      await expect(service.status('session-1', 'token', generation)).resolves.toEqual({
+        state: 'ready',
+        message: 'Transcoded HLS is ready',
+        readySegments: 1,
+        requiredSegments: 1,
+        producerLeadMs: 4_000,
+        startupPolicy: 'baseline_first',
+        startupVariantIndex: 0,
+        readyVariants: 1,
+        variantCount: 2,
       });
     } finally {
       await rm(root, { recursive: true, force: true });

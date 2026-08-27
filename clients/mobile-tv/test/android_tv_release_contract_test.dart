@@ -36,9 +36,18 @@ void main() {
     expect(bridge, contains('WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON'));
     expect(bridge, contains('decorView.keepScreenOn = enabled'));
     expect(bridge, contains('fun reapplyKeepScreenOn()'));
+    expect(bridge, contains('keepScreenOnApplied == enabled'));
     expect(activity, contains('override fun onResume()'));
     expect(activity, contains('override fun onWindowFocusChanged'));
     expect(activity, contains('playbackBridge?.reapplyKeepScreenOn()'));
+  });
+
+  test('TV quality ceiling updates are idempotent', () {
+    final player = File(
+      'third_party/video_player_android/android/src/main/java/io/flutter/plugins/videoplayer/VideoPlayer.java',
+    ).readAsStringSync();
+    expect(player, contains('boltBytesAutoMaximumHeight == height'));
+    expect(player, contains('boltBytesAutoMaximumHeight = height'));
   });
 
   test('CI always couples each flavor to its explicit Dart entrypoint', () {

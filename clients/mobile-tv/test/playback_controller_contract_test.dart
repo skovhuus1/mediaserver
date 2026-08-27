@@ -76,16 +76,21 @@ void main() {
     expect(source, contains('_prematureEndRecovering'));
   });
 
-  test('TV playback keep-awake is owned by the playback controller', () {
-    final source = File(
-      'lib/src/shared_core/playback/playback_session_controller.dart',
-    ).readAsStringSync();
-    expect(source, contains('Timer? _keepAwakeTimer'));
-    expect(source, contains('const Duration(seconds: 15)'));
-    expect(source, contains('_reassertKeepScreenOn(force: true)'));
-    expect(source, contains('AppLifecycleState.resumed'));
-    expect(source, contains('setKeepScreenOn(true)'));
-  });
+  test(
+    'TV playback keep-awake is edge-triggered by the playback controller',
+    () {
+      final source = File(
+        'lib/src/shared_core/playback/playback_session_controller.dart',
+      ).readAsStringSync();
+      expect(source, isNot(contains('Timer? _keepAwakeTimer')));
+      expect(source, isNot(contains('const Duration(seconds: 15)')));
+      expect(source, isNot(contains('const Duration(seconds: 10)')));
+      expect(source, contains('_setKeepScreenOn(true)'));
+      expect(source, contains('_setKeepScreenOn(false)'));
+      expect(source, contains('AppLifecycleState.resumed'));
+      expect(source, contains('setKeepScreenOn(true)'));
+    },
+  );
 
   test('TV next episode handoff does not wait on old session finish', () {
     final source = File(

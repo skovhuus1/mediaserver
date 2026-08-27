@@ -1,5 +1,5 @@
 import { MediaType, Prisma, PrismaClient, SystemJob } from '@prisma/client';
-import { buildDirectStreamHlsArguments, classifyMediaPath, detectVideoSignalProfile, resolveAccurateTranscodeSeek, resolveCpuTranscodeProfile } from '@boltbytes/contracts';
+import { buildDirectStreamHlsArguments, classifyMediaPath, detectVideoSignalProfile, resolveAccurateTranscodeSeek, resolveCpuTranscodeProfile, sortHlsRenditions } from '@boltbytes/contracts';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -524,7 +524,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
     240,
     Math.min(2160, finiteInteger(payload.maxVideoResolution) ?? 1080),
   );
-  const renditions = (requestedRenditions.length > 0
+  const renditions = sortHlsRenditions((requestedRenditions.length > 0
     ? requestedRenditions
     : [{
         height: evenDimension(Math.min(file.height ?? fallbackHeight, fallbackHeight)),
@@ -538,7 +538,7 @@ async function transcodePlayback(job: ClaimedJob): Promise<void> {
           Math.min(50_000_000, (finiteInteger(payload.maxVideoBitrate) ?? 8_000) * 1_000),
         ),
         hdr: payload.preserveHdr === true && sourceVideo.hdr !== null,
-      }]).slice(0, 4);
+      }]).slice(0, 4));
   const preserveHdrRequested =
     payload.preserveHdr === true
     && payload.hdrMode !== 'force_sdr'

@@ -37,7 +37,10 @@ type TranscodeLimits = {
   audioTrackId?: string | null;
   audioStreamIndex?: number | null;
   startPositionMs?: number;
+  startupPolicy?: PlaybackStartupPolicy;
 };
+
+type PlaybackStartupPolicy = 'baseline_first' | 'stable';
 
 @Injectable()
 export class TranscodeStreamService {
@@ -64,6 +67,7 @@ export class TranscodeStreamService {
           preserveHdr: limits.preserveHdr,
           adaptiveQuality: limits.adaptiveQuality,
           hdrMode: limits.hdrMode,
+          startupPolicy: limits.startupPolicy ?? 'stable',
           ...(limits.subtitleTrackId
             ? { subtitleTrackId: limits.subtitleTrackId }
             : {}),
@@ -111,6 +115,10 @@ export class TranscodeStreamService {
     });
     if (!job) return { state: 'failed', message: 'The HLS preparation job was not found' };
     const jobGeneration = hlsJobGeneration(job.id, job.payload);
+    const startupPolicy = hlsStartupPolicy(job.payload);
+    const requiredStartupSegments = startupPolicy === 'baseline_first'
+      ? 1
+      : this.requiredStartupSegments;
     if (generation && generation !== jobGeneration) {
       return { state: 'failed', message: 'The requested HLS generation was not found' };
     }
@@ -122,6 +130,8 @@ export class TranscodeStreamService {
     }
     const manifestPath = this.assetPath(session.id, 'master.m3u8', jobGeneration);
     let readySegments = 0;
+    let readyVariants = 0;
+    let variantCount = 0;
     try {
       const master = await readFile(manifestPath, 'utf8');
       const variants = master
@@ -129,7 +139,11 @@ export class TranscodeStreamService {
         .map((line) => line.trim())
         .filter((line) => line && !line.startsWith('#'));
       if (variants.length === 0) throw new Error('HLS master has no variants');
-      for (const variant of variants) {
+      variantCount = variants.length;
+      const startupVariants = startupPolicy === 'baseline_first'
+        ? variants.slice(0, 1)
+        : variants;
+      for (const variant of startupVariants) {
         if (!isAllowedHlsAsset(variant) || !variant.endsWith('.m3u8')) {
           throw new Error('HLS master contains an invalid variant');
         }
@@ -138,22 +152,27 @@ export class TranscodeStreamService {
         readySegments = readySegments === 0
           ? segments.length
           : Math.min(readySegments, segments.length);
-        if (!isHlsStartupBufferReady(playlist, this.requiredStartupSegments)) {
+        if (!isHlsStartupBufferReady(playlist, requiredStartupSegments)) {
           throw new Error('HLS variant does not have a stable startup buffer');
         }
         await Promise.all(
           [
             ...hlsPlaylistInitializationAssets(playlist),
-            ...segments.slice(0, this.requiredStartupSegments),
+            ...segments.slice(0, requiredStartupSegments),
           ].map((asset) => access(this.assetPath(session.id, asset, jobGeneration))),
         );
+        readyVariants += 1;
       }
       return {
         state: 'ready',
         message: session.method === 'direct_stream' ? 'Direct Stream HLS is ready' : 'Transcoded HLS is ready',
-        readySegments: this.requiredStartupSegments,
-        requiredSegments: this.requiredStartupSegments,
-        producerLeadMs: this.requiredStartupSegments * 4_000,
+        readySegments: requiredStartupSegments,
+        requiredSegments: requiredStartupSegments,
+        producerLeadMs: requiredStartupSegments * 4_000,
+        startupPolicy,
+        startupVariantIndex: 0,
+        readyVariants,
+        variantCount,
       };
     } catch {
       // The event playlists grow atomically while FFmpeg prepares a stable startup buffer.
@@ -167,9 +186,13 @@ export class TranscodeStreamService {
       message: job.status === 'running'
         ? session.method === 'direct_stream' ? 'FFmpeg is remuxing the stream' : 'FFmpeg is transcoding the stream'
         : 'Waiting for an HLS worker',
-      readySegments: Math.min(readySegments, this.requiredStartupSegments),
-      requiredSegments: this.requiredStartupSegments,
+      readySegments: Math.min(readySegments, requiredStartupSegments),
+      requiredSegments: requiredStartupSegments,
       producerLeadMs: readySegments * 4_000,
+      startupPolicy,
+      startupVariantIndex: 0,
+      readyVariants,
+      variantCount,
     };
   }
 
@@ -273,4 +296,11 @@ export class TranscodeStreamService {
 function hlsJobGeneration(jobId: string, payload: unknown): string | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   return (payload as Record<string, unknown>).generationId === jobId ? jobId : null;
+}
+
+function hlsStartupPolicy(payload: unknown): PlaybackStartupPolicy {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return 'stable';
+  return (payload as Record<string, unknown>).startupPolicy === 'baseline_first'
+    ? 'baseline_first'
+    : 'stable';
 }

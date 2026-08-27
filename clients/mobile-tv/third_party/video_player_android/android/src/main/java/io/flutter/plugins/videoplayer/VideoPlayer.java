@@ -177,6 +177,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     return exoPlayer;
   }
 
+  private int boltBytesAutoMaximumHeight = -1;
+
   /** Applies an adaptive maximum without replacing the active MediaItem or ExoPlayer. */
   @UnstableApi
   public void setBoltBytesAutoMaximumHeight(long maximumHeight) {
@@ -186,6 +188,9 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     int height = maximumHeight > 0
         ? (int) Math.min(maximumHeight, Integer.MAX_VALUE)
         : Integer.MAX_VALUE;
+    if (boltBytesAutoMaximumHeight == height) {
+      return;
+    }
     trackSelector.setParameters(
         trackSelector
             .buildUponParameters()
@@ -194,6 +199,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
             .setForceLowestBitrate(false)
             .setMaxVideoSize(Integer.MAX_VALUE, height)
             .build());
+    boltBytesAutoMaximumHeight = height;
   }
 
   /** Returns low-cost telemetry for the BoltBytes TV quality policy. */
@@ -207,6 +213,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     values.put("bufferedPositionMs", buffered);
     values.put("bufferAheadMs", Math.max(0, buffered - position));
     values.put("isLoading", exoPlayer.isLoading());
+    values.put("playbackState", exoPlayer.getPlaybackState());
+    values.put("maximumHeight", boltBytesAutoMaximumHeight);
     if (format != null) {
       if (format.height != Format.NO_VALUE) values.put("height", format.height);
       if (format.width != Format.NO_VALUE) values.put("width", format.width);
