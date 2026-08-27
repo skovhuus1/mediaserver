@@ -188,9 +188,9 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     int height = maximumHeight > 0
         ? (int) Math.min(maximumHeight, Integer.MAX_VALUE)
         : Integer.MAX_VALUE;
-    if (boltBytesAutoMaximumHeight == height) {
-      return;
-    }
+    // Always apply this atomically. The same ceiling can be requested while a
+    // concrete track override is active, and returning early would leave that
+    // override in place instead of restoring adaptive quality.
     trackSelector.setParameters(
         trackSelector
             .buildUponParameters()
@@ -430,6 +430,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     // Check if the new track has different dimensions than the current track
     Format currentFormat = exoPlayer.getVideoFormat();
     Format newFormat = trackGroup.getFormat((int) trackIndex);
+    int selectedMaximumHeight =
+        newFormat.height > 0 ? newFormat.height : Integer.MAX_VALUE;
     boolean dimensionsChanged =
         currentFormat == null
             || currentFormat.width != newFormat.width
@@ -461,7 +463,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     // TODO(nateshmbhat): Remove this workaround once Media3 provides a supported
     // renderer reset path or reliable resolution-changing track switches.
     // https://github.com/flutter/flutter/issues/183824
-    if (dimensionsChanged) {
+    if (dimensionsChanged && surfaceProducer != null) {
       final boolean wasPlaying = exoPlayer.isPlaying();
       final long currentPosition = exoPlayer.getCurrentPosition();
 
@@ -496,6 +498,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
                 trackSelector
                     .buildUponParameters()
                     .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
+                    .setForceLowestBitrate(false)
+                    .setMaxVideoSize(Integer.MAX_VALUE, selectedMaximumHeight)
                     .setOverrideForType(override)
                     .build());
 
@@ -511,7 +515,13 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
 
     // Apply the track selection override normally if dimensions haven't changed
     trackSelector.setParameters(
-        trackSelector.buildUponParameters().setOverrideForType(override).build());
+        trackSelector
+            .buildUponParameters()
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
+            .setForceLowestBitrate(false)
+            .setMaxVideoSize(Integer.MAX_VALUE, selectedMaximumHeight)
+            .setOverrideForType(override)
+            .build());
   }
 
   public void dispose() {

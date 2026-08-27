@@ -130,15 +130,14 @@ class PlaybackQualityCoordinator {
     );
     if (selection.automatic) {
       if (deferAutomatic) return true;
-      await controller.selectVideoTrack(null);
       await _platform.setAutoMaximumHeight(target.ceilingHeight);
       return true;
     }
     final track = target.track;
     if (track == null) return false;
-    // Clearing the old adaptive override before selecting one concrete track
-    // avoids carrying a stale ceiling across Auto/Fixed/Original transitions.
-    await _platform.setAutoMaximumHeight(target.ceilingHeight);
+    // Native selection clears the startup floor and applies the concrete
+    // track in one selector update. A separate adaptive reset here would make
+    // Media3 perform two resolution changes for one user action.
     await controller.selectVideoTrack(track);
     return true;
   }

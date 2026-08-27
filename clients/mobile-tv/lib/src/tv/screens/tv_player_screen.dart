@@ -729,7 +729,7 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
                     aspectRatio: video!.value.aspectRatio == 0
                         ? 16 / 9
                         : video.value.aspectRatio,
-                    child: VideoPlayer(video),
+                    child: VideoPlayer(video, key: ValueKey(video)),
                   ),
                 )
               else

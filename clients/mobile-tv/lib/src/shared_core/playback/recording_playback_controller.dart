@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/app_config.dart';
 import '../../core/playback_platform.dart';
 import '../live_tv_recording_contract.dart';
 import 'playback_session_controller.dart';
@@ -38,6 +39,9 @@ class RecordingPlaybackController extends ChangeNotifier
       );
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(authorization.streamUrl),
+        viewType: AppConfig.isTvBuild
+            ? VideoViewType.platformView
+            : VideoViewType.textureView,
       );
       _video = controller;
       await controller.initialize();
