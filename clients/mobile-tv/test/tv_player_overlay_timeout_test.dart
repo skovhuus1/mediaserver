@@ -1,6 +1,7 @@
 import 'package:boltbytes_media/src/shared_core/playback/playback_session_controller.dart';
 import 'package:boltbytes_media/src/tv/screens/tv_player_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:video_player/video_player.dart';
 
@@ -58,12 +59,49 @@ void main() {
     expect(find.byType(TvPlaybackScaffold), findsNothing);
     expect(controller.finishCalls, 1);
   });
+
+  testWidgets('visible controls navigate and reopen on Pause', (tester) async {
+    final controller = _FakeTvPlaybackController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TvPlaybackScaffold(controller: controller, title: 'Testtitel'),
+      ),
+    );
+    controller.markPlaying();
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      tester.binding.focusManager.primaryFocus?.debugLabel,
+      'tv-player-primary-1',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(
+      tester.binding.focusManager.primaryFocus?.debugLabel,
+      'tv-player-primary-0',
+    );
+    expect(controller.seekDeltas, isEmpty);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      tester.binding.focusManager.primaryFocus?.debugLabel,
+      'tv-player-primary-1',
+    );
+  });
 }
 
 class _FakeTvPlaybackController extends ChangeNotifier
     implements TvPlaybackController {
   PlaybackViewState _state = PlaybackViewState.initial;
   int finishCalls = 0;
+  final List<Duration> seekDeltas = <Duration>[];
 
   @override
   PlaybackViewState get state => _state;
@@ -96,7 +134,9 @@ class _FakeTvPlaybackController extends ChangeNotifier
   Future<void> retry() async {}
 
   @override
-  Future<void> seekBy(Duration delta) async {}
+  Future<void> seekBy(Duration delta) async {
+    seekDeltas.add(delta);
+  }
 
   @override
   Future<void> seekTo(Duration position) async {}

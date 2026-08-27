@@ -243,6 +243,8 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
 
   void _hideControls() {
     _hideTimer?.cancel();
+    _row = 0;
+    _index = 1;
     setState(() => _controlsVisible = false);
     _rootFocus.requestFocus();
   }
@@ -396,10 +398,6 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowLeft) {
-      if (_row == 0) {
-        _remoteSeek(const Duration(seconds: -10));
-        return KeyEventResult.handled;
-      }
       if (_row == -2 && state.activeMarker != null) {
         _row = -1;
       } else if (_row == 1 && _index == 0) {
@@ -413,10 +411,6 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowRight) {
-      if (_row == 0) {
-        _remoteSeek(Duration(seconds: widget.live ? 10 : 30));
-        return KeyEventResult.handled;
-      }
       if (_row == -1 && state.nextEpisodeCountdown != null) {
         _row = -2;
       } else if (_row == 0 && _index == _primaryNodes.length - 1) {
