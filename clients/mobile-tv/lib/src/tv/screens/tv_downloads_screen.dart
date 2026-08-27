@@ -40,6 +40,7 @@ class _TvDownloadsScreenState extends State<TvDownloadsScreen> {
   int _topIndex = 0;
   int _recordIndex = 0;
   int _recordAction = 0;
+  String? _initializationError;
 
   List<OfflineDownloadRecord> get _records =>
       _library.recordsForProfile(widget.profileId);
@@ -54,8 +55,22 @@ class _TvDownloadsScreenState extends State<TvDownloadsScreen> {
   }
 
   Future<void> _initialize() async {
-    await _library.initialize();
-    if (mounted) setState(() => _loading = false);
+    try {
+      await _library.initialize();
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _initializationError = null;
+        });
+      }
+    } catch (failure) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _initializationError = failure.toString();
+        });
+      }
+    }
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
@@ -122,35 +137,39 @@ class _TvDownloadsScreenState extends State<TvDownloadsScreen> {
   int get _topActionCount => widget.onReconnect == null ? 1 : 2;
 
   Future<void> _activate() async {
-    if (_topActions) {
-      if (widget.onReconnect != null && _topIndex == 0) {
-        await widget.onReconnect!();
+    try {
+      if (_topActions) {
+        if (widget.onReconnect != null && _topIndex == 0) {
+          await widget.onReconnect!();
+        } else {
+          await _library.sync();
+        }
+        return;
+      }
+      final record = _records.elementAtOrNull(_recordIndex);
+      if (record == null) return;
+      if (_recordAction == 0) {
+        if (!record.playable) return;
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) =>
+                TvOfflinePlayerScreen(library: _library, record: record),
+          ),
+        );
       } else {
-        await _library.sync();
+        await _library.remove(record);
+        if (mounted) {
+          setState(() {
+            _recordIndex = _recordIndex.clamp(
+              0,
+              (_records.length - 1).clamp(0, 1 << 20),
+            );
+            if (_records.isEmpty) _topActions = true;
+          });
+        }
       }
-      return;
-    }
-    final record = _records.elementAtOrNull(_recordIndex);
-    if (record == null) return;
-    if (_recordAction == 0) {
-      if (!record.playable) return;
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute(
-          builder: (_) =>
-              TvOfflinePlayerScreen(library: _library, record: record),
-        ),
-      );
-    } else {
-      await _library.remove(record);
-      if (mounted) {
-        setState(() {
-          _recordIndex = _recordIndex.clamp(
-            0,
-            (_records.length - 1).clamp(0, 1 << 20),
-          );
-          if (_records.isEmpty) _topActions = true;
-        });
-      }
+    } catch (failure) {
+      if (mounted) setState(() => _initializationError = failure.toString());
     }
   }
 
@@ -183,6 +202,7 @@ class _TvDownloadsScreenState extends State<TvDownloadsScreen> {
       animation: _library.changes,
       builder: (context, _) {
         final records = _records;
+        final downloadError = _initializationError ?? _library.error;
         return Scaffold(
           backgroundColor: Colors.transparent,
           body: Focus(
@@ -263,11 +283,11 @@ class _TvDownloadsScreenState extends State<TvDownloadsScreen> {
                         ),
                       ],
                     ),
-                    if (_library.error != null)
+                    if (downloadError != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
                         child: Text(
-                          _library.error!,
+                          downloadError,
                           style: const TextStyle(color: BoltColors.error),
                         ),
                       ),

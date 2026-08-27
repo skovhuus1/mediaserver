@@ -335,7 +335,7 @@ class AppController extends ChangeNotifier {
       }
       await _loadUser(generation: generation);
       _tvPairingGenerations.clear();
-    });
+    }, generation: generation);
   }
 
   Future<TvLoginPairing?> startTvLogin({
@@ -359,15 +359,21 @@ class AppController extends ChangeNotifier {
       final pairing = TvLoginPairing.fromJson(result);
       _tvPairingGenerations[pairing.pairingId] = generation;
       return pairing;
+    } on _InteractiveSuperseded {
+      return null;
     } on ApiException catch (failure) {
+      if (generation != _authGeneration) return null;
       error = failure.message;
       return null;
     } catch (_) {
+      if (generation != _authGeneration) return null;
       error = 'Forbindelsen til serveren fejlede. Prøv igen.';
       return null;
     } finally {
-      busy = false;
-      notifyListeners();
+      if (generation == _authGeneration) {
+        busy = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -407,11 +413,28 @@ class AppController extends ChangeNotifier {
         return const TvLoginPollResult(status: 'approved');
       }
       return result;
+    } on _InteractiveSuperseded {
+      throw const ApiException(
+        'QR-koden er blevet erstattet af et nyere loginforsøg.',
+        code: 'tv_login_superseded',
+      );
     } on ApiException catch (failure) {
+      if (generation != _authGeneration) {
+        throw const ApiException(
+          'QR-koden er blevet erstattet af et nyere loginforsøg.',
+          code: 'tv_login_superseded',
+        );
+      }
       error = failure.message;
       notifyListeners();
       rethrow;
     } catch (_) {
+      if (generation != _authGeneration) {
+        throw const ApiException(
+          'QR-koden er blevet erstattet af et nyere loginforsøg.',
+          code: 'tv_login_superseded',
+        );
+      }
       error = 'Forbindelsen til serveren fejlede. Prøv igen.';
       notifyListeners();
       rethrow;
@@ -528,7 +551,12 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> _guard(Future<void> Function() operation) async {
+  Future<void> _guard(
+    Future<void> Function() operation, {
+    int? generation,
+  }) async {
+    bool ownsVisibleState() =>
+        generation == null || generation == _authGeneration;
     busy = true;
     error = null;
     notifyListeners();
@@ -537,12 +565,16 @@ class AppController extends ChangeNotifier {
     } on _InteractiveSuperseded {
       // A newer manual or QR login owns the visible state.
     } on ApiException catch (failure) {
-      error = failure.message;
+      if (ownsVisibleState()) error = failure.message;
     } catch (_) {
-      error = 'Forbindelsen til serveren fejlede. Prøv igen.';
+      if (ownsVisibleState()) {
+        error = 'Forbindelsen til serveren fejlede. Prøv igen.';
+      }
     } finally {
-      busy = false;
-      notifyListeners();
+      if (ownsVisibleState()) {
+        busy = false;
+        notifyListeners();
+      }
     }
   }
 }

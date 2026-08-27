@@ -775,23 +775,25 @@ class _TvHubScreenState extends State<TvHubScreen> {
       _selectHoldFired = false;
       _selectHoldMedia = media;
       _selectHoldTimer = Timer(const Duration(milliseconds: 560), () {
-        if (!mounted || !_selectHoldTracking || _selectHoldMedia == null) {
+        final heldMedia = _selectHoldMedia;
+        if (!mounted || !_selectHoldTracking || heldMedia == null) {
           return;
         }
         _selectHoldFired = true;
         _selectHoldTimer = null;
+        unawaited(
+          _openContextMenu(heldMedia).whenComplete(() {
+            if (mounted) _resetSelectHold();
+          }),
+        );
       });
       return true;
     }
     if (event is KeyRepeatEvent) return true;
     if (event is KeyUpEvent) {
       final fired = _selectHoldFired;
-      final heldMedia = _selectHoldMedia;
       _resetSelectHold();
-      if (fired && heldMedia != null) {
-        unawaited(_openContextMenu(heldMedia));
-        return true;
-      }
+      if (fired) return true;
       return _activate();
     }
     return false;

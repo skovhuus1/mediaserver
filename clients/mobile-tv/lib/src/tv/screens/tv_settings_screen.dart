@@ -245,13 +245,13 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
       ),
       _choice(
         'Opskalering',
-        _upscaleLabel(_device.upscaleMode),
+        _device.allowUpscale ? _upscaleLabel(_device.upscaleMode) : 'Fra',
         () {
-          final current = _effectiveTvUpscaleMode(_device.upscaleMode);
+          final current = _device.allowUpscale
+              ? _effectiveTvUpscaleMode(_device.upscaleMode)
+              : 'off';
           final mode = _cycle(
-            playbackUpscaleModes
-                .where((value) => value != 'device')
-                .toList(growable: false),
+            playbackUpscaleModes.toList(growable: false),
             current,
             1,
           );
@@ -261,11 +261,11 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
           );
         },
         () {
-          final current = _effectiveTvUpscaleMode(_device.upscaleMode);
+          final current = _device.allowUpscale
+              ? _effectiveTvUpscaleMode(_device.upscaleMode)
+              : 'off';
           final mode = _cycle(
-            playbackUpscaleModes
-                .where((value) => value != 'device')
-                .toList(growable: false),
+            playbackUpscaleModes.toList(growable: false),
             current,
             -1,
           );
@@ -402,12 +402,13 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
 
   String _upscaleLabel(String value) => switch (value) {
     'off' => 'Fra',
+    'device' => 'TV · lokal',
     'server' => 'Server · FFmpeg',
-    _ => 'Server · FFmpeg',
+    _ => 'Fra',
   };
 
   String _effectiveTvUpscaleMode(String value) =>
-      value == 'off' ? 'off' : 'server';
+      playbackUpscaleModes.contains(value) ? value : 'off';
 
   Future<void> _save(Future<void> Function() operation) async {
     setState(() {

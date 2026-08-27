@@ -165,11 +165,15 @@ class OfflinePlaybackController extends ChangeNotifier
     if (controller == null) return;
     final duration = controller.value.duration;
     final position = controller.value.position;
-    await library.saveProgress(
-      record,
-      position.inMilliseconds,
-      completed: duration > Duration.zero && position >= duration * 0.9,
-    );
+    try {
+      await library.saveProgress(
+        record,
+        position.inMilliseconds,
+        completed: duration > Duration.zero && position >= duration * 0.9,
+      );
+    } catch (_) {
+      // Progress persistence must never interrupt local playback.
+    }
   }
 
   @override
@@ -225,14 +229,31 @@ class OfflinePlaybackController extends ChangeNotifier
 
   Future<void> _finish() async {
     _setState(_state.copyWith(finishing: true));
-    await _saveProgress();
     final controller = _video;
+    final position = controller?.value.position ?? _state.position;
+    final duration = controller?.value.duration ?? _state.duration;
+    _video = null;
     if (controller != null) {
       controller.removeListener(_onVideoChanged);
-      await controller.dispose();
+      try {
+        await controller.pause();
+      } catch (_) {}
+      try {
+        await controller.dispose();
+      } catch (_) {}
     }
-    _video = null;
     await _source.stop().catchError((_) {});
+    if (position > Duration.zero) {
+      try {
+        await library.saveProgress(
+          record,
+          position.inMilliseconds,
+          completed: duration > Duration.zero && position >= duration * 0.9,
+        );
+      } catch (_) {
+        // Local resources are already released; persistence is best effort.
+      }
+    }
     _setState(_state.copyWith(released: true));
   }
 

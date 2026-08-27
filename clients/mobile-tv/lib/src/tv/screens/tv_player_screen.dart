@@ -434,10 +434,6 @@ class _TvPlaybackScaffoldState extends State<TvPlaybackScaffold>
 
   Future<void> _handleBack() async {
     if (_closing) return;
-    if (_controlsVisible) {
-      _hideControls();
-      return;
-    }
     _closing = true;
     _hideTimer?.cancel();
     _seekFeedbackTimer?.cancel();

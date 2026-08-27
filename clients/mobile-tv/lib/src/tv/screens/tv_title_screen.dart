@@ -138,6 +138,11 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
       final selected =
           focusEpisode?.media.seasonNumber ??
           _resolveSelectedSeason(next, preferredSeason);
+      final selectedSeason = _seasonByNumber(next, selected);
+      final hydrateSelectedSeason =
+          seasonNumber == null &&
+          selectedSeason != null &&
+          _seasonNeedsHydration(selectedSeason);
       setState(() {
         _experience = next;
         _selectedSeason = selected;
@@ -149,6 +154,13 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
       _rebuildFocusGraph(rebuildSeasons: true);
       if (focusEpisode != null) {
         _focusEpisodeById(focusEpisode.media.id);
+      }
+      if (hydrateSelectedSeason && selected != null) {
+        await _load(
+          seasonNumber: selected,
+          focusPlaybackPosition: focusPlaybackPosition,
+          playedMediaId: playedMediaId,
+        );
       }
     } catch (failure) {
       if (!mounted || generation != _loadGeneration) return;
@@ -211,6 +223,7 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
       season.number == 0 ? 'Specials' : 'Sæson ${season.number}';
 
   void _rebuildFocusGraph({required bool rebuildSeasons}) {
+    ++_focusRequestEpoch;
     final data = _experience;
     if (data == null) {
       _focusController.replaceSections(const {}, notify: false);
@@ -425,23 +438,25 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
       _selectHoldFired = false;
       _selectHoldMedia = media;
       _selectHoldTimer = Timer(const Duration(milliseconds: 560), () {
-        if (!mounted || !_selectHoldTracking || _selectHoldMedia == null) {
+        final heldMedia = _selectHoldMedia;
+        if (!mounted || !_selectHoldTracking || heldMedia == null) {
           return;
         }
         _selectHoldFired = true;
         _selectHoldTimer = null;
+        unawaited(
+          _openContextMenu(heldMedia).whenComplete(() {
+            if (mounted) _resetSelectHold();
+          }),
+        );
       });
       return true;
     }
     if (event is KeyRepeatEvent) return true;
     if (event is KeyUpEvent) {
       final fired = _selectHoldFired;
-      final heldMedia = _selectHoldMedia;
       _resetSelectHold();
-      if (fired && heldMedia != null) {
-        unawaited(_openContextMenu(heldMedia));
-        return true;
-      }
+      if (fired) return true;
       return _activateFocused();
     }
     return false;
@@ -705,7 +720,8 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
     final epoch = ++_focusRequestEpoch;
     FocusScope.of(context).requestFocus(node);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && epoch == _focusRequestEpoch) node.requestFocus();
+      if (!mounted || epoch != _focusRequestEpoch) return;
+      if (node.canRequestFocus) node.requestFocus();
     });
     return true;
   }
@@ -747,7 +763,7 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
   }
 
   void _activateAction(int index) {
-    if (_loading) return;
+    if (_loading || _loadingSeason) return;
     if (_experience == null) {
       if (index == 0) unawaited(_load());
       return;

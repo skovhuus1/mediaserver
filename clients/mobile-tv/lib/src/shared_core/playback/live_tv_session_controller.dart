@@ -90,11 +90,7 @@ class LiveTvSessionController extends ChangeNotifier
   }
 
   Future<void> _openVideo(LiveTvSession session) async {
-    final previous = _video;
-    if (previous != null) {
-      previous.removeListener(_onVideoChanged);
-      await previous.dispose();
-    }
+    await _disposeVideo();
     final tuning = await PlaybackTuningStore.instance.load();
     await PlaybackPlatform.instance.configureTvVideoPlayer(
       true,
@@ -256,17 +252,27 @@ class LiveTvSessionController extends ChangeNotifier
 
   @override
   Future<void> retry() async {
+    _heartbeatTimer?.cancel();
+    _uiTimer?.cancel();
+    await _disposeVideo();
     await _release();
-    final previous = _video;
-    _video = null;
-    if (previous != null) {
-      previous.removeListener(_onVideoChanged);
-      await previous.dispose();
-    }
     _released = false;
     _finishOperation = null;
     _initialization = null;
     await _authorize();
+  }
+
+  Future<void> _disposeVideo() async {
+    final controller = _video;
+    _video = null;
+    if (controller == null) return;
+    controller.removeListener(_onVideoChanged);
+    try {
+      await controller.pause();
+    } catch (_) {}
+    try {
+      await controller.dispose();
+    } catch (_) {}
   }
 
   Future<void> _release() async {
@@ -286,7 +292,9 @@ class LiveTvSessionController extends ChangeNotifier
     _heartbeatTimer?.cancel();
     _uiTimer?.cancel();
     _setState(_state.copyWith(finishing: true));
+    await _disposeVideo();
     await _release();
+    await PlaybackPlatform.instance.clear().catchError((_) {});
   }
 
   void _setState(PlaybackViewState value) {
@@ -300,9 +308,7 @@ class LiveTvSessionController extends ChangeNotifier
     if (_disposed) return;
     _heartbeatTimer?.cancel();
     _uiTimer?.cancel();
-    final controller = _video;
-    if (controller != null) controller.removeListener(_onVideoChanged);
-    unawaited(finish().whenComplete(() => controller?.dispose()));
+    unawaited(finish());
     _disposed = true;
     super.dispose();
   }

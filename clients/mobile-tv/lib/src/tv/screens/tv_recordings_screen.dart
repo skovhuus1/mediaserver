@@ -28,7 +28,9 @@ class _TvRecordingsScreenState extends State<TvRecordingsScreen> {
   List<LiveTvRecording> _items = const [];
   int _selected = 0;
   bool _loading = true;
+  bool _actionBusy = false;
   String? _error;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -52,13 +54,15 @@ class _TvRecordingsScreenState extends State<TvRecordingsScreen> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
+    final generation = ++_loadGeneration;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final items = await _recordings.load();
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       _items = items;
       _syncNodes(items.length + 1);
       setState(() => _loading = false);
@@ -68,7 +72,7 @@ class _TvRecordingsScreenState extends State<TvRecordingsScreen> {
         }
       });
     } catch (failure) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       _syncNodes(1);
       setState(() {
         _loading = false;
@@ -110,6 +114,7 @@ class _TvRecordingsScreenState extends State<TvRecordingsScreen> {
   }
 
   Future<void> _activate() async {
+    if (_actionBusy) return;
     if (_selected == 0) return _load();
     final recording = _items.elementAtOrNull(_selected - 1);
     if (recording == null) return;
@@ -148,34 +153,39 @@ class _TvRecordingsScreenState extends State<TvRecordingsScreen> {
       ),
     );
     if (!mounted || action == null) return;
+    setState(() => _actionBusy = true);
     try {
-      switch (action) {
-        case _RecordingAction.play:
-          final authorization = await _recordings.authorizePlayback(
-            recording.id,
-          );
-          if (!mounted) return;
-          await Navigator.of(context).push<void>(
-            MaterialPageRoute(
-              builder: (_) => _TvRecordingPlayerScreen(
-                title: recording.title,
-                authorization: authorization,
-              ),
+      if (action == _RecordingAction.play) {
+        final authorization = await _recordings.authorizePlayback(recording.id);
+        if (!mounted) return;
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => _TvRecordingPlayerScreen(
+              title: recording.title,
+              authorization: authorization,
             ),
-          );
-        case _RecordingAction.cancel:
-          await _recordings.cancel(recording.id);
-        case _RecordingAction.remove:
-          await _recordings.remove(recording.id);
+          ),
+        );
+      } else if (action == _RecordingAction.cancel) {
+        await _recordings.cancel(recording.id);
+      } else {
+        await _recordings.remove(recording.id);
       }
-      await _load();
+      if (mounted) await _load();
     } on ApiException catch (failure) {
       if (mounted) setState(() => _error = failure.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = 'Handlingen kunne ikke gennemføres.');
+      }
+    } finally {
+      if (mounted) setState(() => _actionBusy = false);
     }
   }
 
   @override
   void dispose() {
+    _loadGeneration++;
     _root.dispose();
     for (final node in _nodes) {
       node.dispose();

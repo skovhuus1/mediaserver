@@ -28,7 +28,7 @@ void main() {
     expect(opacity.opacity, 0);
   });
 
-  testWidgets('system Back hides controls before closing the player', (
+  testWidgets('system Back closes the player and finishes once', (
     tester,
   ) async {
     final controller = _FakeTvPlaybackController();
@@ -48,23 +48,10 @@ void main() {
     controller.markPlaying();
     await tester.pump();
 
-    final firstPopScope =
+    final popScope =
         tester.widget(find.byKey(const ValueKey('tv-player-pop-scope')))
             as PopScope;
-    firstPopScope.onPopInvokedWithResult?.call(false, null);
-    await tester.pump(const Duration(milliseconds: 200));
-
-    final opacity = tester.widget<AnimatedOpacity>(
-      find.byType(AnimatedOpacity),
-    );
-    expect(opacity.opacity, 0);
-    expect(find.byType(TvPlaybackScaffold), findsOneWidget);
-    expect(controller.finishCalls, 0);
-
-    final secondPopScope =
-        tester.widget(find.byKey(const ValueKey('tv-player-pop-scope')))
-            as PopScope;
-    secondPopScope.onPopInvokedWithResult?.call(false, null);
+    popScope.onPopInvokedWithResult?.call(false, null);
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 

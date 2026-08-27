@@ -51,6 +51,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
   bool _favoritesOnly = false;
   bool _loading = true;
   String? _error;
+  int _loadGeneration = 0;
   late DateTime _windowStart;
   late DateTime _windowEnd;
 
@@ -99,6 +100,9 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
   }
 
   Future<void> _load({bool silent = false}) async {
+    if (!mounted) return;
+    final generation = ++_loadGeneration;
+    _setWindow();
     final selectedChannel = _channels.elementAtOrNull(_row)?.id;
     final selectedProgram = _channels
         .elementAtOrNull(_row)
@@ -112,14 +116,19 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
       });
     }
     try {
+      final requestFrom = _windowStart;
+      final requestTo = _windowEnd;
+      final requestPage = _page;
+      final requestGroup = _group;
+      final requestFavoritesOnly = _favoritesOnly;
       final guide = await _liveTv.loadGuide(
-        from: _windowStart,
-        to: _windowEnd,
-        page: _page,
-        group: _group,
-        favoritesOnly: _favoritesOnly,
+        from: requestFrom,
+        to: requestTo,
+        page: requestPage,
+        group: requestGroup,
+        favoritesOnly: requestFavoritesOnly,
       );
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _guide = guide;
         _page = guide.page;
@@ -139,7 +148,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
       });
       _ensureVisible();
     } catch (failure) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _loading = false;
         _error = failure.toString();
@@ -359,6 +368,7 @@ class _TvLiveGuideScreenState extends State<TvLiveGuideScreen> {
 
   @override
   void dispose() {
+    _loadGeneration++;
     _refreshTimer?.cancel();
     _timeline.removeListener(_timelineChanged);
     _timeline.dispose();
