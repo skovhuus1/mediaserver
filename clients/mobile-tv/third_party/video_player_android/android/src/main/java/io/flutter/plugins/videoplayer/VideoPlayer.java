@@ -213,6 +213,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     values.put("bufferedPositionMs", buffered);
     values.put("bufferAheadMs", Math.max(0, buffered - position));
     values.put("isLoading", exoPlayer.isLoading());
+    values.put("isPlaying", exoPlayer.isPlaying());
     values.put("playbackState", exoPlayer.getPlaybackState());
     values.put("maximumHeight", boltBytesAutoMaximumHeight);
     if (format != null) {

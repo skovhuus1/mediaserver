@@ -343,7 +343,10 @@ class PlaybackSessionController extends ChangeNotifier
       PlaybackQualityCoordinator(platform: _platform);
   Timer? _autoQualityUnlockTimer;
   Timer? _uiTimer;
+  Timer? _nativeTelemetryTimer;
   Timer? _nextTimer;
+  bool _nativeTelemetryPollInFlight = false;
+  int _nativeTelemetryGeneration = 0;
   Future<void>? _initialization;
   Future<void>? _finishOperation;
   SubtitleQueueSelection? _subtitleQueueSelection;
@@ -640,6 +643,7 @@ class PlaybackSessionController extends ChangeNotifier
       const Duration(milliseconds: 250),
       (_) => _tick(),
     );
+    _startNativeTelemetryPolling();
     _setKeepScreenOn(true);
   }
 
@@ -647,10 +651,76 @@ class PlaybackSessionController extends ChangeNotifier
     _maintenanceScheduler.stop();
     _autoQualityUnlockTimer?.cancel();
     _uiTimer?.cancel();
+    _nativeTelemetryTimer?.cancel();
     _nextTimer?.cancel();
     _autoQualityUnlockTimer = null;
     _uiTimer = null;
+    _nativeTelemetryTimer = null;
     _nextTimer = null;
+    _nativeTelemetryGeneration += 1;
+    _nativeTelemetryPollInFlight = false;
+  }
+
+  void _startNativeTelemetryPolling() {
+    final generation = ++_nativeTelemetryGeneration;
+    unawaited(_refreshNativeVideoValue(generation));
+    _nativeTelemetryTimer = Timer.periodic(
+      const Duration(milliseconds: 400),
+      (_) => unawaited(_refreshNativeVideoValue(generation)),
+    );
+  }
+
+  Future<void> _refreshNativeVideoValue(int generation) async {
+    if (_disposed || _nativeTelemetryPollInFlight) return;
+    final controller = _video;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    _nativeTelemetryPollInFlight = true;
+    try {
+      final telemetry = await _platform
+          .videoTelemetry()
+          .timeout(const Duration(milliseconds: 800));
+      if (_disposed ||
+          telemetry == null ||
+          generation != _nativeTelemetryGeneration ||
+          !identical(controller, _video) ||
+          !controller.value.isInitialized) {
+        return;
+      }
+
+      final durationMs = controller.value.duration.inMilliseconds;
+      var positionMs = telemetry.positionMs;
+      if (positionMs < 0) positionMs = 0;
+      if (durationMs > 0 && positionMs > durationMs) {
+        positionMs = durationMs;
+      }
+
+      var bufferedPositionMs = telemetry.bufferedPositionMs;
+      if (bufferedPositionMs < positionMs) {
+        bufferedPositionMs = positionMs;
+      }
+      if (durationMs > 0 && bufferedPositionMs > durationMs) {
+        bufferedPositionMs = durationMs;
+      }
+
+      controller.value = controller.value.copyWith(
+        position: Duration(milliseconds: positionMs),
+        buffered: <DurationRange>[
+          DurationRange(
+            Duration.zero,
+            Duration(milliseconds: bufferedPositionMs),
+          ),
+        ],
+        isBuffering: telemetry.playbackState == 2,
+        isPlaying: telemetry.isPlaying,
+      );
+    } on TimeoutException {
+      // A delayed native sample must never block later UI telemetry updates.
+    } catch (_) {
+      // Unsupported platforms keep using video_player's regular value stream.
+    } finally {
+      _nativeTelemetryPollInFlight = false;
+    }
   }
 
   void _tick() {

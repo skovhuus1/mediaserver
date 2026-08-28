@@ -27,22 +27,30 @@ class PlaybackPlatformCommand {
 
 class NativeVideoTelemetry {
   const NativeVideoTelemetry({
+    required this.positionMs,
+    required this.bufferedPositionMs,
     required this.bufferAheadMs,
     required this.bandwidthEstimate,
     required this.droppedFrames,
     required this.totalFrames,
     required this.isLoading,
+    required this.isPlaying,
+    required this.playbackState,
     this.height,
     this.width,
     this.bitrate,
     this.decoder,
   });
 
+  final int positionMs;
+  final int bufferedPositionMs;
   final int bufferAheadMs;
   final int bandwidthEstimate;
   final int droppedFrames;
   final int totalFrames;
   final bool isLoading;
+  final bool isPlaying;
+  final int playbackState;
   final int? height;
   final int? width;
   final int? bitrate;
@@ -54,11 +62,15 @@ class NativeVideoTelemetry {
         : const <String, dynamic>{};
     int? number(String key) => (map[key] as num?)?.round();
     return NativeVideoTelemetry(
+      positionMs: number('positionMs') ?? 0,
+      bufferedPositionMs: number('bufferedPositionMs') ?? 0,
       bufferAheadMs: number('bufferAheadMs') ?? 0,
       bandwidthEstimate: number('bandwidthEstimate') ?? 0,
       droppedFrames: number('droppedFrames') ?? 0,
       totalFrames: number('totalFrames') ?? 0,
       isLoading: map['isLoading'] == true,
+      isPlaying: map['isPlaying'] == true,
+      playbackState: number('playbackState') ?? 0,
       height: number('height'),
       width: number('width'),
       bitrate: number('bitrate'),
