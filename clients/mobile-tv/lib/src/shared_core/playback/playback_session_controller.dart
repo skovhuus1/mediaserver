@@ -677,9 +677,9 @@ class PlaybackSessionController extends ChangeNotifier
 
     _nativeTelemetryPollInFlight = true;
     try {
-      final telemetry = await _platform
-          .videoTelemetry()
-          .timeout(const Duration(milliseconds: 800));
+      final telemetry = await _platform.videoTelemetry().timeout(
+        const Duration(milliseconds: 800),
+      );
       if (_disposed ||
           telemetry == null ||
           generation != _nativeTelemetryGeneration ||
