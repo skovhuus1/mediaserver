@@ -11,6 +11,7 @@ import '../../shared_core/paged_catalog_controller.dart';
 import '../../shared_core/ui_tokens/tv_design_tokens.dart';
 import '../../widgets/media_card.dart';
 import '../widgets/tv_media_context_menu.dart';
+import '../widgets/tv_premium_layout.dart';
 
 class TvLibraryScreen extends StatefulWidget {
   const TvLibraryScreen({
@@ -323,143 +324,109 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
   @override
   Widget build(BuildContext context) {
     final category = widget.category?.trim();
-    return Scaffold(
-      backgroundColor: const Color(0xFF040506),
-      appBar: AppBar(
-        toolbarHeight: 88,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: const Color(0xFF040506),
-        surfaceTintColor: Colors.transparent,
-        leadingWidth: 76,
-        leading: Padding(
-          padding: const EdgeInsets.only(left: 22),
-          child: IconButton(
-            tooltip: 'Tilbage',
-            onPressed: () => Navigator.of(context).maybePop(),
-            icon: const Icon(Icons.arrow_back_rounded, size: 30),
+    final title = category == null || category.isEmpty
+        ? 'Alle ${widget.label.toLowerCase()}'
+        : '${widget.label} · $category';
+    return TvPageScaffold(
+      title: title,
+      eyebrow: category == null || category.isEmpty
+          ? 'KATALOG'
+          : 'DISCOVERY',
+      subtitle:
+          '${_state.total} titler  ·  sorteret alfabetisk  ·  hold OK for hurtigmenu',
+      icon: widget.mediaType == 'movie'
+          ? Icons.movie_creation_outlined
+          : Icons.live_tv_rounded,
+      trailing: TvStatusPill(
+        label: category == null || category.isEmpty ? 'A–Å' : category,
+        icon: category == null || category.isEmpty
+            ? Icons.sort_by_alpha_rounded
+            : Icons.category_outlined,
+        emphasized: category != null && category.isNotEmpty,
+      ),
+      onKeyEvent: _handleKey,
+      body: Column(
+        children: [
+          Expanded(
+            child: _state.loading && _state.items.isEmpty
+                ? const TvStateView(
+                    icon: Icons.video_library_outlined,
+                    title: 'Henter katalog',
+                    message: 'Indlæser titler, artwork og metadata.',
+                    busy: true,
+                  )
+                : _state.items.isEmpty && _state.error == null
+                ? const TvStateView(
+                    icon: Icons.search_off_rounded,
+                    title: 'Ingen titler fundet',
+                    message: 'Der er ingen titler i dette katalog endnu.',
+                  )
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      _columnCount =
+                          (constraints.maxWidth /
+                                  (TvDesignTokens.cardWidth +
+                                      TvDesignTokens.cardGap))
+                              .floor()
+                              .clamp(1, 10)
+                              .toInt();
+                      return GridView.builder(
+                        controller: _gridController,
+                        padding: const EdgeInsets.fromLTRB(4, 4, 4, 18),
+                        gridDelegate:
+                            SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: _columnCount,
+                              mainAxisExtent: TvDesignTokens.cardHeight,
+                              crossAxisSpacing: TvDesignTokens.cardGap,
+                              mainAxisSpacing: TvDesignTokens.cardGap,
+                            ),
+                        itemCount: _state.items.length,
+                        itemBuilder: (_, index) => Center(
+                          child: MediaPosterCard(
+                            api: widget.api,
+                            media: _state.items[index],
+                            width: TvDesignTokens.cardWidth,
+                            isTv: true,
+                            focusNode: _itemNodes[index],
+                            heroTag:
+                                'tv-library-${category ?? 'all'}-${_state.items[index].id}',
+                            onPressed: () {
+                              _focusedItemIndex = index;
+                              _activate();
+                            },
+                            onLongPressed: () => unawaited(
+                              _openContextMenu(_state.items[index]),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
           ),
-        ),
-        titleSpacing: 12,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              category == null || category.isEmpty
-                  ? 'Alle ${widget.label.toLowerCase()}'
-                  : '${widget.label} · $category',
-              style: const TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0,
+          if (_state.loadingMore)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SizedBox(
+                width: 220,
+                child: LinearProgressIndicator(
+                  minHeight: 4,
+                  borderRadius: BorderRadius.circular(99),
+                  color: TvDesignTokens.cyan,
+                ),
               ),
             ),
-            const SizedBox(height: 3),
-            Text(
-              '${_state.total} titler  ·  A–Å',
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
+          if (_state.error != null) ...[
+            const SizedBox(height: 10),
+            TvInlineNotice(message: _state.error!, error: true),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              focusNode: _footerNode,
+              onPressed: _catalog.retry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Prøv igen'),
             ),
           ],
-        ),
-      ),
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment.topRight,
-            radius: 1.2,
-            colors: [Color(0x20332A1A), Color(0xFF040506)],
-          ),
-        ),
-        child: Focus(
-          canRequestFocus: true,
-          onKeyEvent: _handleKey,
-          child: Column(
-            children: [
-              Expanded(
-                child: _state.loading && _state.items.isEmpty
-                    ? const Center(child: CircularProgressIndicator())
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          _columnCount =
-                              (constraints.maxWidth /
-                                      (TvDesignTokens.cardWidth +
-                                          TvDesignTokens.cardGap))
-                                  .floor()
-                                  .clamp(1, 10)
-                                  .toInt();
-                          return GridView.builder(
-                            controller: _gridController,
-                            padding: const EdgeInsets.all(
-                              TvDesignTokens.pageHorizontalPadding,
-                            ),
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: _columnCount,
-                                  mainAxisExtent: TvDesignTokens.cardHeight,
-                                  crossAxisSpacing: TvDesignTokens.cardGap,
-                                  mainAxisSpacing: TvDesignTokens.cardGap,
-                                ),
-                            itemCount: _state.items.length,
-                            itemBuilder: (_, index) => Center(
-                              child: MediaPosterCard(
-                                api: widget.api,
-                                media: _state.items[index],
-                                width: TvDesignTokens.cardWidth,
-                                isTv: true,
-                                focusNode: _itemNodes[index],
-                                heroTag:
-                                    'tv-library-${category ?? 'all'}-${_state.items[index].id}',
-                                onPressed: () {
-                                  _focusedItemIndex = index;
-                                  _activate();
-                                },
-                                onLongPressed: () => unawaited(
-                                  _openContextMenu(_state.items[index]),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              if (_state.loadingMore)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 10, 24, 22),
-                  child: SizedBox(
-                    width: 180,
-                    child: LinearProgressIndicator(
-                      minHeight: 3,
-                      borderRadius: BorderRadius.circular(99),
-                    ),
-                  ),
-                ),
-              if (_state.error != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-                  child: OutlinedButton.icon(
-                    focusNode: _footerNode,
-                    onPressed: _catalog.retry,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Prøv igen'),
-                  ),
-                ),
-              if (_state.error != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 18),
-                  child: Text(
-                    _state.error!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }

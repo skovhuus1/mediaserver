@@ -34,23 +34,23 @@ class TvOptionOverlay<T> extends StatelessWidget {
             begin: Alignment.centerLeft,
             end: Alignment.centerRight,
             colors: [
-              Color(0xFA000000),
-              Color(0xEE070A0F),
-              Color(0x99101820),
-              Color(0x24000000),
+              Color(0xFC000000),
+              Color(0xF5070B10),
+              Color(0xD4121B24),
+              Color(0x26000000),
             ],
-            stops: [0, 0.38, 0.70, 1],
+            stops: [0, 0.32, 0.74, 1],
           ),
         ),
         child: SafeArea(
-          minimum: const EdgeInsets.fromLTRB(52, 30, 52, 34),
+          minimum: const EdgeInsets.fromLTRB(42, 22, 42, 24),
           child: FocusTraversalGroup(
             policy: OrderedTraversalPolicy(),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SizedBox(
-                  width: 392,
+                  width: 404,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -81,12 +81,12 @@ class TvOptionOverlay<T> extends StatelessWidget {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 26),
+                      const SizedBox(height: 24),
                       Text(
                         panelTitle,
                         style: TextStyle(
                           color: Color(0xFFFFE8A3),
-                          fontSize: 18,
+                          fontSize: 20,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.2,
                         ),
@@ -103,13 +103,17 @@ class TvOptionOverlay<T> extends StatelessWidget {
                       ),
                       const Spacer(),
                       Container(
-                        width: 326,
+                        width: 362,
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
+                          horizontal: 18,
+                          vertical: 14,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0x66000000),
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xD0162029), Color(0xED05070A)],
+                          ),
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(color: const Color(0x33FFFFFF)),
                         ),
@@ -139,15 +143,19 @@ class TvOptionOverlay<T> extends StatelessWidget {
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(
                       maxWidth: 430,
-                      maxHeight: 570,
+                      maxHeight: 600,
                     ),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: const Color(0xE6070A0F),
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xF51A232C), Color(0xFC06080B)],
+                        ),
                         borderRadius: BorderRadius.circular(
                           TvDesignTokens.panelRadius,
                         ),
-                        border: Border.all(color: const Color(0x55FFE8A3)),
+                        border: Border.all(color: const Color(0x3DFFFFFF)),
                         boxShadow: const [
                           BoxShadow(
                             color: Color(0xCC000000),
@@ -188,6 +196,236 @@ class TvOptionOverlay<T> extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class TvPlaybackInfoRow {
+  const TvPlaybackInfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+}
+
+class TvPlaybackInfoOverlay extends StatelessWidget {
+  const TvPlaybackInfoOverlay({
+    required this.playbackTitle,
+    required this.rows,
+    this.playbackSubtitle,
+    super.key,
+  });
+
+  final String playbackTitle;
+  final String? playbackSubtitle;
+  final List<TvPlaybackInfoRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              Color(0xFC000000),
+              Color(0xF5070B10),
+              Color(0xD4121B24),
+              Color(0x26000000),
+            ],
+            stops: [0, 0.32, 0.74, 1],
+          ),
+        ),
+        child: SafeArea(
+          minimum: const EdgeInsets.fromLTRB(42, 22, 42, 24),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 404,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _TvPlaybackOptionEyebrow(label: 'AFSPILNING'),
+                    const SizedBox(height: 10),
+                    Text(
+                      playbackTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 38,
+                        height: 0.95,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -1.5,
+                      ),
+                    ),
+                    if (playbackSubtitle case final subtitle?) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Color(0xCCFFFFFF),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 28),
+                    const Text(
+                      'Afspilningsinfo',
+                      style: TextStyle(
+                        color: TvDesignTokens.goldSoft,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Aktuelle oplysninger fra playeren. Session-id og adgangstokens vises aldrig.',
+                      style: TextStyle(
+                        color: Color(0xB8FFFFFF),
+                        height: 1.35,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.keyboard_return_rounded,
+                          color: TvDesignTokens.goldSoft,
+                          size: 18,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Back vender tilbage til playeren',
+                          style: TextStyle(
+                            color: TvDesignTokens.textMuted,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Container(
+                  width: 510,
+                  constraints: const BoxConstraints(maxHeight: 610),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xF51A232C), Color(0xFC06080B)],
+                    ),
+                    borderRadius: BorderRadius.circular(
+                      TvDesignTokens.panelRadius,
+                    ),
+                    border: Border.all(color: const Color(0x3DFFFFFF)),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0xCC000000),
+                        blurRadius: 46,
+                        offset: Offset(0, 20),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: _TvPlaybackOptionEyebrow(label: 'AKTUELT'),
+                      ),
+                      const SizedBox(height: 10),
+                      for (final row in rows) _TvPlaybackInfoTile(row: row),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton.icon(
+                          autofocus: true,
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.check_rounded),
+                          label: const Text('Færdig'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TvPlaybackInfoTile extends StatelessWidget {
+  const _TvPlaybackInfoTile({required this.row});
+
+  final TvPlaybackInfoRow row;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xA60D1319),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0x26FFFFFF)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0x1FFFD978),
+            ),
+            child: Icon(row.icon, color: TvDesignTokens.goldSoft, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              row.label,
+              style: const TextStyle(
+                color: TvDesignTokens.textMuted,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              row.value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -262,10 +500,10 @@ class TvPlaybackChoiceTileState<T> extends State<TvPlaybackChoiceTile<T>> {
   Widget build(BuildContext context) {
     final choice = widget.choice;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 6),
       child: AnimatedScale(
         duration: const Duration(milliseconds: 115),
-        scale: _focused ? 1.025 : 1,
+        scale: _focused ? 1.018 : 1,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 115),
           decoration: BoxDecoration(
@@ -273,8 +511,8 @@ class TvPlaybackChoiceTileState<T> extends State<TvPlaybackChoiceTile<T>> {
                 ? const Color(0xFFFFE8A3)
                 : choice.selected
                 ? const Color(0xFF241B10)
-                : const Color(0xC80E1319),
-            borderRadius: BorderRadius.circular(18),
+                : const Color(0xD00D1319),
+            borderRadius: BorderRadius.circular(13),
             border: Border.all(
               color: _focused
                   ? Colors.white
@@ -305,7 +543,7 @@ class TvPlaybackChoiceTileState<T> extends State<TvPlaybackChoiceTile<T>> {
               selected: choice.selected,
               child: InkWell(
                 autofocus: widget.autofocus,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(13),
                 onFocusChange: (focused) {
                   setState(() => _focused = focused);
                   if (!focused) return;
@@ -322,13 +560,13 @@ class TvPlaybackChoiceTileState<T> extends State<TvPlaybackChoiceTile<T>> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
-                    vertical: 14,
+                    vertical: 10,
                   ),
                   child: Row(
                     children: [
                       Container(
-                        width: 38,
-                        height: 38,
+                        width: 36,
+                        height: 36,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: _focused
@@ -337,7 +575,7 @@ class TvPlaybackChoiceTileState<T> extends State<TvPlaybackChoiceTile<T>> {
                         ),
                         child: Icon(
                           choice.icon,
-                          size: 21,
+                          size: 20,
                           color: _focused
                               ? const Color(0xFF090806)
                               : TvDesignTokens.gold,

@@ -9,6 +9,7 @@ import '../../core/offline_downloads.dart';
 import '../../shared_core/offline_library_contract.dart';
 import '../../shared_core/playback/offline_playback_controller.dart';
 import '../../shared_core/ui_tokens/tv_design_tokens.dart';
+import '../widgets/tv_premium_layout.dart';
 import 'tv_player_screen.dart';
 
 class TvDownloadsScreen extends StatefulWidget {
@@ -203,126 +204,91 @@ class _TvDownloadsScreenState extends State<TvDownloadsScreen> {
       builder: (context, _) {
         final records = _records;
         final downloadError = _initializationError ?? _library.error;
-        return Scaffold(
-          backgroundColor: Colors.transparent,
-          body: Focus(
-            focusNode: _root,
-            autofocus: true,
-            onKeyEvent: _handleKey,
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: TvDesignTokens.pageHorizontalPadding,
-                  vertical: TvDesignTokens.pageVerticalPadding,
+        return TvPageScaffold(
+          focusNode: _root,
+          autofocus: true,
+          onKeyEvent: _handleKey,
+          eyebrow: widget.offline ? 'OFFLINE MODE' : 'DIT BIBLIOTEK',
+          title: widget.offline ? 'Offlinebibliotek' : 'Downloads',
+          subtitle: widget.offline
+              ? 'Lokale titler, licenser og afspilningsstatus'
+              : 'Administrér lokale kopier og se downloadstatus',
+          icon: widget.offline
+              ? Icons.cloud_off_rounded
+              : Icons.download_for_offline_rounded,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_library.syncing) ...[
+                const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: TvDesignTokens.gold.withValues(alpha: 0.13),
-                            borderRadius: BorderRadius.circular(
-                              TvDesignTokens.chromeRadius,
-                            ),
-                            border: Border.all(
-                              color: TvDesignTokens.gold.withValues(
-                                alpha: 0.24,
-                              ),
-                            ),
-                          ),
-                          child: Icon(
-                            widget.offline
-                                ? Icons.cloud_off
-                                : Icons.download_for_offline_outlined,
-                            size: 29,
-                            color: TvDesignTokens.goldSoft,
-                          ),
-                        ),
-                        const SizedBox(width: 13),
-                        Text(
-                          widget.offline ? 'Offlinebibliotek' : 'Downloads',
-                          style: const TextStyle(
-                            fontSize: 32,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.4,
-                          ),
-                        ),
-                        const Spacer(),
-                        if (_library.syncing)
-                          const SizedBox.square(
-                            dimension: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        const SizedBox(width: 14),
-                        Text(
-                          '${records.length} titler',
-                          style: const TextStyle(color: Colors.white60),
-                        ),
-                      ],
+                const SizedBox(width: 12),
+              ],
+              TvStatusPill(
+                label: '${records.length} titler',
+                icon: Icons.video_library_outlined,
+                emphasized: records.isNotEmpty,
+              ),
+            ],
+          ),
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  if (widget.onReconnect != null) ...[
+                    _TopAction(
+                      label: 'Forbind igen',
+                      icon: Icons.cloud_sync_outlined,
+                      focused: _topActions && _topIndex == 0,
                     ),
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        if (widget.onReconnect != null) ...[
-                          _TopAction(
-                            label: 'Forbind igen',
-                            icon: Icons.cloud_sync_outlined,
-                            focused: _topActions && _topIndex == 0,
-                          ),
-                          const SizedBox(width: 12),
-                        ],
-                        _TopAction(
-                          label: 'Opdatér',
-                          icon: Icons.refresh,
-                          focused:
-                              _topActions && _topIndex == _topActionCount - 1,
-                        ),
-                      ],
-                    ),
-                    if (downloadError != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Text(
-                          downloadError,
-                          style: const TextStyle(color: BoltColors.error),
+                    const SizedBox(width: 10),
+                  ],
+                  _TopAction(
+                    label: 'Opdatér',
+                    icon: Icons.refresh_rounded,
+                    focused: _topActions && _topIndex == _topActionCount - 1,
+                  ),
+                ],
+              ),
+              if (downloadError != null) ...[
+                const SizedBox(height: 12),
+                TvInlineNotice(message: downloadError, error: true),
+              ],
+              const SizedBox(height: 14),
+              Expanded(
+                child: _loading
+                    ? const TvStateView(
+                        icon: Icons.downloading_rounded,
+                        title: 'Indlæser downloads',
+                        message: 'Kontrollerer lokale filer og licenser.',
+                        busy: true,
+                      )
+                    : records.isEmpty
+                    ? const TvStateView(
+                        icon: Icons.download_done_rounded,
+                        title: 'Ingen lokale titler endnu',
+                        message:
+                            'Downloadede film og afsnit vises her med status, kvalitet og licens.',
+                      )
+                    : ListView.separated(
+                        controller: _scroll,
+                        padding: const EdgeInsets.only(bottom: 12),
+                        itemCount: records.length,
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(height: 9),
+                        itemBuilder: (_, index) => _DownloadRow(
+                          record: records[index],
+                          focused: !_topActions && index == _recordIndex,
+                          actionIndex: index == _recordIndex
+                              ? _recordAction
+                              : -1,
                         ),
                       ),
-                    const SizedBox(height: 18),
-                    Expanded(
-                      child: _loading
-                          ? const Center(child: CircularProgressIndicator())
-                          : records.isEmpty
-                          ? const Center(
-                              child: Text(
-                                'Ingen offline-titler endnu.',
-                                style: TextStyle(
-                                  color: Colors.white60,
-                                  fontSize: 20,
-                                ),
-                              ),
-                            )
-                          : ListView.separated(
-                              controller: _scroll,
-                              itemCount: records.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: 9),
-                              itemBuilder: (_, index) => _DownloadRow(
-                                record: records[index],
-                                focused: !_topActions && index == _recordIndex,
-                                actionIndex: index == _recordIndex
-                                    ? _recordAction
-                                    : -1,
-                              ),
-                            ),
-                    ),
-                  ],
-                ),
               ),
-            ),
+            ],
           ),
         );
       },
@@ -384,40 +350,11 @@ class _TopAction extends StatelessWidget {
   final bool focused;
 
   @override
-  Widget build(BuildContext context) => AnimatedContainer(
-    duration: TvDesignTokens.focusAnimationDuration,
-    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-    decoration: BoxDecoration(
-      color: focused ? TvDesignTokens.goldSoft : TvDesignTokens.surfaceRaised,
-      borderRadius: BorderRadius.circular(999),
-      border: Border.all(
-        color: focused ? Colors.white : TvDesignTokens.panelBorderSoft,
-        width: focused ? 2 : 1,
-      ),
-      boxShadow: focused
-          ? const [
-              BoxShadow(
-                color: Color(0x44F7C35F),
-                blurRadius: 16,
-                offset: Offset(0, 7),
-              ),
-            ]
-          : const [],
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: focused ? const Color(0xFF090806) : Colors.white),
-        const SizedBox(width: 10),
-        Text(
-          label,
-          style: TextStyle(
-            color: focused ? const Color(0xFF090806) : Colors.white,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ],
-    ),
+  Widget build(BuildContext context) => TvActionPill(
+    label: label,
+    icon: icon,
+    focused: focused,
+    primary: true,
   );
 }
 
@@ -435,17 +372,17 @@ class _DownloadRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AnimatedContainer(
     duration: TvDesignTokens.focusAnimationDuration,
-    height: 128,
-    padding: const EdgeInsets.all(15),
+    height: 126,
+    padding: const EdgeInsets.all(13),
     decoration: BoxDecoration(
       gradient: LinearGradient(
         begin: Alignment.centerLeft,
         end: Alignment.centerRight,
         colors: focused
-            ? const [Color(0xFF2B2417), Color(0xFF0D1014)]
-            : const [Color(0xCC090B0E), Color(0x9907090C)],
+            ? const [Color(0xFF302719), Color(0xF0111820)]
+            : const [Color(0xE80D1319), Color(0xD9070A0E)],
       ),
-      borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
+      borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
       border: Border.all(
         color: focused
             ? TvDesignTokens.goldSoft
@@ -465,11 +402,12 @@ class _DownloadRow extends StatelessWidget {
     child: Row(
       children: [
         Container(
-          width: 70,
+          width: 74,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: const Color(0xFF040506),
             borderRadius: BorderRadius.circular(TvDesignTokens.chromeRadius),
+            border: Border.all(color: Colors.white10),
           ),
           child: Icon(
             record.playable
@@ -565,45 +503,11 @@ class _RowAction extends StatelessWidget {
   final bool enabled;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    decoration: BoxDecoration(
-      color: !enabled
-          ? Colors.white10
-          : focused
-          ? TvDesignTokens.goldSoft
-          : const Color(0xAA040506),
-      borderRadius: BorderRadius.circular(999),
-      border: Border.all(
-        color: focused ? Colors.white : TvDesignTokens.panelBorderSoft,
-        width: focused ? 2 : 1,
-      ),
-    ),
-    child: Row(
-      children: [
-        Icon(
-          icon,
-          color: !enabled
-              ? Colors.white30
-              : focused
-              ? const Color(0xFF090806)
-              : Colors.white,
-          size: 19,
-        ),
-        const SizedBox(width: 8),
-        Text(
-          label,
-          style: TextStyle(
-            color: !enabled
-                ? Colors.white30
-                : focused
-                ? const Color(0xFF090806)
-                : Colors.white,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ],
-    ),
+  Widget build(BuildContext context) => TvActionPill(
+    label: label,
+    icon: icon,
+    focused: focused,
+    enabled: enabled,
   );
 }
 

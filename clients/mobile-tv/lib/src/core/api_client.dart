@@ -136,6 +136,11 @@ class ApiClient {
     return utf8.decode(response.bodyBytes);
   }
 
+  Future<List<int>> getBytes(String path) async {
+    final response = await _send('GET', path, retryAfterRefresh: true);
+    return response.bodyBytes;
+  }
+
   Future<Map<String, dynamic>> login({
     required String email,
     required String password,

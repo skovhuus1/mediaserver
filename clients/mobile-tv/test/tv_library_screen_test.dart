@@ -54,13 +54,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       FocusManager.instance.primaryFocus?.debugLabel,
-      'tv-library-item-10',
+      'tv-library-item-9',
     );
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(
       FocusManager.instance.primaryFocus?.debugLabel,
-      'tv-library-item-10',
+      'tv-library-item-9',
     );
 
     expect(library.requestedPages, [1, 2]);

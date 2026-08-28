@@ -1364,9 +1364,24 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
               width: 292,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0x99040506),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF263747)),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xD8141A21), Color(0xE607090D)],
+                ),
+                borderRadius: BorderRadius.circular(
+                  TvDesignTokens.panelRadius,
+                ),
+                border: Border.all(
+                  color: TvDesignTokens.panelBorderSoft,
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x66000000),
+                    blurRadius: 20,
+                    offset: Offset(0, 9),
+                  ),
+                ],
               ),
               child: Column(
                 children: [
@@ -1399,13 +1414,26 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Sæsoner og afsnit',
-            style: TextStyle(
-              fontSize: TvDesignTokens.sectionTitleSize - 2,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: TvDesignTokens.gold,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(width: 9),
+              const Text(
+                'Sæsoner og afsnit',
+                style: TextStyle(
+                  fontSize: TvDesignTokens.sectionTitleSize,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           SingleChildScrollView(
@@ -1597,7 +1625,7 @@ class _TvPersonCardState extends State<_TvPersonCard> {
       },
       child: GestureDetector(
         onTap: widget.onPressed,
-        child: AnimatedContainer(
+          child: AnimatedContainer(
           duration: TvDesignTokens.focusAnimationDuration,
           width: 106,
           padding: const EdgeInsets.all(7),
@@ -1948,7 +1976,7 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
                 ? const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xFF2A2214), Color(0xFF141A21)],
+                    colors: [Color(0xFF332918), Color(0xFF151D25)],
                   )
                 : active
                 ? const LinearGradient(
@@ -1988,7 +2016,7 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
                     : const Color(0x99FFE8A3),
               ),
               SizedBox(
-                width: 170,
+                width: 190,
                 height: double.infinity,
                 child: Stack(
                   fit: StackFit.expand,
@@ -1997,10 +2025,11 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
                       Image.network(
                         still,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                        errorBuilder: (_, _, _) =>
+                            const _TvEpisodeArtworkFallback(),
                       )
                     else
-                      const ColoredBox(color: Color(0xFF182939)),
+                      const _TvEpisodeArtworkFallback(),
                     const Center(
                       child: Icon(
                         Icons.play_circle_fill_rounded,
@@ -2081,6 +2110,42 @@ class _TvEpisodeTileState extends State<_TvEpisodeTile> {
       ),
     );
   }
+}
+
+class _TvEpisodeArtworkFallback extends StatelessWidget {
+  const _TvEpisodeArtworkFallback();
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
+    children: [
+      const DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF2C3E4D), Color(0xFF111820), Color(0xFF3A2B18)],
+          ),
+        ),
+      ),
+      Positioned(
+        right: -18,
+        top: -24,
+        child: Icon(
+          Icons.movie_filter_rounded,
+          size: 108,
+          color: Colors.white.withValues(alpha: 0.08),
+        ),
+      ),
+      const Center(
+        child: Icon(
+          Icons.play_circle_outline_rounded,
+          size: 44,
+          color: Color(0xCCFFE8A3),
+        ),
+      ),
+    ],
+  );
 }
 
 void _ensureVisible(BuildContext context) {

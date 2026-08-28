@@ -8,6 +8,7 @@ import '../../core/api_client.dart';
 import '../../shared_core/live_tv_recording_contract.dart';
 import '../../shared_core/playback/recording_playback_controller.dart';
 import '../../shared_core/ui_tokens/tv_design_tokens.dart';
+import '../widgets/tv_premium_layout.dart';
 
 class TvRecordingsScreen extends StatefulWidget {
   const TvRecordingsScreen({required this.api, this.recordings, super.key});
@@ -195,45 +196,74 @@ class _TvRecordingsScreenState extends State<TvRecordingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Optagelser')),
-      body: Focus(
-        focusNode: _root,
-        onKeyEvent: _key,
-        child: _loading && _items.isEmpty
-            ? const Center(child: CircularProgressIndicator())
-            : ListView.separated(
-                padding: const EdgeInsets.all(
-                  TvDesignTokens.pageHorizontalPadding,
-                ),
-                itemCount: _items.length + 1,
-                separatorBuilder: (_, _) => const SizedBox(height: 12),
-                itemBuilder: (_, index) {
-                  if (index == 0) {
-                    return _RecordingTile(
-                      focusNode: _nodes[index],
-                      focused: _selected == index,
-                      icon: Icons.refresh_rounded,
-                      title: 'Opdater optagelser',
-                      subtitle: _error ?? '${_items.length} optagelser',
-                    );
-                  }
-                  final item = _items[index - 1];
-                  return _RecordingTile(
-                    focusNode: _nodes[index],
-                    focused: _selected == index,
-                    icon: item.ready
-                        ? Icons.play_circle_outline
-                        : item.cancellable
-                        ? Icons.fiber_manual_record
-                        : Icons.error_outline,
-                    title: item.title,
-                    subtitle:
-                        '${item.channelName} · ${item.statusLabel} · ${_date(item.startsAt)}',
-                    progress: item.status == 'recording' ? item.progress : null,
-                  );
-                },
-              ),
+    final active = _items.where((item) => item.status == 'recording').length;
+    return TvPageScaffold(
+      focusNode: _root,
+      autofocus: true,
+      onKeyEvent: _key,
+      eyebrow: 'LIVE TV',
+      title: 'Optagelser',
+      subtitle: 'Planlagte, aktive og færdige TV-optagelser',
+      icon: Icons.video_library_rounded,
+      trailing: TvStatusPill(
+        label: active > 0
+            ? '$active optager nu'
+            : '${_items.length} optagelser',
+        icon: active > 0
+            ? Icons.fiber_manual_record_rounded
+            : Icons.inventory_2_outlined,
+        emphasized: active > 0,
+      ),
+      body: Column(
+        children: [
+          if (_error != null) ...[
+            TvInlineNotice(message: _error!, error: true),
+            const SizedBox(height: 12),
+          ],
+          Expanded(
+            child: _loading && _items.isEmpty
+                ? const TvStateView(
+                    icon: Icons.video_library_rounded,
+                    title: 'Henter optagelser',
+                    message: 'Synkroniserer optagelsesbiblioteket.',
+                    busy: true,
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    itemCount: _items.length + 1,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: 9),
+                    itemBuilder: (_, index) {
+                      if (index == 0) {
+                        return _RecordingTile(
+                          focusNode: _nodes[index],
+                          focused: _selected == index,
+                          icon: Icons.refresh_rounded,
+                          title: 'Opdatér optagelser',
+                          subtitle:
+                              'Hent seneste status fra TV-serveren',
+                        );
+                      }
+                      final item = _items[index - 1];
+                      return _RecordingTile(
+                        focusNode: _nodes[index],
+                        focused: _selected == index,
+                        icon: item.ready
+                            ? Icons.play_circle_fill_rounded
+                            : item.cancellable
+                            ? Icons.fiber_manual_record_rounded
+                            : Icons.error_outline_rounded,
+                        title: item.title,
+                        subtitle:
+                            '${item.channelName}  ·  ${item.statusLabel}  ·  ${_date(item.startsAt)}',
+                        progress: item.status == 'recording'
+                            ? item.progress
+                            : null,
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -262,26 +292,52 @@ class _RecordingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AnimatedScale(
-    scale: focused ? 1.015 : 1,
+    scale: focused ? 1.018 : 1,
     duration: TvDesignTokens.focusAnimationDuration,
     child: InkWell(
       focusNode: focusNode,
       onTap: focusNode.requestFocus,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
       child: AnimatedContainer(
         duration: TvDesignTokens.focusAnimationDuration,
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         decoration: BoxDecoration(
-          color: focused ? const Color(0xFF17130D) : const Color(0xFF090B0E),
-          borderRadius: BorderRadius.circular(8),
+          gradient: LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: focused
+                ? const [Color(0xFF302719), Color(0xF0111820)]
+                : const [Color(0xE80D1319), Color(0xD9070A0E)],
+          ),
+          borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
           border: Border.all(
-            color: focused ? const Color(0xFFFFF4D0) : const Color(0xFF332D21),
+            color: focused
+                ? TvDesignTokens.goldSoft
+                : TvDesignTokens.panelBorderSoft,
             width: focused ? TvDesignTokens.focusBorderWidth : 1,
           ),
+          boxShadow: focused
+              ? const [
+                  BoxShadow(
+                    color: Color(0x44000000),
+                    blurRadius: 20,
+                    offset: Offset(0, 9),
+                  ),
+                ]
+              : const [],
         ),
         child: Row(
           children: [
-            Icon(icon, size: 34, color: const Color(0xFFF7C35F)),
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: TvDesignTokens.gold.withValues(alpha: 0.11),
+                border: Border.all(color: const Color(0x33FFC857)),
+              ),
+              child: Icon(icon, size: 25, color: TvDesignTokens.goldSoft),
+            ),
             const SizedBox(width: 18),
             Expanded(
               child: Column(
@@ -298,12 +354,23 @@ class _RecordingTile extends StatelessWidget {
                   Text(subtitle, style: const TextStyle(color: Colors.white60)),
                   if (progress != null) ...[
                     const SizedBox(height: 10),
-                    LinearProgressIndicator(value: progress!.clamp(0, 1)),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        minHeight: 4,
+                        value: progress!.clamp(0, 1),
+                        backgroundColor: Colors.white10,
+                        color: TvDesignTokens.cyan,
+                      ),
+                    ),
                   ],
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: focused ? TvDesignTokens.goldSoft : Colors.white30,
+            ),
           ],
         ),
       ),

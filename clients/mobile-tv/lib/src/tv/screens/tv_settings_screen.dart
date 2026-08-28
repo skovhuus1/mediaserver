@@ -6,10 +6,10 @@ import 'package:flutter/services.dart';
 import '../../core/api_client.dart';
 import '../../core/app_config.dart';
 import '../../core/app_update_service.dart';
-import '../../core/brand_theme.dart';
 import '../../shared_core/client_preferences_contract.dart';
 import '../../shared_core/playback/playback_tuning.dart';
 import '../../shared_core/ui_tokens/tv_design_tokens.dart';
+import '../widgets/tv_premium_layout.dart';
 
 class TvSettingsScreen extends StatefulWidget {
   const TvSettingsScreen({required this.api, this.preferences, super.key});
@@ -550,226 +550,201 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
   Widget build(BuildContext context) {
     final options = _options;
     _option = _option.clamp(0, options.length - 1);
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Focus(
-        focusNode: _root,
-        autofocus: true,
-        onKeyEvent: _handleKey,
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: TvDesignTokens.pageHorizontalPadding,
-              vertical: TvDesignTokens.pageVerticalPadding,
+    return TvPageScaffold(
+      focusNode: _root,
+      autofocus: true,
+      onKeyEvent: _handleKey,
+      eyebrow: 'PERSONLIG TILPASNING',
+      title: 'Indstillinger',
+      subtitle: _categoryDescription(_category),
+      icon: Icons.tune_rounded,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_saving) ...[
+            const SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: TvDesignTokens.gold.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: TvDesignTokens.gold.withValues(alpha: 0.26),
-                        ),
-                      ),
-                      child: const Text(
-                        'TV',
-                        style: TextStyle(
-                          color: TvDesignTokens.goldSoft,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.4,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    const Text(
-                      'Indstillinger',
-                      style: TextStyle(
-                        fontSize: 34,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const Spacer(),
-                    const Text(
-                      '↑↓ vælg · ←→ justér · OK gem/aktivér',
-                      style: TextStyle(
-                        color: TvDesignTokens.textMuted,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-                if (_message != null || _error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Text(
-                      _error ?? _message!,
-                      style: TextStyle(
-                        color: _error == null
-                            ? BoltColors.success
-                            : BoltColors.error,
-                      ),
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    _categoryDescription(_category),
-                    style: const TextStyle(
-                      color: TvDesignTokens.textMuted,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 22),
-                Expanded(
-                  child: _loading
-                      ? const Center(child: CircularProgressIndicator())
-                      : Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Container(
-                              width: 282,
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    Color(0xE80E141C),
-                                    Color(0xE806090D),
-                                  ],
-                                ),
-                                borderRadius: BorderRadius.circular(
-                                  TvDesignTokens.panelRadius,
-                                ),
-                                border: Border.all(
-                                  color: TvDesignTokens.panelBorderSoft,
-                                ),
-                              ),
-                              child: ListView.separated(
-                                itemCount: _categories.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(height: 10),
-                                itemBuilder: (_, index) {
-                                  final focused =
-                                      !_inOptions && index == _category;
-                                  final selected = index == _category;
-                                  return _settingsTile(
-                                    focused: focused,
-                                    selected: selected,
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          _categoryIcon(index),
-                                          color: selected
-                                              ? TvDesignTokens.goldSoft
-                                              : TvDesignTokens.textMuted,
-                                          size: 22,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Text(
-                                            _categories[index],
-                                            style: TextStyle(
-                                              fontSize: 17,
-                                              fontWeight: selected
-                                                  ? FontWeight.w900
-                                                  : FontWeight.w600,
+            const SizedBox(width: 10),
+          ],
+          const TvStatusPill(
+            label: '↑↓ vælg  ·  ←→ justér  ·  OK aktivér',
+            icon: Icons.gamepad_outlined,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (_message != null || _error != null) ...[
+            TvInlineNotice(
+              message: _error ?? _message!,
+              error: _error != null,
+            ),
+            const SizedBox(height: 12),
+          ],
+          Expanded(
+            child: _loading
+                ? const TvStateView(
+                    icon: Icons.tune_rounded,
+                    title: 'Henter indstillinger',
+                    message: 'Indlæser profil- og enhedsvalg.',
+                    busy: true,
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TvPanel(
+                        width: TvDesignTokens.contentRailWidth,
+                        padding: const EdgeInsets.all(9),
+                        child: ListView.separated(
+                          itemCount: _categories.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (_, index) {
+                            final focused =
+                                !_inOptions && index == _category;
+                            final selected = index == _category;
+                            return _settingsTile(
+                              focused: focused,
+                              selected: selected,
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 34,
+                                    height: 34,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: selected
+                                          ? TvDesignTokens.gold.withValues(
+                                              alpha: 0.13,
+                                            )
+                                          : Colors.white.withValues(
+                                              alpha: 0.035,
                                             ),
-                                          ),
-                                        ),
-                                      ],
                                     ),
-                                  );
-                                },
+                                    child: Icon(
+                                      _categoryIcon(index),
+                                      color: selected
+                                          ? TvDesignTokens.goldSoft
+                                          : TvDesignTokens.textMuted,
+                                      size: 19,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 11),
+                                  Expanded(
+                                    child: Text(
+                                      _categories[index],
+                                      style: TextStyle(
+                                        fontSize: 15.5,
+                                        fontWeight: selected
+                                            ? FontWeight.w900
+                                            : FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  if (selected)
+                                    const Icon(
+                                      Icons.chevron_right_rounded,
+                                      size: 18,
+                                      color: TvDesignTokens.goldSoft,
+                                    ),
+                                ],
                               ),
-                            ),
-                            const SizedBox(width: 22),
-                            Expanded(
-                              child: Container(
-                                padding: const EdgeInsets.all(18),
-                                decoration: BoxDecoration(
-                                  gradient: const LinearGradient(
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                    colors: [
-                                      Color(0xF0121821),
-                                      Color(0xE807090D),
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(
-                                    TvDesignTokens.panelRadius,
-                                  ),
-                                  border: Border.all(
-                                    color: TvDesignTokens.panelBorderSoft,
-                                  ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Color(0x88000000),
-                                      blurRadius: 30,
-                                      offset: Offset(0, 16),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 18),
+                      Expanded(
+                        child: TvPanel(
+                          padding: const EdgeInsets.all(15),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    _categories[_category],
+                                    style: const TextStyle(
+                                      fontSize: 23,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.3,
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                  const Spacer(),
+                                  TvStatusPill(
+                                    label: '${options.length} valg',
+                                    icon: Icons.tune_rounded,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Expanded(
                                 child: ListView.separated(
                                   itemCount: options.length,
                                   separatorBuilder: (_, _) =>
-                                      const SizedBox(height: 12),
+                                      const SizedBox(height: 8),
                                   itemBuilder: (_, index) {
                                     final option = options[index];
                                     return _settingsTile(
-                                      focused: _inOptions && index == _option,
+                                      focused:
+                                          _inOptions && index == _option,
                                       selected: false,
                                       child: Row(
                                         children: [
                                           Icon(
                                             option.icon,
                                             color: TvDesignTokens.gold,
-                                            size: 22,
+                                            size: 20,
                                           ),
-                                          const SizedBox(width: 14),
+                                          const SizedBox(width: 13),
                                           Expanded(
                                             child: Text(
                                               option.label,
                                               style: const TextStyle(
-                                                fontSize: 17,
+                                                fontSize: 15.5,
                                                 fontWeight: FontWeight.w700,
                                               ),
                                             ),
                                           ),
                                           if (option.onLeft != null)
                                             const Icon(
-                                              Icons.chevron_left,
+                                              Icons.chevron_left_rounded,
                                               color: Colors.white38,
                                             ),
-                                          ConstrainedBox(
+                                          Container(
                                             constraints: const BoxConstraints(
                                               minWidth: 142,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 7,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withValues(
+                                                alpha: 0.045,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                              border: Border.all(
+                                                color: Colors.white10,
+                                              ),
                                             ),
                                             child: Text(
                                               option.value,
                                               textAlign: TextAlign.center,
                                               style: const TextStyle(
-                                                color: TvDesignTokens.goldSoft,
-                                                fontSize: 16,
+                                                color:
+                                                    TvDesignTokens.goldSoft,
+                                                fontSize: 14,
                                                 fontWeight: FontWeight.w900,
                                               ),
                                             ),
                                           ),
                                           if (option.onRight != null)
                                             const Icon(
-                                              Icons.chevron_right,
+                                              Icons.chevron_right_rounded,
                                               color: Colors.white38,
                                             ),
                                         ],
@@ -778,14 +753,14 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
                                   },
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                ),
-              ],
-            ),
+                      ),
+                    ],
+                  ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -795,11 +770,11 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
     required bool selected,
     required Widget child,
   }) => AnimatedScale(
-    scale: focused ? 1.025 : 1,
+    scale: focused ? 1.018 : 1,
     duration: TvDesignTokens.focusAnimationDuration,
     child: AnimatedContainer(
       duration: TvDesignTokens.focusAnimationDuration,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
         gradient: focused
             ? const LinearGradient(

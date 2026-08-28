@@ -55,6 +55,7 @@ void main() {
     '10-recordings.png',
     '11-profiles.png',
     '12-login.png',
+    '14-player-info.png',
   ];
   final requested = Platform.environment['BB_TV_PREVIEW_SCREEN']?.trim();
   final files = requested == null || requested.isEmpty
@@ -167,6 +168,53 @@ Widget _previewWidget(String fileName) {
             subtitle: 'Tekstspor',
             icon: Icons.subtitles_rounded,
             selected: false,
+          ),
+        ],
+      );
+    case '14-player-info.png':
+      return const TvPlaybackInfoOverlay(
+        playbackTitle: 'Sommer',
+        playbackSubtitle: 'Sæson 2, episode 4',
+        rows: [
+          TvPlaybackInfoRow(
+            icon: Icons.memory_rounded,
+            label: 'Stream',
+            value: 'Transkodning',
+          ),
+          TvPlaybackInfoRow(
+            icon: Icons.high_quality_rounded,
+            label: 'Aktuel kvalitet',
+            value: '1080p · Server',
+          ),
+          TvPlaybackInfoRow(
+            icon: Icons.video_settings_rounded,
+            label: 'Kilde',
+            value: '2160p · 24,8 Mbps',
+          ),
+          TvPlaybackInfoRow(
+            icon: Icons.network_check_rounded,
+            label: 'Buffer foran',
+            value: '12:28 · til 31:00',
+          ),
+          TvPlaybackInfoRow(
+            icon: Icons.audiotrack_rounded,
+            label: 'Lyd',
+            value: 'Dansk 5.1',
+          ),
+          TvPlaybackInfoRow(
+            icon: Icons.subtitles_rounded,
+            label: 'Undertekster',
+            value: 'Dansk · normal timing',
+          ),
+          TvPlaybackInfoRow(
+            icon: Icons.auto_fix_high_rounded,
+            label: 'Opskalering',
+            value: 'TV',
+          ),
+          TvPlaybackInfoRow(
+            icon: Icons.speed_rounded,
+            label: 'Hastighed',
+            value: '1.00x',
           ),
         ],
       );

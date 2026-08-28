@@ -8,6 +8,7 @@ import '../core/api_client.dart';
 import '../core/brand_theme.dart';
 import '../core/models.dart';
 import '../shared_core/ui_tokens/tv_design_tokens.dart';
+import '../tv/widgets/tv_motion_preview.dart';
 
 class MediaPosterCard extends StatefulWidget {
   const MediaPosterCard({
@@ -219,10 +220,23 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                           Image.network(
                             image,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => const _PosterFallback(),
+                            errorBuilder: (_, _, _) => _PosterFallback(
+                              title: media.displayTitle,
+                              series: media.isSeries || media.isEpisode,
+                            ),
                           )
                         else
-                          const _PosterFallback(),
+                          _PosterFallback(
+                            title: media.displayTitle,
+                            series: media.isSeries || media.isEpisode,
+                          ),
+                        if (widget.isTv && _focused)
+                          Positioned.fill(
+                            child: TvMotionPreviewAnchor(
+                              api: widget.api,
+                              media: media,
+                            ),
+                          ),
                         if (media.is4k || media.isHdr || media.isEpisode)
                           Positioned(
                             left: 8,
@@ -243,6 +257,74 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                             right: 8,
                             top: 8,
                             child: _CountBadge(media.badgeCount!),
+                          ),
+                        if (widget.isTv && _focused)
+                          Positioned(
+                            left: 12,
+                            right: 12,
+                            top: 0,
+                            child: Container(
+                              height: 3,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(999),
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Colors.transparent,
+                                    TvDesignTokens.goldSoft,
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (widget.isTv && _focused)
+                          Positioned(
+                            right: 9,
+                            bottom: 9,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: const Color(0xE6121820),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: TvDesignTokens.luxuryGold.withValues(
+                                    alpha: 0.72,
+                                  ),
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x44000000),
+                                    blurRadius: 12,
+                                    offset: Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 9,
+                                  vertical: 5,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.radio_button_checked_rounded,
+                                      size: 13,
+                                      color: TvDesignTokens.luxuryGold,
+                                    ),
+                                    SizedBox(width: 5),
+                                    Text(
+                                      'OK Åbn · Hold Flere',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.25,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
                         if (_focused && !widget.isTv)
                           Positioned(
@@ -395,6 +477,9 @@ class _MediaPosterCardState extends State<MediaPosterCard> {
                                 fontSize: widget.isTv ? 13.2 : 14,
                                 height: 1.08,
                                 letterSpacing: widget.isTv ? -0.1 : 0,
+                                color: widget.isTv && _focused
+                                    ? TvDesignTokens.goldSoft
+                                    : Colors.white,
                               ),
                             ),
                             SizedBox(height: widget.isTv ? 2 : 6),
@@ -552,34 +637,102 @@ class _CountBadge extends StatelessWidget {
 }
 
 class _PosterFallback extends StatelessWidget {
-  const _PosterFallback();
+  const _PosterFallback({required this.title, required this.series});
+
+  final String title;
+  final bool series;
 
   @override
-  Widget build(BuildContext context) => Stack(
-    fit: StackFit.expand,
-    children: [
-      const DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF2A200D), Color(0xFF060708), Color(0xFF11202A)],
-            stops: [0, 0.52, 1],
+  Widget build(BuildContext context) {
+    const palettes = [
+      [Color(0xFF473117), Color(0xFF10141A), Color(0xFF173544)],
+      [Color(0xFF233C36), Color(0xFF0B1116), Color(0xFF3A2418)],
+      [Color(0xFF29334B), Color(0xFF0B0E13), Color(0xFF422434)],
+      [Color(0xFF40311C), Color(0xFF101217), Color(0xFF203E35)],
+    ];
+    final colors = palettes[title.hashCode.abs() % palettes.length];
+    final initial = title.trim().isEmpty ? 'B' : title.trim()[0].toUpperCase();
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: colors,
+              stops: const [0, 0.54, 1],
+            ),
           ),
         ),
-      ),
-      Positioned(
-        right: -26,
-        bottom: -22,
-        child: Icon(
-          Icons.movie_creation_outlined,
-          size: 96,
-          color: Colors.white.withValues(alpha: 0.06),
+        Positioned(
+          right: -42,
+          top: -34,
+          child: Transform.rotate(
+            angle: -0.28,
+            child: Container(
+              width: 112,
+              height: 216,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(56),
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.white.withValues(alpha: 0.16),
+                    Colors.white.withValues(alpha: 0.015),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
-      ),
-      const Center(
-        child: Icon(Icons.movie_outlined, size: 42, color: Color(0x70FFF4D0)),
-      ),
-    ],
-  );
+        Positioned(
+          left: -18,
+          bottom: -28,
+          child: Text(
+            initial,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.055),
+              fontSize: 128,
+              height: 0.8,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        Center(
+          child: Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0x5A05070A),
+              border: Border.all(color: const Color(0x55FFE8A3)),
+              boxShadow: const [
+                BoxShadow(color: Color(0x66000000), blurRadius: 20),
+              ],
+            ),
+            child: Icon(
+              series ? Icons.tv_rounded : Icons.movie_filter_rounded,
+              size: 28,
+              color: const Color(0xCCFFE8A3),
+            ),
+          ),
+        ),
+        const Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 32,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.transparent, Color(0x99000000)],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }

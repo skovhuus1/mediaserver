@@ -1365,17 +1365,17 @@ class _FeaturedChannelLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    width: 80,
-    height: 80,
-    padding: const EdgeInsets.all(8),
+    width: 82,
+    height: 82,
+    padding: const EdgeInsets.all(9),
     decoration: BoxDecoration(
       gradient: const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFF26313C), Color(0xFF111820)],
+        colors: [Color(0xFF2A3540), Color(0xFF0E151C)],
       ),
-      borderRadius: BorderRadius.circular(9),
-      border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: const Color(0x55FFE8A3)),
       boxShadow: const [
         BoxShadow(
           color: Color(0x66000000),
@@ -1415,12 +1415,12 @@ class _FeaturedProgramPlate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    width: 226,
-    height: 80,
+    width: 244,
+    height: 82,
     clipBehavior: Clip.antiAlias,
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(9),
-      border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: const Color(0x44FFE8A3)),
       boxShadow: const [
         BoxShadow(
           color: Color(0x66000000),
@@ -1438,8 +1438,8 @@ class _FeaturedProgramPlate extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                TvDesignTokens.gold.withValues(alpha: 0.30),
-                TvDesignTokens.cyan.withValues(alpha: 0.14),
+                TvDesignTokens.gold.withValues(alpha: 0.34),
+                TvDesignTokens.cyan.withValues(alpha: 0.17),
                 const Color(0xFF0A0F15),
               ],
             ),
@@ -1540,12 +1540,13 @@ class _ChannelLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    width: 28,
-    height: 28,
-    padding: const EdgeInsets.all(3),
+    width: 30,
+    height: 30,
+    padding: const EdgeInsets.all(4),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(7),
+      borderRadius: BorderRadius.circular(9),
+      border: Border.all(color: Colors.white24),
     ),
     child: channel.logoUrl == null
         ? const Icon(Icons.live_tv, color: Color(0xFF17130D))

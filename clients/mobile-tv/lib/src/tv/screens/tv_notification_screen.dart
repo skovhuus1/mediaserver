@@ -7,6 +7,7 @@ import '../../core/api_client.dart';
 import '../../core/brand_theme.dart';
 import '../../shared_core/notification_contract.dart';
 import '../../shared_core/ui_tokens/tv_design_tokens.dart';
+import '../widgets/tv_premium_layout.dart';
 
 class TvNotificationScreen extends StatefulWidget {
   const TvNotificationScreen({
@@ -143,263 +144,244 @@ class _TvNotificationScreenState extends State<TvNotificationScreen> {
   @override
   Widget build(BuildContext context) {
     final selected = _items.elementAtOrNull(_index);
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Focus(
-        focusNode: _root,
-        autofocus: true,
-        onKeyEvent: _handleKey,
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: TvDesignTokens.pageHorizontalPadding,
-              vertical: TvDesignTokens.pageVerticalPadding,
+    final unread = _notifications.unreadCount(_items);
+    return TvPageScaffold(
+      focusNode: _root,
+      autofocus: true,
+      onKeyEvent: _handleKey,
+      eyebrow: 'AKTIVITET',
+      title: 'Notifikationer',
+      subtitle: 'Beskeder, statusændringer og nye hændelser',
+      icon: Icons.notifications_rounded,
+      trailing: TvStatusPill(
+        label: unread == 1 ? '1 ulæst' : '$unread ulæste',
+        icon: unread > 0
+            ? Icons.notifications_active_rounded
+            : Icons.done_all_rounded,
+        emphasized: unread > 0,
+      ),
+      footer: _items.isEmpty
+          ? null
+          : Align(
+              alignment: Alignment.centerLeft,
+              child: TvActionPill(
+                label: 'Markér alle som læst',
+                icon: Icons.done_all_rounded,
+                focused: _actionFocused,
+                primary: true,
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: TvDesignTokens.gold.withValues(alpha: 0.13),
-                        borderRadius: BorderRadius.circular(
-                          TvDesignTokens.chromeRadius,
-                        ),
-                        border: Border.all(
-                          color: TvDesignTokens.gold.withValues(alpha: 0.24),
-                        ),
-                      ),
-                      child: const Icon(
-                        Icons.notifications_outlined,
-                        size: 29,
-                        color: TvDesignTokens.goldSoft,
-                      ),
-                    ),
-                    const SizedBox(width: 13),
-                    const Text(
-                      'Notifikationer',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${_notifications.unreadCount(_items)} ulæste',
-                      style: const TextStyle(color: Colors.white60),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 22),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      _error!,
-                      style: const TextStyle(color: BoltColors.error),
-                    ),
-                  ),
-                Expanded(
-                  child: _loading
-                      ? const Center(child: CircularProgressIndicator())
-                      : _items.isEmpty
-                      ? const Center(child: Text('Ingen notifikationer endnu.'))
-                      : Row(
-                          children: [
-                            SizedBox(
-                              width: 500,
-                              child: ListView.separated(
-                                itemCount: _items.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(height: 9),
-                                itemBuilder: (_, index) {
-                                  final item = _items[index];
-                                  final focused =
-                                      !_actionFocused && index == _index;
-                                  return AnimatedContainer(
-                                    duration:
-                                        TvDesignTokens.focusAnimationDuration,
-                                    padding: const EdgeInsets.all(15),
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        begin: Alignment.centerLeft,
-                                        end: Alignment.centerRight,
-                                        colors: focused
-                                            ? const [
-                                                Color(0xFF2B2417),
-                                                Color(0xFF0D1014),
-                                              ]
-                                            : const [
-                                                Color(0xCC090B0E),
-                                                Color(0x9907090C),
-                                              ],
-                                      ),
-                                      borderRadius: BorderRadius.circular(
-                                        TvDesignTokens.chromeRadius,
-                                      ),
-                                      border: Border.all(
-                                        color: focused
-                                            ? TvDesignTokens.goldSoft
-                                            : TvDesignTokens.panelBorderSoft,
-                                        width: focused ? 2 : 1,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          item.unread
-                                              ? Icons.notifications_active
-                                              : Icons.notifications_none,
-                                          color: item.unread
-                                              ? BoltColors.success
-                                              : Colors.white38,
-                                        ),
-                                        const SizedBox(width: 14),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                item.title,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                  fontSize: 18,
-                                                  fontWeight: item.unread
-                                                      ? FontWeight.w900
-                                                      : FontWeight.w600,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 5),
-                                              Text(
-                                                _date(item.createdAt),
-                                                style: const TextStyle(
-                                                  color: Colors.white54,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 22),
-                            Expanded(
-                              child: Container(
-                                padding: const EdgeInsets.all(24),
+      body: Column(
+        children: [
+          if (_error != null) ...[
+            TvInlineNotice(message: _error!, error: true),
+            const SizedBox(height: 12),
+          ],
+          Expanded(
+            child: _loading
+                ? const TvStateView(
+                    icon: Icons.notifications_outlined,
+                    title: 'Henter notifikationer',
+                    message: 'Synkroniserer beskeder fra serveren.',
+                    busy: true,
+                  )
+                : _items.isEmpty
+                ? const TvStateView(
+                    icon: Icons.notifications_none_rounded,
+                    title: 'Alt er stille',
+                    message: 'Nye beskeder og statusændringer vises her.',
+                  )
+                : Row(
+                    children: [
+                      SizedBox(
+                        width: 440,
+                        child: ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          itemCount: _items.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (_, index) {
+                            final item = _items[index];
+                            final focused =
+                                !_actionFocused && index == _index;
+                            return AnimatedScale(
+                              scale: focused ? 1.018 : 1,
+                              duration:
+                                  TvDesignTokens.focusAnimationDuration,
+                              child: AnimatedContainer(
+                                duration:
+                                    TvDesignTokens.focusAnimationDuration,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 15,
+                                  vertical: 13,
+                                ),
                                 decoration: BoxDecoration(
-                                  gradient: const LinearGradient(
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                    colors: [
-                                      Color(0xF00B0F14),
-                                      Color(0xE807090C),
-                                    ],
+                                  gradient: LinearGradient(
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                    colors: focused
+                                        ? const [
+                                            Color(0xFF302719),
+                                            Color(0xF0111820),
+                                          ]
+                                        : item.unread
+                                        ? const [
+                                            Color(0xD9131A21),
+                                            Color(0xD9080C10),
+                                          ]
+                                        : const [
+                                            Color(0xB80C1117),
+                                            Color(0xA807090C),
+                                          ],
                                   ),
                                   borderRadius: BorderRadius.circular(
-                                    TvDesignTokens.panelRadius,
+                                    TvDesignTokens.chromeRadius,
                                   ),
                                   border: Border.all(
-                                    color: TvDesignTokens.panelBorderSoft,
+                                    color: focused
+                                        ? TvDesignTokens.goldSoft
+                                        : item.unread
+                                        ? const Color(0x4465C58A)
+                                        : TvDesignTokens.panelBorderSoft,
+                                    width: focused ? 2 : 1,
                                   ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Color(0x88000000),
-                                      blurRadius: 30,
-                                      offset: Offset(0, 16),
-                                    ),
-                                  ],
+                                  boxShadow: focused
+                                      ? const [
+                                          BoxShadow(
+                                            color: Color(0x44000000),
+                                            blurRadius: 18,
+                                            offset: Offset(0, 8),
+                                          ),
+                                        ]
+                                      : const [],
                                 ),
-                                child: selected == null
-                                    ? const SizedBox.shrink()
-                                    : Column(
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 38,
+                                      height: 38,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: item.unread
+                                            ? const Color(0x2265C58A)
+                                            : Colors.white.withValues(
+                                                alpha: 0.04,
+                                              ),
+                                      ),
+                                      child: Icon(
+                                        item.unread
+                                            ? Icons.notifications_active_rounded
+                                            : Icons.notifications_none_rounded,
+                                        size: 20,
+                                        color: item.unread
+                                            ? BoltColors.success
+                                            : Colors.white38,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 13),
+                                    Expanded(
+                                      child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            selected.title,
-                                            style: const TextStyle(
-                                              fontSize: 30,
-                                              fontWeight: FontWeight.w900,
+                                            item.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 16.5,
+                                              fontWeight: item.unread
+                                                  ? FontWeight.w900
+                                                  : FontWeight.w600,
                                             ),
                                           ),
-                                          const SizedBox(height: 18),
+                                          const SizedBox(height: 4),
                                           Text(
-                                            selected.body,
+                                            _date(item.createdAt),
                                             style: const TextStyle(
-                                              fontSize: 19,
-                                              height: 1.5,
-                                              color: Colors.white70,
+                                              color: TvDesignTokens.textMuted,
+                                              fontSize: 12,
                                             ),
                                           ),
-                                          const Spacer(),
-                                          if (selected.unread)
-                                            const Text(
-                                              'Tryk OK for at markere som læst',
-                                              style: TextStyle(
-                                                color: Color(0xFFF7C35F),
-                                              ),
-                                            ),
                                         ],
                                       ),
+                                    ),
+                                    if (item.unread)
+                                      const Icon(
+                                        Icons.circle,
+                                        size: 8,
+                                        color: TvDesignTokens.gold,
+                                      ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
+                            );
+                          },
                         ),
-                ),
-                const SizedBox(height: 14),
-                AnimatedContainer(
-                  duration: TvDesignTokens.focusAnimationDuration,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _actionFocused
-                        ? TvDesignTokens.goldSoft
-                        : TvDesignTokens.surfaceRaised,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: _actionFocused
-                          ? Colors.white
-                          : TvDesignTokens.panelBorderSoft,
-                      width: _actionFocused ? 2 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.done_all,
-                        color: _actionFocused
-                            ? const Color(0xFF090806)
-                            : Colors.white,
                       ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Markér alle som læst',
-                        style: TextStyle(
-                          color: _actionFocused
-                              ? const Color(0xFF090806)
-                              : Colors.white,
-                          fontWeight: FontWeight.w900,
+                      const SizedBox(width: 18),
+                      Expanded(
+                        child: TvPanel(
+                          padding: const EdgeInsets.all(26),
+                          selected: selected?.unread ?? false,
+                          child: selected == null
+                              ? const SizedBox.shrink()
+                              : Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        TvStatusPill(
+                                          label: _date(selected.createdAt),
+                                          icon: Icons.schedule_rounded,
+                                        ),
+                                        const Spacer(),
+                                        if (selected.unread)
+                                          const TvStatusPill(
+                                            label: 'Ulæst',
+                                            icon:
+                                                Icons.mark_email_unread_rounded,
+                                            emphasized: true,
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 24),
+                                    Text(
+                                      selected.title,
+                                      style: const TextStyle(
+                                        fontSize: 30,
+                                        height: 1.05,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.5,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      selected.body,
+                                      style: const TextStyle(
+                                        fontSize: 17,
+                                        height: 1.45,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    if (selected.unread)
+                                      const Text(
+                                        'OK  ·  Markér som læst',
+                                        style: TextStyle(
+                                          color: TvDesignTokens.goldSoft,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                  ],
+                                ),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
           ),
-        ),
+        ],
       ),
     );
   }

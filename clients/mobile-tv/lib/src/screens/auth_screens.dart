@@ -381,22 +381,22 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     final controls = ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: tv ? 470 : 460),
+      constraints: BoxConstraints(maxWidth: tv ? 500 : 460),
       child: Form(
         key: _form,
         child: Container(
-          padding: tv ? const EdgeInsets.all(20) : EdgeInsets.zero,
+          padding: tv ? const EdgeInsets.all(24) : EdgeInsets.zero,
           decoration: tv
               ? BoxDecoration(
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xE0111820), Color(0xC8070A0F)],
+                    colors: [Color(0xF0182029), Color(0xEA070A0F)],
                   ),
                   borderRadius: BorderRadius.circular(
                     TvDesignTokens.panelRadius,
                   ),
-                  border: Border.all(color: const Color(0x55FFE8A3)),
+                    border: Border.all(color: const Color(0x66FFE8A3)),
                   boxShadow: const [
                     BoxShadow(
                       color: Color(0x99000000),
@@ -782,15 +782,15 @@ class _TvQrLoginPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final activePairing = pairing;
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xF0121821), Color(0xE6070A0F)],
+          colors: [Color(0xF019212A), Color(0xF2070A0F)],
         ),
         borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
-        border: Border.all(color: const Color(0x55FFE8A3)),
+        border: Border.all(color: const Color(0x66FFE8A3)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x99000000),
@@ -827,10 +827,10 @@ class _TvQrLoginPanel extends StatelessWidget {
                   ),
                   border: Border.all(color: Colors.white12),
                 ),
-                child: SizedBox.square(
-                  dimension: MediaQuery.sizeOf(context).height < 800
-                      ? 156
-                      : 188,
+                    child: SizedBox.square(
+                      dimension: MediaQuery.sizeOf(context).height < 800
+                          ? 174
+                          : 204,
                   child: Center(
                     child: starting
                         ? const CircularProgressIndicator()
@@ -873,7 +873,7 @@ class _TvQrLoginPanel extends StatelessWidget {
                   child: QrImageView(
                     data: activePairing.approveUrl,
                     version: QrVersions.auto,
-                    size: MediaQuery.sizeOf(context).height < 800 ? 150 : 184,
+                    size: MediaQuery.sizeOf(context).height < 800 ? 168 : 198,
                     eyeStyle: const QrEyeStyle(
                       eyeShape: QrEyeShape.square,
                       color: Color(0xFF071018),
@@ -892,7 +892,7 @@ class _TvQrLoginPanel extends StatelessWidget {
                 activePairing.userCode,
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   color: TvDesignTokens.goldSoft,
-                  fontSize: 22,
+                    fontSize: 24,
                   letterSpacing: 3,
                   fontWeight: FontWeight.w900,
                 ),

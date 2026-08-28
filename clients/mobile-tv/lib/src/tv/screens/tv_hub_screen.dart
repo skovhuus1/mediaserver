@@ -1108,7 +1108,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
           end: Alignment.centerRight,
           colors: [
             TvDesignTokens.background.withValues(alpha: 0.99),
-            const Color(0xEE0A0D12).withValues(alpha: 0.96),
+            const Color(0xF20D131A).withValues(alpha: 0.97),
           ],
         ),
         boxShadow: expanded
@@ -1182,8 +1182,18 @@ class _TvHubScreenState extends State<TvHubScreen> {
                         horizontal: expanded ? 8 : 0,
                       ),
                       decoration: BoxDecoration(
+                        gradient: focused
+                            ? const LinearGradient(
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                                colors: [
+                                  Color(0xFF40351F),
+                                  Color(0xD8182028),
+                                ],
+                              )
+                            : null,
                         color: focused
-                            ? const Color(0xE0363023)
+                            ? null
                             : selected
                             ? const Color(0x334A3A20)
                             : Colors.transparent,
@@ -1291,9 +1301,141 @@ class _TvHubScreenState extends State<TvHubScreen> {
           ),
         ),
         const SizedBox(width: 12),
-        const Expanded(child: Divider(height: 1, color: Color(0x2230343A))),
+        const Expanded(child: Divider(height: 1, color: Color(0x33404B55))),
       ],
     ),
+  );
+
+  Widget _buildHeroArtworkFallback(MediaItem media) => Stack(
+    fit: StackFit.expand,
+    children: [
+      const DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF4A3217),
+              Color(0xFF121820),
+              Color(0xFF143645),
+            ],
+            stops: [0, 0.48, 1],
+          ),
+        ),
+      ),
+      Positioned(
+        right: 42,
+        top: -86,
+        width: 360,
+        height: 360,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                TvDesignTokens.cyan.withValues(alpha: 0.24),
+                Colors.transparent,
+              ],
+            ),
+          ),
+        ),
+      ),
+      Positioned(
+        right: 30,
+        top: 38,
+        width: 166,
+        height: 238,
+        child: Transform.rotate(
+          angle: 0.11,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0x553F6575),
+                  Color(0xAA101820),
+                  Color(0xCC080B0F),
+                ],
+              ),
+              border: Border.all(color: Colors.white10),
+            ),
+          ),
+        ),
+      ),
+      Positioned(
+        right: 142,
+        top: 22,
+        width: 174,
+        height: 260,
+        child: Transform.rotate(
+          angle: -0.10,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(26),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0x775D4525),
+                  Color(0xDD171B21),
+                  Color(0xEE080A0D),
+                ],
+              ),
+              border: Border.all(color: const Color(0x44FFE8A3)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x77000000),
+                  blurRadius: 28,
+                  offset: Offset(0, 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      Positioned(
+        right: 92,
+        top: 46,
+        width: 176,
+        height: 238,
+        child: Transform.rotate(
+          angle: -0.02,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(26),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF2A4857),
+                  Color(0xFF17212A),
+                  Color(0xFF0A0D11),
+                ],
+              ),
+              border: Border.all(color: const Color(0x66FFE8A3)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x99000000),
+                  blurRadius: 32,
+                  offset: Offset(0, 16),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Icon(
+                media.isSeries
+                    ? Icons.tv_rounded
+                    : Icons.movie_filter_rounded,
+                size: 76,
+                color: Colors.white.withValues(alpha: 0.30),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ],
   );
 
   Widget _buildHeroSection(_TvHubSection section) {
@@ -1320,11 +1462,10 @@ class _TvHubScreenState extends State<TvHubScreen> {
               imageUrl,
               fit: BoxFit.cover,
               alignment: Alignment.centerRight,
-              errorBuilder: (_, _, _) =>
-                  const ColoredBox(color: Color(0xFF17130D)),
+              errorBuilder: (_, _, _) => _buildHeroArtworkFallback(media),
             )
           else
-            const ColoredBox(color: Color(0xFF17130D)),
+            _buildHeroArtworkFallback(media),
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -1381,10 +1522,10 @@ class _TvHubScreenState extends State<TvHubScreen> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 38,
-                        height: 1.02,
+                        fontSize: 42,
+                        height: 0.98,
                         fontWeight: FontWeight.w900,
-                        letterSpacing: 0,
+                        letterSpacing: -0.8,
                       ),
                     ),
                     if (metadata.isNotEmpty) ...[
@@ -1401,11 +1542,11 @@ class _TvHubScreenState extends State<TvHubScreen> {
                     const SizedBox(height: 12),
                     Text(
                       media.overview ?? media.reason ?? 'Klar til afspilning.',
-                      maxLines: 2,
+                      maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white70,
-                        fontSize: 14,
+                        fontSize: 14.5,
                         height: 1.35,
                       ),
                     ),

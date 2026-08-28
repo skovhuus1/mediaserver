@@ -7,6 +7,7 @@ import '../../core/models.dart';
 import '../../shared_core/ui_tokens/tv_design_tokens.dart';
 import '../../state/app_controller.dart';
 import '../../widgets/brand.dart';
+import '../widgets/tv_premium_layout.dart';
 import '../tv_focus_controller.dart';
 
 typedef TvProfileSelectionHandler =
@@ -272,11 +273,30 @@ class _TvProfileScreenState extends State<TvProfileScreen> {
                     center: Alignment(-0.55, -0.75),
                     radius: 1.2,
                     colors: [
-                      Color(0xFF332A1A),
-                      Color(0xFF0E0C09),
+                      Color(0xFF392D1A),
+                      Color(0xFF10151B),
                       TvDesignTokens.background,
                     ],
                     stops: [0, 0.48, 1],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: -120,
+              bottom: -210,
+              width: 520,
+              height: 520,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        TvDesignTokens.cyan.withValues(alpha: 0.09),
+                        Colors.transparent,
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -303,6 +323,11 @@ class _TvProfileScreenState extends State<TvProfileScreen> {
                             color: Color(0xFFC5D2DD),
                           ),
                         ),
+                        Spacer(),
+                        TvStatusPill(
+                          label: 'OK vælg  ·  PIN beskyttet',
+                          icon: Icons.lock_outline_rounded,
+                        ),
                       ],
                     ),
                     const Spacer(),
@@ -312,22 +337,24 @@ class _TvProfileScreenState extends State<TvProfileScreen> {
                           const Text(
                             'Hvem ser med?',
                             style: TextStyle(
-                              fontSize: 42,
+                              fontSize: 46,
+                              height: 0.96,
                               fontWeight: FontWeight.w900,
-                              letterSpacing: 0,
+                              letterSpacing: -1.1,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 10),
                           Text(
                             user == null
                                 ? 'Vælg en profil for at fortsætte'
                                 : '${user.displayName} · vælg seerprofil',
                             style: const TextStyle(
                               color: Color(0xFFAEC0D0),
-                              fontSize: TvDesignTokens.bodyTextSize,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(height: 28),
+                          const SizedBox(height: 30),
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -344,7 +371,7 @@ class _TvProfileScreenState extends State<TvProfileScreen> {
                                       _profiles.length,
                                       (index) => Padding(
                                         padding: const EdgeInsets.symmetric(
-                                          horizontal: 11,
+                                          horizontal: 9,
                                         ),
                                         child: _TvProfileCard(
                                           focusNode: _profileNodes[index],
@@ -364,7 +391,7 @@ class _TvProfileScreenState extends State<TvProfileScreen> {
                                     ),
                             ),
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 22),
                           Wrap(
                             spacing: 14,
                             children: List.generate(
@@ -408,7 +435,15 @@ class _TvProfileScreenState extends State<TvProfileScreen> {
               const Positioned.fill(
                 child: ColoredBox(
                   color: Color(0x77000000),
-                  child: Center(child: CircularProgressIndicator()),
+                      child: Center(
+                        child: TvPanel(
+                          padding: EdgeInsets.all(24),
+                          child: SizedBox.square(
+                            dimension: 36,
+                            child: CircularProgressIndicator(strokeWidth: 2.5),
+                          ),
+                        ),
+                      ),
                 ),
               ),
           ],
@@ -766,7 +801,13 @@ class _TvProfileCardState extends State<_TvProfileCard> {
           height: TvDesignTokens.profileCardHeight,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: _focused ? const Color(0xFF332A1A) : const Color(0xCC11151B),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: _focused
+                  ? const [Color(0xFF3A2F1C), Color(0xFF151C24)]
+                  : const [Color(0xE8151B22), Color(0xE6090C10)],
+            ),
             borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
             border: Border.all(
               color: _focused
@@ -791,15 +832,27 @@ class _TvProfileCardState extends State<_TvProfileCard> {
             children: [
               Stack(
                 children: [
-                  CircleAvatar(
-                    radius: 44,
-                    backgroundColor: _profileColor(widget.profile.id),
-                    child: Text(
-                      _profileInitials(widget.profile.name),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
+                  Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: _focused
+                            ? TvDesignTokens.goldSoft
+                            : Colors.white12,
+                        width: 2,
+                      ),
+                    ),
+                    child: CircleAvatar(
+                      radius: 41,
+                      backgroundColor: _profileColor(widget.profile.id),
+                      child: Text(
+                        _profileInitials(widget.profile.name),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                     ),
                   ),
@@ -874,7 +927,7 @@ class _TvEmptyProfileCardState extends State<_TvEmptyProfileCard> {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: const Color(0xCC111D28),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
         border: Border.all(
           color: _focused ? Colors.white : const Color(0xFF304253),
           width: _focused ? TvDesignTokens.focusBorderWidth : 1,
@@ -918,8 +971,16 @@ class _TvProfileActionButtonState extends State<_TvProfileActionButton> {
         height: TvDesignTokens.actionButtonHeight,
         padding: const EdgeInsets.symmetric(horizontal: 22),
         decoration: BoxDecoration(
-          color: _focused ? const Color(0xFFE5A424) : const Color(0xFF13212E),
-          borderRadius: BorderRadius.circular(7),
+          gradient: _focused
+              ? const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFFFFF2C1), TvDesignTokens.gold],
+                )
+              : const LinearGradient(
+                  colors: [Color(0xDD151C24), Color(0xDD0A0E13)],
+                ),
+          borderRadius: BorderRadius.circular(999),
           border: Border.all(
             color: _focused ? Colors.white : const Color(0xFF34495C),
             width: _focused ? TvDesignTokens.focusBorderWidth : 1,
