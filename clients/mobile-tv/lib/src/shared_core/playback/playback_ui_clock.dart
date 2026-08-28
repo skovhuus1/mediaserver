@@ -115,3 +115,40 @@ class PlaybackUiClock {
     );
   }
 }
+
+/// Selects native Android transport state while telemetry is arriving.
+///
+/// video_player can emit a delayed paused/buffering value after ExoPlayer has
+/// already resumed. Keeping a short freshness window prevents that stale value
+/// from stopping the UI clock while still allowing the regular controller to
+/// take over when native telemetry is unavailable.
+class PlaybackNativeTelemetryGate {
+  PlaybackNativeTelemetryGate({
+    int Function()? elapsedMilliseconds,
+    this.freshness = const Duration(milliseconds: 2500),
+  }) : _elapsedMilliseconds =
+           elapsedMilliseconds ?? _processStopwatchElapsedMilliseconds;
+
+  static final Stopwatch _processStopwatch = Stopwatch()..start();
+
+  static int _processStopwatchElapsedMilliseconds() =>
+      _processStopwatch.elapsedMilliseconds;
+
+  final int Function() _elapsedMilliseconds;
+  final Duration freshness;
+  int? _lastSampleElapsedMs;
+
+  bool get isFresh {
+    final lastSample = _lastSampleElapsedMs;
+    if (lastSample == null) return false;
+    return _elapsedMilliseconds() - lastSample <= freshness.inMilliseconds;
+  }
+
+  void markSample() {
+    _lastSampleElapsedMs = _elapsedMilliseconds();
+  }
+
+  void reset() {
+    _lastSampleElapsedMs = null;
+  }
+}

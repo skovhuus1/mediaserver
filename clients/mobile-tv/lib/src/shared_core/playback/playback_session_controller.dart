@@ -341,6 +341,8 @@ class PlaybackSessionController extends ChangeNotifier
       PlaybackMaintenanceScheduler();
   final PlaybackPlatform _platform = PlaybackPlatform.instance;
   final PlaybackUiClock _uiClock = PlaybackUiClock();
+  final PlaybackNativeTelemetryGate _nativeTelemetryGate =
+      PlaybackNativeTelemetryGate();
   late final PlaybackQualityCoordinator _qualityCoordinator =
       PlaybackQualityCoordinator(platform: _platform);
   Timer? _autoQualityUnlockTimer;
@@ -573,6 +575,7 @@ class PlaybackSessionController extends ChangeNotifier
         ? math.max(directPlaySeekMs, controller.value.position.inMilliseconds)
         : math.max(0, controller.value.position.inMilliseconds);
     _latestNativeTelemetry = null;
+    _nativeTelemetryGate.reset();
     _uiClock.reset(
       positionMs: initialLocalPositionMs,
       bufferedPositionMs: initialLocalPositionMs,
@@ -620,11 +623,13 @@ class PlaybackSessionController extends ChangeNotifier
   void _onVideoChanged() {
     final controller = _video;
     if (controller == null || _disposed) return;
-    _uiClock.setTransport(
-      playing: controller.value.isPlaying,
-      buffering: controller.value.isBuffering && !controller.value.isPlaying,
-      playbackRate: controller.value.playbackSpeed,
-    );
+    if (!_nativeTelemetryGate.isFresh) {
+      _uiClock.setTransport(
+        playing: controller.value.isPlaying,
+        buffering: controller.value.isBuffering && !controller.value.isPlaying,
+        playbackRate: controller.value.playbackSpeed,
+      );
+    }
     if (controller.value.isBuffering && !_lastBuffering) {
       _stallCount += 1;
     }
@@ -676,6 +681,8 @@ class PlaybackSessionController extends ChangeNotifier
     _nextTimer = null;
     _nativeTelemetryGeneration += 1;
     _nativeTelemetryPollInFlight = false;
+    _latestNativeTelemetry = null;
+    _nativeTelemetryGate.reset();
   }
 
   void _startNativeTelemetryPolling() {
@@ -706,6 +713,7 @@ class PlaybackSessionController extends ChangeNotifier
       }
 
       _latestNativeTelemetry = telemetry;
+      _nativeTelemetryGate.markSample();
       if (telemetry.bandwidthEstimate > 0) {
         _estimatedDownlinkMbps = telemetry.bandwidthEstimate / 1000000;
       }

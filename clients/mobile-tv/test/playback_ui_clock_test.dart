@@ -77,4 +77,28 @@ void main() {
     elapsedMs = 6000;
     expect(clock.positionMs, 16000);
   });
+
+  test(
+    'native transport remains authoritative only while samples are fresh',
+    () {
+      var elapsedMs = 0;
+      final gate = PlaybackNativeTelemetryGate(
+        elapsedMilliseconds: () => elapsedMs,
+      );
+
+      expect(gate.isFresh, isFalse);
+      gate.markSample();
+      expect(gate.isFresh, isTrue);
+
+      elapsedMs = 2400;
+      expect(gate.isFresh, isTrue);
+      elapsedMs = 2600;
+      expect(gate.isFresh, isFalse);
+
+      gate.markSample();
+      expect(gate.isFresh, isTrue);
+      gate.reset();
+      expect(gate.isFresh, isFalse);
+    },
+  );
 }
