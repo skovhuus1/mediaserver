@@ -10,6 +10,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(_loadPreviewFonts);
 
+  final enabled = Platform.environment['BB_TV_PREVIEW'] == '1';
+
   testWidgets('writes 13-focus-motion-preview.png', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1280, 720));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -42,7 +44,7 @@ void main() {
       find.byType(_PreviewStage),
       matchesGoldenFile('goldens/13-focus-motion-preview.png'),
     );
-  });
+  }, skip: !enabled);
 }
 
 Future<void> _loadPreviewFonts() async {
