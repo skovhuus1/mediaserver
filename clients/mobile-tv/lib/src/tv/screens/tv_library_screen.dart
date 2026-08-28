@@ -329,9 +329,7 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
         : '${widget.label} · $category';
     return TvPageScaffold(
       title: title,
-      eyebrow: category == null || category.isEmpty
-          ? 'KATALOG'
-          : 'DISCOVERY',
+      eyebrow: category == null || category.isEmpty ? 'KATALOG' : 'DISCOVERY',
       subtitle:
           '${_state.total} titler  ·  sorteret alfabetisk  ·  hold OK for hurtigmenu',
       icon: widget.mediaType == 'movie'
@@ -373,13 +371,12 @@ class _TvLibraryScreenState extends State<TvLibraryScreen> {
                       return GridView.builder(
                         controller: _gridController,
                         padding: const EdgeInsets.fromLTRB(4, 4, 4, 18),
-                        gridDelegate:
-                            SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: _columnCount,
-                              mainAxisExtent: TvDesignTokens.cardHeight,
-                              crossAxisSpacing: TvDesignTokens.cardGap,
-                              mainAxisSpacing: TvDesignTokens.cardGap,
-                            ),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: _columnCount,
+                          mainAxisExtent: TvDesignTokens.cardHeight,
+                          crossAxisSpacing: TvDesignTokens.cardGap,
+                          mainAxisSpacing: TvDesignTokens.cardGap,
+                        ),
                         itemCount: _state.items.length,
                         itemBuilder: (_, index) => Center(
                           child: MediaPosterCard(

@@ -116,10 +116,7 @@ class TvPageScaffold extends StatelessWidget {
                   const SizedBox(height: 14),
                 ],
                 Expanded(child: body),
-                if (footer != null) ...[
-                  const SizedBox(height: 12),
-                  footer!,
-                ],
+                if (footer != null) ...[const SizedBox(height: 12), footer!],
               ],
             ),
           ),
@@ -240,10 +237,7 @@ class TvPageHeader extends StatelessWidget {
           ],
         ),
       ),
-      if (trailing != null) ...[
-        const SizedBox(width: 20),
-        trailing!,
-      ],
+      if (trailing != null) ...[const SizedBox(width: 20), trailing!],
     ],
   );
 }
@@ -455,11 +449,7 @@ class TvActionPill extends StatelessWidget {
 }
 
 class TvInlineNotice extends StatelessWidget {
-  const TvInlineNotice({
-    required this.message,
-    this.error = false,
-    super.key,
-  });
+  const TvInlineNotice({required this.message, this.error = false, super.key});
 
   final String message;
   final bool error;
@@ -533,10 +523,7 @@ class TvStateView extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-              ),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 7),
             Text(

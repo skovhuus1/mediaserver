@@ -1369,12 +1369,8 @@ class _TvTitleScreenState extends State<TvTitleScreen> {
                   end: Alignment.bottomRight,
                   colors: [Color(0xD8141A21), Color(0xE607090D)],
                 ),
-                borderRadius: BorderRadius.circular(
-                  TvDesignTokens.panelRadius,
-                ),
-                border: Border.all(
-                  color: TvDesignTokens.panelBorderSoft,
-                ),
+                borderRadius: BorderRadius.circular(TvDesignTokens.panelRadius),
+                border: Border.all(color: TvDesignTokens.panelBorderSoft),
                 boxShadow: const [
                   BoxShadow(
                     color: Color(0x66000000),
@@ -1625,7 +1621,7 @@ class _TvPersonCardState extends State<_TvPersonCard> {
       },
       child: GestureDetector(
         onTap: widget.onPressed,
-          child: AnimatedContainer(
+        child: AnimatedContainer(
           duration: TvDesignTokens.focusAnimationDuration,
           width: 106,
           padding: const EdgeInsets.all(7),

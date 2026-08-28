@@ -95,7 +95,11 @@ class _PreviewStage extends StatelessWidget {
                 gradient: RadialGradient(
                   center: Alignment(0.38, -0.28),
                   radius: 1.12,
-                  colors: [Color(0xFF142635), Color(0xFF080C11), Color(0xFF030507)],
+                  colors: [
+                    Color(0xFF142635),
+                    Color(0xFF080C11),
+                    Color(0xFF030507),
+                  ],
                 ),
               ),
             ),

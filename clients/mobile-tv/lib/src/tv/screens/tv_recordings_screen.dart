@@ -231,8 +231,7 @@ class _TvRecordingsScreenState extends State<TvRecordingsScreen> {
                 : ListView.separated(
                     padding: const EdgeInsets.only(bottom: 12),
                     itemCount: _items.length + 1,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: 9),
+                    separatorBuilder: (_, _) => const SizedBox(height: 9),
                     itemBuilder: (_, index) {
                       if (index == 0) {
                         return _RecordingTile(
@@ -240,8 +239,7 @@ class _TvRecordingsScreenState extends State<TvRecordingsScreen> {
                           focused: _selected == index,
                           icon: Icons.refresh_rounded,
                           title: 'Opdatér optagelser',
-                          subtitle:
-                              'Hent seneste status fra TV-serveren',
+                          subtitle: 'Hent seneste status fra TV-serveren',
                         );
                       }
                       final item = _items[index - 1];

@@ -59,20 +59,21 @@ class TvPreviewManifest {
     final rows = intValue(trickplay['rows']) ?? 0;
     final sheetCount = intValue(trickplay['sheetCount']) ?? 0;
     final durationMs = intValue(trickplay['durationMs']) ?? 0;
-    final cues = jsonList(trickplay['cues'])
-        .map(TvPreviewCue.fromJson)
-        .where(
-          (cue) =>
-              cue.endMs > cue.startMs &&
-              cue.sheet >= 0 &&
-              cue.sheet < sheetCount &&
-              cue.column >= 0 &&
-              cue.column < columns &&
-              cue.row >= 0 &&
-              cue.row < rows,
-        )
-        .toList(growable: false)
-      ..sort((a, b) => a.startMs.compareTo(b.startMs));
+    final cues =
+        jsonList(trickplay['cues'])
+            .map(TvPreviewCue.fromJson)
+            .where(
+              (cue) =>
+                  cue.endMs > cue.startMs &&
+                  cue.sheet >= 0 &&
+                  cue.sheet < sheetCount &&
+                  cue.column >= 0 &&
+                  cue.column < columns &&
+                  cue.row >= 0 &&
+                  cue.row < rows,
+            )
+            .toList(growable: false)
+          ..sort((a, b) => a.startMs.compareTo(b.startMs));
     if (tileWidth <= 0 ||
         tileHeight <= 0 ||
         columns <= 0 ||
@@ -116,8 +117,9 @@ class TvPreviewManifest {
 class TvPreviewContract {
   TvPreviewContract(this.api);
 
-  static final Expando<TvPreviewContract> _shared =
-      Expando<TvPreviewContract>('tv-preview-contract');
+  static final Expando<TvPreviewContract> _shared = Expando<TvPreviewContract>(
+    'tv-preview-contract',
+  );
 
   factory TvPreviewContract.shared(ApiClient api) {
     final existing = _shared[api];

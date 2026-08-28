@@ -277,8 +277,7 @@ class _TvDownloadsScreenState extends State<TvDownloadsScreen> {
                         controller: _scroll,
                         padding: const EdgeInsets.only(bottom: 12),
                         itemCount: records.length,
-                        separatorBuilder: (_, _) =>
-                            const SizedBox(height: 9),
+                        separatorBuilder: (_, _) => const SizedBox(height: 9),
                         itemBuilder: (_, index) => _DownloadRow(
                           record: records[index],
                           focused: !_topActions && index == _recordIndex,
@@ -350,12 +349,8 @@ class _TopAction extends StatelessWidget {
   final bool focused;
 
   @override
-  Widget build(BuildContext context) => TvActionPill(
-    label: label,
-    icon: icon,
-    focused: focused,
-    primary: true,
-  );
+  Widget build(BuildContext context) =>
+      TvActionPill(label: label, icon: icon, focused: focused, primary: true);
 }
 
 class _DownloadRow extends StatelessWidget {

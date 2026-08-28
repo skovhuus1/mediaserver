@@ -1186,10 +1186,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
                             ? const LinearGradient(
                                 begin: Alignment.centerLeft,
                                 end: Alignment.centerRight,
-                                colors: [
-                                  Color(0xFF40351F),
-                                  Color(0xD8182028),
-                                ],
+                                colors: [Color(0xFF40351F), Color(0xD8182028)],
                               )
                             : null,
                         color: focused
@@ -1314,11 +1311,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF4A3217),
-              Color(0xFF121820),
-              Color(0xFF143645),
-            ],
+            colors: [Color(0xFF4A3217), Color(0xFF121820), Color(0xFF143645)],
             stops: [0, 0.48, 1],
           ),
         ),
@@ -1425,9 +1418,7 @@ class _TvHubScreenState extends State<TvHubScreen> {
             ),
             child: Center(
               child: Icon(
-                media.isSeries
-                    ? Icons.tv_rounded
-                    : Icons.movie_filter_rounded,
+                media.isSeries ? Icons.tv_rounded : Icons.movie_filter_rounded,
                 size: 76,
                 color: Colors.white.withValues(alpha: 0.30),
               ),

@@ -435,15 +435,15 @@ class _TvProfileScreenState extends State<TvProfileScreen> {
               const Positioned.fill(
                 child: ColoredBox(
                   color: Color(0x77000000),
-                      child: Center(
-                        child: TvPanel(
-                          padding: EdgeInsets.all(24),
-                          child: SizedBox.square(
-                            dimension: 36,
-                            child: CircularProgressIndicator(strokeWidth: 2.5),
-                          ),
-                        ),
+                  child: Center(
+                    child: TvPanel(
+                      padding: EdgeInsets.all(24),
+                      child: SizedBox.square(
+                        dimension: 36,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
                       ),
+                    ),
+                  ),
                 ),
               ),
           ],

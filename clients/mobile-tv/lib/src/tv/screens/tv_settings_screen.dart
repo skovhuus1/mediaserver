@@ -577,10 +577,7 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
       body: Column(
         children: [
           if (_message != null || _error != null) ...[
-            TvInlineNotice(
-              message: _error ?? _message!,
-              error: _error != null,
-            ),
+            TvInlineNotice(message: _error ?? _message!, error: _error != null),
             const SizedBox(height: 12),
           ],
           Expanded(
@@ -599,11 +596,9 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
                         padding: const EdgeInsets.all(9),
                         child: ListView.separated(
                           itemCount: _categories.length,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: 8),
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
                           itemBuilder: (_, index) {
-                            final focused =
-                                !_inOptions && index == _category;
+                            final focused = !_inOptions && index == _category;
                             final selected = index == _category;
                             return _settingsTile(
                               focused: focused,
@@ -688,8 +683,7 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
                                   itemBuilder: (_, index) {
                                     final option = options[index];
                                     return _settingsTile(
-                                      focused:
-                                          _inOptions && index == _option,
+                                      focused: _inOptions && index == _option,
                                       selected: false,
                                       child: Row(
                                         children: [
@@ -735,8 +729,7 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
                                               option.value,
                                               textAlign: TextAlign.center,
                                               style: const TextStyle(
-                                                color:
-                                                    TvDesignTokens.goldSoft,
+                                                color: TvDesignTokens.goldSoft,
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.w900,
                                               ),

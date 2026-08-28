@@ -198,19 +198,15 @@ class _TvNotificationScreenState extends State<TvNotificationScreen> {
                         child: ListView.separated(
                           padding: const EdgeInsets.only(bottom: 10),
                           itemCount: _items.length,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: 8),
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
                           itemBuilder: (_, index) {
                             final item = _items[index];
-                            final focused =
-                                !_actionFocused && index == _index;
+                            final focused = !_actionFocused && index == _index;
                             return AnimatedScale(
                               scale: focused ? 1.018 : 1,
-                              duration:
-                                  TvDesignTokens.focusAnimationDuration,
+                              duration: TvDesignTokens.focusAnimationDuration,
                               child: AnimatedContainer(
-                                duration:
-                                    TvDesignTokens.focusAnimationDuration,
+                                duration: TvDesignTokens.focusAnimationDuration,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 15,
                                   vertical: 13,
@@ -327,8 +323,7 @@ class _TvNotificationScreenState extends State<TvNotificationScreen> {
                           child: selected == null
                               ? const SizedBox.shrink()
                               : Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
                                       children: [

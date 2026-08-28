@@ -396,7 +396,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   borderRadius: BorderRadius.circular(
                     TvDesignTokens.panelRadius,
                   ),
-                    border: Border.all(color: const Color(0x66FFE8A3)),
+                  border: Border.all(color: const Color(0x66FFE8A3)),
                   boxShadow: const [
                     BoxShadow(
                       color: Color(0x99000000),
@@ -827,10 +827,10 @@ class _TvQrLoginPanel extends StatelessWidget {
                   ),
                   border: Border.all(color: Colors.white12),
                 ),
-                    child: SizedBox.square(
-                      dimension: MediaQuery.sizeOf(context).height < 800
-                          ? 174
-                          : 204,
+                child: SizedBox.square(
+                  dimension: MediaQuery.sizeOf(context).height < 800
+                      ? 174
+                      : 204,
                   child: Center(
                     child: starting
                         ? const CircularProgressIndicator()
@@ -892,7 +892,7 @@ class _TvQrLoginPanel extends StatelessWidget {
                 activePairing.userCode,
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   color: TvDesignTokens.goldSoft,
-                    fontSize: 24,
+                  fontSize: 24,
                   letterSpacing: 3,
                   fontWeight: FontWeight.w900,
                 ),

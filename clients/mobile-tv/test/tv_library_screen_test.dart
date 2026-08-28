@@ -52,16 +52,10 @@ void main() {
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'tv-library-item-1');
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(
-      FocusManager.instance.primaryFocus?.debugLabel,
-      'tv-library-item-9',
-    );
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'tv-library-item-9');
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(
-      FocusManager.instance.primaryFocus?.debugLabel,
-      'tv-library-item-9',
-    );
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'tv-library-item-9');
 
     expect(library.requestedPages, [1, 2]);
     expect(find.textContaining('15 titler'), findsOneWidget);

@@ -297,8 +297,7 @@ class TvMotionPreviewChrome extends StatelessWidget {
   static String _metadata(MediaItem media) {
     final parts = <String>[
       if (media.isEpisode) media.episodeLabel,
-      if (!media.isEpisode && media.releaseYear != null)
-        '${media.releaseYear}',
+      if (!media.isEpisode && media.releaseYear != null) '${media.releaseYear}',
       if (media.is4k) '4K',
       if (media.isHdr) 'HDR',
     ];
