@@ -570,10 +570,7 @@ class PlaybackSessionController extends ChangeNotifier
     controller.addListener(_onVideoChanged);
     await controller.play();
     final initialLocalPositionMs = authorization.isDirectPlay
-        ? math.max(
-            directPlaySeekMs,
-            controller.value.position.inMilliseconds,
-          )
+        ? math.max(directPlaySeekMs, controller.value.position.inMilliseconds)
         : math.max(0, controller.value.position.inMilliseconds);
     _latestNativeTelemetry = null;
     _uiClock.reset(
@@ -625,8 +622,7 @@ class PlaybackSessionController extends ChangeNotifier
     if (controller == null || _disposed) return;
     _uiClock.setTransport(
       playing: controller.value.isPlaying,
-      buffering:
-          controller.value.isBuffering && !controller.value.isPlaying,
+      buffering: controller.value.isBuffering && !controller.value.isPlaying,
       playbackRate: controller.value.playbackSpeed,
     );
     if (controller.value.isBuffering && !_lastBuffering) {

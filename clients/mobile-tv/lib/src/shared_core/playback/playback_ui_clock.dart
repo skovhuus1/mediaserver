@@ -50,10 +50,7 @@ class PlaybackUiClock {
   }) {
     _initialized = true;
     _basePositionMs = math.max(0, positionMs);
-    _bufferedPositionMs = math.max(
-      _basePositionMs,
-      bufferedPositionMs,
-    );
+    _bufferedPositionMs = math.max(_basePositionMs, bufferedPositionMs);
     _baseElapsedMs = _elapsedMilliseconds();
     _playing = playing;
     _buffering = buffering;
