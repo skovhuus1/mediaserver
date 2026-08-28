@@ -12,6 +12,7 @@ import '../../core/webvtt.dart';
 import 'playback_maintenance_scheduler.dart';
 import 'playback_quality_coordinator.dart';
 import 'playback_tuning.dart';
+import 'playback_ui_clock.dart';
 
 const _stateUnset = Object();
 
@@ -339,6 +340,7 @@ class PlaybackSessionController extends ChangeNotifier
   final PlaybackMaintenanceScheduler _maintenanceScheduler =
       PlaybackMaintenanceScheduler();
   final PlaybackPlatform _platform = PlaybackPlatform.instance;
+  final PlaybackUiClock _uiClock = PlaybackUiClock();
   late final PlaybackQualityCoordinator _qualityCoordinator =
       PlaybackQualityCoordinator(platform: _platform);
   Timer? _autoQualityUnlockTimer;
@@ -347,6 +349,7 @@ class PlaybackSessionController extends ChangeNotifier
   Timer? _nextTimer;
   bool _nativeTelemetryPollInFlight = false;
   int _nativeTelemetryGeneration = 0;
+  NativeVideoTelemetry? _latestNativeTelemetry;
   Future<void>? _initialization;
   Future<void>? _finishOperation;
   SubtitleQueueSelection? _subtitleQueueSelection;
@@ -566,6 +569,20 @@ class PlaybackSessionController extends ChangeNotifier
     await _configureQuality(controller, authorization);
     controller.addListener(_onVideoChanged);
     await controller.play();
+    final initialLocalPositionMs = authorization.isDirectPlay
+        ? math.max(
+            directPlaySeekMs,
+            controller.value.position.inMilliseconds,
+          )
+        : math.max(0, controller.value.position.inMilliseconds);
+    _latestNativeTelemetry = null;
+    _uiClock.reset(
+      positionMs: initialLocalPositionMs,
+      bufferedPositionMs: initialLocalPositionMs,
+      playing: true,
+      buffering: false,
+      playbackRate: controller.value.playbackSpeed,
+    );
     _setKeepScreenOn(true);
     _authorization = authorization;
     final buffered = math.max(
@@ -606,6 +623,12 @@ class PlaybackSessionController extends ChangeNotifier
   void _onVideoChanged() {
     final controller = _video;
     if (controller == null || _disposed) return;
+    _uiClock.setTransport(
+      playing: controller.value.isPlaying,
+      buffering:
+          controller.value.isBuffering && !controller.value.isPlaying,
+      playbackRate: controller.value.playbackSpeed,
+    );
     if (controller.value.isBuffering && !_lastBuffering) {
       _stallCount += 1;
     }
@@ -661,14 +684,14 @@ class PlaybackSessionController extends ChangeNotifier
 
   void _startNativeTelemetryPolling() {
     final generation = ++_nativeTelemetryGeneration;
-    unawaited(_refreshNativeVideoValue(generation));
+    unawaited(_refreshNativeTelemetry(generation));
     _nativeTelemetryTimer = Timer.periodic(
-      const Duration(milliseconds: 400),
-      (_) => unawaited(_refreshNativeVideoValue(generation)),
+      const Duration(milliseconds: 750),
+      (_) => unawaited(_refreshNativeTelemetry(generation)),
     );
   }
 
-  Future<void> _refreshNativeVideoValue(int generation) async {
+  Future<void> _refreshNativeTelemetry(int generation) async {
     if (_disposed || _nativeTelemetryPollInFlight) return;
     final controller = _video;
     if (controller == null || !controller.value.isInitialized) return;
@@ -686,31 +709,18 @@ class PlaybackSessionController extends ChangeNotifier
         return;
       }
 
-      final durationMs = controller.value.duration.inMilliseconds;
-      var positionMs = telemetry.positionMs;
-      if (positionMs < 0) positionMs = 0;
-      if (durationMs > 0 && positionMs > durationMs) {
-        positionMs = durationMs;
+      _latestNativeTelemetry = telemetry;
+      if (telemetry.bandwidthEstimate > 0) {
+        _estimatedDownlinkMbps = telemetry.bandwidthEstimate / 1000000;
       }
-
-      var bufferedPositionMs = telemetry.bufferedPositionMs;
-      if (bufferedPositionMs < positionMs) {
-        bufferedPositionMs = positionMs;
-      }
-      if (durationMs > 0 && bufferedPositionMs > durationMs) {
-        bufferedPositionMs = durationMs;
-      }
-
-      controller.value = controller.value.copyWith(
-        position: Duration(milliseconds: positionMs),
-        buffered: <DurationRange>[
-          DurationRange(
-            Duration.zero,
-            Duration(milliseconds: bufferedPositionMs),
-          ),
-        ],
-        isBuffering: telemetry.playbackState == 2,
-        isPlaying: telemetry.isPlaying,
+      _uiClock.synchronize(
+        positionMs: telemetry.positionMs,
+        bufferedPositionMs: telemetry.bufferedPositionMs,
+        playing: telemetry.isPlaying,
+        buffering:
+            !telemetry.isPlaying &&
+            (telemetry.isLoading || telemetry.playbackState == 2),
+        playbackRate: controller.value.playbackSpeed,
       );
     } on TimeoutException {
       // A delayed native sample must never block later UI telemetry updates.
@@ -763,13 +773,13 @@ class PlaybackSessionController extends ChangeNotifier
     );
     _setState(
       _state.copyWith(
-        buffering: controller.value.isBuffering,
-        playing: controller.value.isPlaying,
+        buffering: _uiClock.buffering,
+        playing: _uiClock.playing,
         position: Duration(milliseconds: absolute),
         bufferedPosition: Duration(milliseconds: bufferedMs),
         duration: Duration(milliseconds: _durationMs),
         seekable: _durationMs > 0,
-        playbackRate: controller.value.playbackSpeed,
+        playbackRate: _uiClock.playbackRate,
         subtitleText: cueText,
         activeMarker: marker,
         qualityLabel: _qualityLabel,
@@ -779,7 +789,10 @@ class PlaybackSessionController extends ChangeNotifier
 
   int get _absolutePositionMs => math.max(
     0,
-    _timelineOffsetMs + (_video?.value.position.inMilliseconds ?? 0),
+    _timelineOffsetMs +
+        (_uiClock.initialized
+            ? _uiClock.positionMs
+            : (_video?.value.position.inMilliseconds ?? 0)),
   );
 
   int get _durationMs {
@@ -810,7 +823,8 @@ class PlaybackSessionController extends ChangeNotifier
     final controller = _video;
     if (auth == null || controller == null || _released) return;
     try {
-      final telemetry = await _platform.videoTelemetry();
+      final telemetry =
+          _latestNativeTelemetry ?? await _platform.videoTelemetry();
       final bandwidth = telemetry?.bandwidthEstimate ?? 0;
       if (bandwidth > 0) {
         _estimatedDownlinkMbps = bandwidth / 1000000;
@@ -818,9 +832,9 @@ class PlaybackSessionController extends ChangeNotifier
       await api.patchJson(
         '/playback/sessions/${Uri.encodeComponent(auth.sessionId)}/heartbeat',
         {
-          'runtimeState': controller.value.isBuffering
+          'runtimeState': _uiClock.buffering
               ? 'buffering'
-              : controller.value.isPlaying
+              : _uiClock.playing
               ? 'playing'
               : 'paused',
           'positionMs': _absolutePositionMs,
@@ -892,6 +906,7 @@ class PlaybackSessionController extends ChangeNotifier
   }
 
   int get _bufferAheadMs {
+    if (_uiClock.initialized) return _uiClock.bufferAheadMs;
     final controller = _video;
     if (controller == null) return 0;
     for (final range in controller.value.buffered) {
@@ -911,7 +926,11 @@ class PlaybackSessionController extends ChangeNotifier
       return false;
     }
     final streamDuration = controller.value.duration;
-    final streamPosition = controller.value.position;
+    final streamPosition = Duration(
+      milliseconds: _uiClock.initialized
+          ? _uiClock.positionMs
+          : controller.value.position.inMilliseconds,
+    );
     final remainingStreamMs =
         streamDuration.inMilliseconds - streamPosition.inMilliseconds;
     final knownDurationMs = _durationMs;
@@ -999,10 +1018,20 @@ class PlaybackSessionController extends ChangeNotifier
   Future<void> togglePlayback() async {
     final controller = _video;
     if (controller == null) return;
-    if (controller.value.isPlaying) {
+    if (_uiClock.playing) {
       await controller.pause();
+      _uiClock.setTransport(
+        playing: false,
+        buffering: false,
+        playbackRate: controller.value.playbackSpeed,
+      );
     } else {
       await controller.play();
+      _uiClock.setTransport(
+        playing: true,
+        buffering: false,
+        playbackRate: controller.value.playbackSpeed,
+      );
     }
     _tick();
   }
@@ -1019,6 +1048,12 @@ class PlaybackSessionController extends ChangeNotifier
     final target = position.inMilliseconds.clamp(0, _durationMs).toInt();
     if (auth.isDirectPlay) {
       await controller.seekTo(Duration(milliseconds: target));
+      _uiClock.seek(
+        positionMs: target,
+        playing: _state.playing,
+        buffering: false,
+        playbackRate: controller.value.playbackSpeed,
+      );
     } else {
       final local = target - _timelineOffsetMs;
       final buffered = controller.value.buffered.any(
@@ -1028,6 +1063,12 @@ class PlaybackSessionController extends ChangeNotifier
       );
       if (local >= 0 && buffered) {
         await controller.seekTo(Duration(milliseconds: local));
+        _uiClock.seek(
+          positionMs: local,
+          playing: _state.playing,
+          buffering: false,
+          playbackRate: controller.value.playbackSpeed,
+        );
       } else {
         await _reconfigure(
           target,
@@ -1575,6 +1616,11 @@ class PlaybackSessionController extends ChangeNotifier
   Future<void> setPlaybackRate(double rate) async {
     final normalized = rate.clamp(0.5, 2).toDouble();
     await _video?.setPlaybackSpeed(normalized);
+    _uiClock.setTransport(
+      playing: _uiClock.playing,
+      buffering: _uiClock.buffering,
+      playbackRate: normalized,
+    );
     _setState(_state.copyWith(playbackRate: normalized));
   }
 
