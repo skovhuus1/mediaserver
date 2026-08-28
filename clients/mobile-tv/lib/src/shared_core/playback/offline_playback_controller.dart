@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
-import '../../core/app_config.dart';
 import '../../core/offline_downloads.dart';
 import '../../core/playback_platform.dart';
 import '../offline_library_contract.dart';
@@ -97,9 +96,7 @@ class OfflinePlaybackController extends ChangeNotifier
       );
       final controller = VideoPlayerController.networkUrl(
         uri,
-        viewType: AppConfig.isTvBuild
-            ? VideoViewType.platformView
-            : VideoViewType.textureView,
+        viewType: VideoViewType.textureView,
         videoPlayerOptions: VideoPlayerOptions(allowBackgroundPlayback: true),
       );
       _video = controller;

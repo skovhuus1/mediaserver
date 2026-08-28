@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:video_player/video_player.dart';
 
-import '../../core/app_config.dart';
 import '../../core/playback_platform.dart';
 import '../live_tv_contract.dart';
 import 'playback_session_controller.dart';
@@ -103,9 +102,7 @@ class LiveTvSessionController extends ChangeNotifier
       formatHint: session.contentType.toLowerCase().contains('mpegurl')
           ? VideoFormat.hls
           : VideoFormat.other,
-      viewType: AppConfig.isTvBuild
-          ? VideoViewType.platformView
-          : VideoViewType.textureView,
+      viewType: VideoViewType.textureView,
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
     );
     _video = controller;

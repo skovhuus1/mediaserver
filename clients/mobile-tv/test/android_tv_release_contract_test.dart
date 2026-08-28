@@ -65,6 +65,31 @@ void main() {
     expect(coordinator, isNot(contains('selectVideoTrack(null)')));
   });
 
+  test('TV playback keeps video and Flutter chrome on one seamless surface', () {
+    const playbackControllers = [
+      'lib/src/shared_core/playback/playback_session_controller.dart',
+      'lib/src/shared_core/playback/live_tv_session_controller.dart',
+      'lib/src/shared_core/playback/offline_playback_controller.dart',
+      'lib/src/shared_core/playback/recording_playback_controller.dart',
+    ];
+    for (final path in playbackControllers) {
+      final source = File(path).readAsStringSync();
+      expect(source, contains('viewType: VideoViewType.textureView'));
+      expect(source, isNot(contains('VideoViewType.platformView')));
+    }
+
+    final player = File(
+      'third_party/video_player_android/android/src/main/java/io/flutter/plugins/videoplayer/VideoPlayer.java',
+    ).readAsStringSync();
+    expect(player, contains('this.boltBytesTvMode = options.boltBytesTvMode'));
+    expect(
+      player,
+      contains(
+        'dimensionsChanged && surfaceProducer != null && !boltBytesTvMode',
+      ),
+    );
+  });
+
   test('CI always couples each flavor to its explicit Dart entrypoint', () {
     final root = Directory.current.parent.parent;
     final ci = File(

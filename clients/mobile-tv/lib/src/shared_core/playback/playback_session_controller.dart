@@ -551,9 +551,7 @@ class PlaybackSessionController extends ChangeNotifier
     final controller = VideoPlayerController.networkUrl(
       api.endpoint(authorization.streamUrl),
       formatHint: authorization.isHls ? VideoFormat.hls : VideoFormat.other,
-      viewType: AppConfig.isTvBuild
-          ? VideoViewType.platformView
-          : VideoViewType.textureView,
+      viewType: VideoViewType.textureView,
       videoPlayerOptions: VideoPlayerOptions(
         mixWithOthers: false,
         allowBackgroundPlayback: true,

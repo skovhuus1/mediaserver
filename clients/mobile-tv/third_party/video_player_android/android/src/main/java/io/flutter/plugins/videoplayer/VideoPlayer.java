@@ -44,6 +44,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
   @UnstableApi @Nullable protected DefaultTrackSelector trackSelector;
 
   private final Handler mainHandler = new Handler(Looper.getMainLooper());
+  private final boolean boltBytesTvMode;
   private boolean isDisposed = false;
 
   /** A closure-compatible signature since {@link java.util.function.Supplier} is API level 24. */
@@ -77,6 +78,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
       @NonNull ExoPlayerProvider exoPlayerProvider) {
     this.videoPlayerEvents = events;
     this.surfaceProducer = surfaceProducer;
+    this.boltBytesTvMode = options.boltBytesTvMode;
     exoPlayer = exoPlayerProvider.get();
 
     // Try to get the track selector from the ExoPlayer if it was built with one
@@ -464,7 +466,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     // TODO(nateshmbhat): Remove this workaround once Media3 provides a supported
     // renderer reset path or reliable resolution-changing track switches.
     // https://github.com/flutter/flutter/issues/183824
-    if (dimensionsChanged && surfaceProducer != null) {
+    if (dimensionsChanged && surfaceProducer != null && !boltBytesTvMode) {
       final boolean wasPlaying = exoPlayer.isPlaying();
       final long currentPosition = exoPlayer.getCurrentPosition();
 
