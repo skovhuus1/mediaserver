@@ -105,7 +105,7 @@ jobs:
           "$aapt" dump badging "$output_apk" | tee "$output_dir/apk-badging.txt"
           grep -Fq "package: name='com.boltbytes.boltbytes_media.tv' versionCode='$BUILD_NUMBER' versionName='$RELEASE_VERSION'" "$output_dir/apk-badging.txt"
           grep -Fq "leanback-launchable-activity" "$output_dir/apk-badging.txt"
-          grep -Fq "uses-feature-not-required:'android.hardware.touchscreen'" "$output_dir/apk-badging.txt"
+          grep -Eq "uses-feature-not-required:( name=)?'android.hardware.touchscreen'" "$output_dir/apk-badging.txt"
 
           "$aapt" dump xmltree "$output_apk" AndroidManifest.xml | tee "$output_dir/manifest-tree.txt"
           grep -Fq "android:banner" "$output_dir/manifest-tree.txt"
@@ -124,4 +124,3 @@ jobs:
           path: release/android-tv-v1/
           if-no-files-found: error
           retention-days: 30
-
