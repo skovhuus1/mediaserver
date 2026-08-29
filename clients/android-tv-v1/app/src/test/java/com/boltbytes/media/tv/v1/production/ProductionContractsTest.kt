@@ -3,10 +3,44 @@ package com.boltbytes.media.tv.v1.production
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProductionContractsTest {
+    @Test
+    fun vodAuthorizationPayloadMatchesServerContract() {
+        val capabilities = productionPlaybackCapabilities(
+            screenHeight = 2_160,
+            devicePixelRatio = 2.0,
+            supportedCodecs = listOf("h264", "hevc"),
+            hdrEnabled = true,
+            supportsHdr = true,
+            allowUpscale = true,
+            upscaleMode = "device",
+            estimatedDownlinkMbps = 42.0,
+        )
+        val payload = productionAuthorizePayload(
+            profileId = "11111111-1111-4111-8111-111111111111",
+            mediaId = "22222222-2222-4222-8222-222222222222",
+            deviceId = "33333333-3333-4333-8333-333333333333",
+            startPositionMs = 5_000,
+            capabilities = capabilities,
+        )
+
+        assertEquals(5_000L, payload.getLong("startPositionMs"))
+        assertFalse(payload.has("startPosition"))
+        assertFalse(payload.getBoolean("isCastSession"))
+        assertTrue(capabilities.has("supportedCodecs"))
+        assertTrue(capabilities.has("supportedAudioCodecs"))
+        assertTrue(capabilities.has("supportedContainers"))
+        assertTrue(capabilities.getBoolean("supportsHdr"))
+        assertEquals("device", capabilities.getString("upscaleMode"))
+        assertFalse(capabilities.has("hdr"))
+        assertFalse(capabilities.has("qualityMode"))
+        assertFalse(capabilities.has("maxHeight"))
+    }
+
     @Test
     fun tokensParseFromNestedLoginPayload() {
         val tokens = parseTokens(

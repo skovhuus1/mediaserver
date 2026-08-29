@@ -1,6 +1,9 @@
 package com.boltbytes.media.tv.v1.production
 
 import android.content.Context
+import android.hardware.display.DisplayManager
+import android.media.MediaCodecList
+import android.net.ConnectivityManager
 import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -58,6 +61,7 @@ internal fun qrPollPayload(challenge: ProductionQrChallenge): JSONObject =
         .put("pollToken", challenge.pollToken)
 
 class ProductionApi(context: Context) {
+    private val applicationContext = context.applicationContext
     private val store = ProductionSessionStore(context)
     private val preferences = context.getSharedPreferences("tv_v1_runtime", Context.MODE_PRIVATE)
     private val refreshMutex = Mutex()
@@ -208,30 +212,66 @@ class ProductionApi(context: Context) {
         val playbackContext = request("GET", "playback/context").payload()
         val profileId = playbackContext.firstString("profileId")
             ?: throw ProductionApiException("Ingen aktiv profil", 409)
+        val playbackDeviceId = playbackContext.firstString("deviceId") ?: deviceId
+        val metrics = applicationContext.resources.displayMetrics
+        val capabilities = productionPlaybackCapabilities(
+            screenHeight = metrics.heightPixels,
+            devicePixelRatio = metrics.density.toDouble(),
+            supportedCodecs = supportedVideoCodecs(),
+            hdrEnabled = preferences.hdr,
+            supportsHdr = deviceSupportsHdr(),
+            allowUpscale = preferences.allowUpscale,
+            upscaleMode = preferences.upscaleMode,
+            estimatedDownlinkMbps = estimatedDownlinkMbps(),
+        )
         val response = request(
             "POST",
             "playback/authorize",
-            JSONObject()
-                .put("profileId", profileId)
-                .put("mediaId", mediaId)
-                .put("deviceId", deviceId)
-                .put("startPosition", startPositionMs)
-                .put(
-                    "capabilities",
-                    JSONObject()
-                        .put("platform", "android-tv")
-                        .put("adaptiveStreaming", true)
-                        .put("hls", true)
-                        .put("dash", true)
-                        .put("hdr", preferences.hdr)
-                        .put("allowUpscale", preferences.allowUpscale)
-                        .put("upscaleMode", preferences.upscaleMode)
-                        .put("qualityMode", preferences.qualityMode)
-                        .put("maxHeight", preferences.maxHeight ?: JSONObject.NULL)
-                        .put("startupPolicy", "baseline_first"),
-                ),
+            productionAuthorizePayload(
+                profileId = profileId,
+                mediaId = mediaId,
+                deviceId = playbackDeviceId,
+                startPositionMs = startPositionMs,
+                capabilities = capabilities,
+            ),
         )
         return parseAuthorization(response, ::resolvePublicUrl)
+    }
+
+    private fun supportedVideoCodecs(): List<String> = runCatching {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .filterNot { it.isEncoder }
+            .flatMap { it.supportedTypes.asIterable() }
+            .mapNotNull { mimeType ->
+                when (mimeType.lowercase()) {
+                    "video/avc" -> "h264"
+                    "video/hevc" -> "hevc"
+                    "video/x-vnd.on2.vp9" -> "vp9"
+                    "video/av01" -> "av1"
+                    else -> null
+                }
+            }
+            .distinct()
+            .ifEmpty { listOf("h264") }
+    }.getOrDefault(listOf("h264"))
+
+    private fun deviceSupportsHdr(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false
+        val display = applicationContext
+            .getSystemService(DisplayManager::class.java)
+            ?.displays
+            ?.firstOrNull()
+        return display?.hdrCapabilities?.supportedHdrTypes?.isNotEmpty() == true
+    }
+
+    private fun estimatedDownlinkMbps(): Double? {
+        val connectivity = applicationContext.getSystemService(ConnectivityManager::class.java)
+            ?: return null
+        val network = connectivity.activeNetwork ?: return null
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return null
+        return capabilities.linkDownstreamBandwidthKbps
+            .takeIf { it > 0 }
+            ?.div(1_000.0)
     }
 
     suspend fun heartbeatVod(sessionId: String, positionMs: Long, playing: Boolean) {
@@ -467,5 +507,57 @@ class ProductionApi(context: Context) {
         val EMPTY_BODY = ByteArray(0).toRequestBody(JSON)
     }
 }
+
+internal fun productionPlaybackCapabilities(
+    screenHeight: Int,
+    devicePixelRatio: Double,
+    supportedCodecs: List<String>,
+    hdrEnabled: Boolean,
+    supportsHdr: Boolean,
+    allowUpscale: Boolean,
+    upscaleMode: String,
+    estimatedDownlinkMbps: Double? = null,
+): JSONObject = JSONObject()
+    .put("screenHeight", screenHeight.coerceIn(240, 4_320))
+    .put("devicePixelRatio", devicePixelRatio.coerceIn(0.5, 4.0))
+    .apply {
+        estimatedDownlinkMbps
+            ?.coerceIn(0.1, 1_000.0)
+            ?.let { put("estimatedDownlinkMbps", it) }
+    }
+    .put("supportedCodecs", JSONArray(supportedCodecs.ifEmpty { listOf("h264") }))
+    .put(
+        "supportedAudioCodecs",
+        JSONArray(listOf("aac", "ac3", "eac3", "opus", "mp3", "flac")),
+    )
+    .put(
+        "supportedContainers",
+        JSONArray(listOf("mov", "mp4", "mkv", "matroska", "webm", "mpegts", "hls")),
+    )
+    .put("supportsHdr", hdrEnabled && supportsHdr)
+    .put(
+        "upscaleMode",
+        when {
+            !allowUpscale -> "off"
+            upscaleMode in setOf("off", "server", "device") -> upscaleMode
+            else -> "device"
+        },
+    )
+    .put("bufferProfile", "stable")
+    .put("startupPolicy", "baseline_first")
+
+internal fun productionAuthorizePayload(
+    profileId: String,
+    mediaId: String,
+    deviceId: String,
+    startPositionMs: Long,
+    capabilities: JSONObject,
+): JSONObject = JSONObject()
+    .put("profileId", profileId)
+    .put("mediaId", mediaId)
+    .put("deviceId", deviceId)
+    .put("startPositionMs", startPositionMs.coerceIn(0L, Int.MAX_VALUE.toLong()))
+    .put("isCastSession", false)
+    .put("capabilities", capabilities)
 
 class ProductionApiException(message: String, val status: Int) : Exception(message)
