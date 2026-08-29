@@ -9,7 +9,9 @@ import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,7 +47,9 @@ private data class GitHubRelease(
 class ProductionUpdateManager(private val context: Context) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.MINUTES)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .retryOnConnectionFailure(true)
         .build()
     private val mutableState = MutableStateFlow<ProductionUpdateState>(ProductionUpdateState.Idle)
@@ -70,25 +74,33 @@ class ProductionUpdateManager(private val context: Context) {
 
     suspend fun download() {
         val available = mutableState.value as? ProductionUpdateState.Available ?: return
+        var stage = "Forberedelse af opdatering"
         try {
+            stage = "Hentning af releaseoplysninger"
             val release = fetchRelease()
             require(release.version == available.version) { "Den seneste release ændrede sig. Kontrollér igen." }
-            val expectedHash = fetchText(release.checksumUrl).lineSequence()
-                .firstOrNull { it.contains(release.apkName) }
-                ?.trim()?.split(Regex("\\s+"))?.firstOrNull()
-                ?: error("Release mangler en SHA-256 for ${release.apkName}")
-            require(expectedHash.matches(Regex("[a-fA-F0-9]{64}"))) { "Release har en ugyldig SHA-256" }
-            val directory = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "updates")
+            stage = "Hentning af checksum"
+            val expectedHash = parseReleaseChecksum(fetchText(release.checksumUrl), release.apkName)
+            stage = "Oprettelse af opdateringsmappe"
+            val externalRoot = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            val directory = externalRoot?.let { File(it, "updates") } ?: File(context.filesDir, "updates")
             require(directory.exists() || directory.mkdirs()) { "Opdateringsmappen kunne ikke oprettes" }
             val temporary = File(directory, "${release.apkName}.part")
             val target = File(directory, release.apkName)
+            stage = "Download af APK"
             downloadFile(release.apkUrl, temporary, release.version)
+            stage = "Validering af APK"
             verifyCandidate(temporary, expectedHash.lowercase())
             if (target.exists()) target.delete()
+            stage = "Færdiggørelse af APK"
             require(temporary.renameTo(target)) { "Den validerede APK kunne ikke færdiggøres" }
             mutableState.value = ProductionUpdateState.Ready(release.version, target)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
-            mutableState.value = ProductionUpdateState.Failure(error.message ?: "Download mislykkedes")
+            mutableState.value = ProductionUpdateState.Failure(
+                "$stage fejlede: ${error.message ?: error.javaClass.simpleName}",
+            )
         }
     }
 
@@ -154,13 +166,39 @@ class ProductionUpdateManager(private val context: Context) {
     }
 
     private suspend fun downloadFile(url: String, target: File, version: String) = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
-        client.newCall(request).execute().use { response ->
-            require(response.isSuccessful) { "APK-download gav HTTP ${response.code}" }
+        var lastError: Exception? = null
+        repeat(DOWNLOAD_ATTEMPTS) { attempt ->
+            try {
+                downloadAttempt(url, target, version)
+                return@withContext
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                lastError = error
+                if (attempt < DOWNLOAD_ATTEMPTS - 1) delay(RETRY_DELAY_MS * (attempt + 1))
+            }
+        }
+        throw lastError ?: error("APK-download mislykkedes")
+    }
+
+    private fun downloadAttempt(url: String, target: File, version: String) {
+        val existingBytes = target.takeIf(File::isFile)?.length() ?: 0L
+        val builder = Request.Builder()
+            .url(url)
+            .header("Accept", "application/octet-stream")
+            .header("Cache-Control", "no-cache")
+            .header("User-Agent", USER_AGENT)
+        if (existingBytes > 0L) builder.header("Range", "bytes=$existingBytes-")
+        client.newCall(builder.build()).execute().use { response ->
+            if (response.code == 416 && target.delete()) error("Serveren afviste den gemte del; download genstartes")
+            require(response.code == 200 || response.code == 206) { "APK-download gav HTTP ${response.code}" }
             val body = response.body ?: error("APK-download var tom")
-            val total = body.contentLength().coerceAtLeast(1L)
+            val append = existingBytes > 0L && response.code == 206
+            val baseBytes = if (append) existingBytes else 0L
+            val responseBytes = body.contentLength()
+            val totalBytes = if (responseBytes >= 0L) baseBytes + responseBytes else 0L
             body.byteStream().use { input ->
-                FileOutputStream(target, false).use { output ->
+                FileOutputStream(target, append).use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     var copied = 0L
                     while (true) {
@@ -168,11 +206,22 @@ class ProductionUpdateManager(private val context: Context) {
                         if (count < 0) break
                         output.write(buffer, 0, count)
                         copied += count
-                        mutableState.value = ProductionUpdateState.Downloading(version, (copied.toFloat() / total).coerceIn(0f, 1f))
+                        val progress = if (totalBytes > 0L) {
+                            ((baseBytes + copied).toFloat() / totalBytes).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
+                        mutableState.value = ProductionUpdateState.Downloading(version, progress)
                     }
                     output.fd.sync()
+                    if (responseBytes >= 0L) {
+                        require(copied == responseBytes) {
+                            "APK-download blev afbrudt (${baseBytes + copied}/$totalBytes bytes)"
+                        }
+                    }
                 }
             }
+            mutableState.value = ProductionUpdateState.Downloading(version, 1f)
         }
     }
 
@@ -212,10 +261,15 @@ class ProductionUpdateManager(private val context: Context) {
     }
 
     @Suppress("DEPRECATION")
-    private fun archivePackage(file: File): PackageInfo? = if (Build.VERSION.SDK_INT >= 33) {
-        context.packageManager.getPackageArchiveInfo(file.absolutePath, PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()))
-    } else {
-        context.packageManager.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
+    private fun archivePackage(file: File): PackageInfo? {
+        val info = if (Build.VERSION.SDK_INT >= 33) {
+            context.packageManager.getPackageArchiveInfo(file.absolutePath, PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()))
+        } else {
+            context.packageManager.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
+        }
+        info?.applicationInfo?.sourceDir = file.absolutePath
+        info?.applicationInfo?.publicSourceDir = file.absolutePath
+        return info
     }
 
     @Suppress("DEPRECATION")
@@ -270,7 +324,18 @@ class ProductionUpdateManager(private val context: Context) {
         const val RELEASES_URL = "https://api.github.com/repos/skovhuus1/mediaserver/releases?per_page=30"
         const val USER_AGENT = "BoltBytes-TV-V1-Updater"
         const val APK_MIME = "application/vnd.android.package-archive"
+        const val DOWNLOAD_ATTEMPTS = 3
+        const val RETRY_DELAY_MS = 1_500L
     }
+}
+
+internal fun parseReleaseChecksum(content: String, apkName: String): String {
+    val lines = content.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
+    val preferred = lines.firstOrNull { it.contains(apkName) } ?: lines.singleOrNull()
+        ?: error("Release mangler en entydig SHA-256 for $apkName")
+    val hash = preferred.split(Regex("\\s+")).firstOrNull().orEmpty()
+    require(hash.matches(Regex("[a-fA-F0-9]{64}"))) { "Release har en ugyldig SHA-256" }
+    return hash.lowercase()
 }
 
 internal fun compareSemanticVersions(left: String, right: String): Int {

@@ -208,6 +208,18 @@ class ProductionContractsTest {
         assertTrue(compareSemanticVersions("0.9.9", "1.0.0") < 0)
     }
 
+    @Test
+    fun updaterAcceptsReleaseChecksumWithAssetPath() {
+        val hash = "38cf17521fd4632d285af82b007750dac7d7a40eee3a79ec468e7fcd4fbc8096"
+        assertEquals(
+            hash,
+            parseReleaseChecksum(
+                "$hash  release/android-tv-v1/BoltBytes-TV-V1-1.0.2.apk\n",
+                "BoltBytes-TV-V1-1.0.2.apk",
+            ),
+        )
+    }
+
     private fun episode(id: String, seriesId: String, seriesTitle: String, addedAt: String): JSONObject =
         JSONObject()
             .put("mediaId", id)
