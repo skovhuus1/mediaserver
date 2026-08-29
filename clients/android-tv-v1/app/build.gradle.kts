@@ -23,11 +23,13 @@ val hasReleaseSigning = listOf(
     releaseKeyAlias,
     releaseKeyPassword,
 ).all { !it.isNullOrBlank() }
-val releaseTaskRequested = gradle.startParameter.taskNames.any {
-    it.contains("release", ignoreCase = true)
+val releaseArtifactTaskRequested = gradle.startParameter.taskNames.any { requested ->
+    val task = requested.substringAfterLast(':').lowercase()
+    task in setOf("assemblerelease", "bundlerelease", "packagerelease") ||
+        (task.startsWith("publish") && task.contains("release"))
 }
 
-if (releaseTaskRequested && !hasReleaseSigning) {
+if (releaseArtifactTaskRequested && !hasReleaseSigning) {
     throw GradleException(
         "Release signing requires BB_MEDIA_ANDROID_KEYSTORE_PATH, BB_MEDIA_ANDROID_STORE_PASSWORD, " +
             "BB_MEDIA_ANDROID_KEY_ALIAS and BB_MEDIA_ANDROID_KEY_PASSWORD",
@@ -69,6 +71,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -80,12 +83,21 @@ android {
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     implementation(platform("androidx.compose:compose-bom:2026.08.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.tv:tv-material:1.1.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.3")
     implementation("androidx.media3:media3-exoplayer:1.11.0")
     implementation("androidx.media3:media3-ui:1.11.0")
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }

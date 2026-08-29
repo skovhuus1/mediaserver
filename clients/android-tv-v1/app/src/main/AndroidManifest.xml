@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature
         android:name="android.software.leanback"
@@ -16,8 +18,22 @@
         android:icon="@drawable/ic_launcher"
         android:label="BoltBytes TV V1"
         android:theme="@style/AppTheme">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            tools:ignore="DiscouragedApi" />
+        <activity
+            android:name=".production.ProductionTvActivity"
             android:exported="true"
             android:screenOrientation="landscape"
             tools:ignore="DiscouragedApi">
