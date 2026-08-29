@@ -1,0 +1,127 @@
+name: Android TV V1 signed release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Numeric semantic version
+        required: true
+        default: 1.0.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-tv-v1-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  signed-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Version must be numeric semantic versioning." >&2
+            exit 1
+          }
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [[ -n "${!name:-}" ]] || {
+              echo "Missing production signing secret: $name" >&2
+              exit 1
+            }
+          done
+          build_number="$(node scripts/android-version-code.mjs --version "$version" --attempt "$GITHUB_RUN_ATTEMPT")"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/boltbytes-tv-v1-release.jks"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
+          echo "BB_MEDIA_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/boltbytes-tv-v1-release.jks" >> "$GITHUB_ENV"
+          echo "BB_MEDIA_ANDROID_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "BB_MEDIA_ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "BB_MEDIA_ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Lint and test native TV client
+        working-directory: clients/android-tv-v1
+        run: |
+          chmod +x gradlew
+          ./gradlew --console=plain :app:lintDebug :app:testDebugUnitTest
+
+      - name: Build production-signed APK
+        working-directory: clients/android-tv-v1
+        run: |
+          ./gradlew --console=plain :app:assembleRelease \
+            -PBB_MEDIA_VERSION_NAME="$RELEASE_VERSION" \
+            -PBB_MEDIA_VERSION_CODE="$BUILD_NUMBER"
+
+      - name: Certify APK identity and signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_apk="clients/android-tv-v1/app/build/outputs/apk/release/app-release.apk"
+          output_dir="release/android-tv-v1"
+          output_apk="$output_dir/BoltBytes-TV-V1-$RELEASE_VERSION.apk"
+          [[ -f "$source_apk" ]] || {
+            echo "Release APK was not produced." >&2
+            exit 1
+          }
+          mkdir -p "$output_dir"
+          cp "$source_apk" "$output_apk"
+
+          build_tools="$(find "$ANDROID_SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          aapt="$build_tools/aapt"
+          apksigner="$build_tools/apksigner"
+          [[ -x "$aapt" && -x "$apksigner" ]] || {
+            echo "Android certification tools are unavailable." >&2
+            exit 1
+          }
+
+          "$aapt" dump badging "$output_apk" | tee "$output_dir/apk-badging.txt"
+          grep -Fq "package: name='com.boltbytes.boltbytes_media.tv' versionCode='$BUILD_NUMBER' versionName='$RELEASE_VERSION'" "$output_dir/apk-badging.txt"
+          grep -Fq "leanback-launchable-activity" "$output_dir/apk-badging.txt"
+          grep -Fq "uses-feature-not-required:'android.hardware.touchscreen'" "$output_dir/apk-badging.txt"
+
+          "$aapt" dump xmltree "$output_apk" AndroidManifest.xml | tee "$output_dir/manifest-tree.txt"
+          grep -Fq "android:banner" "$output_dir/manifest-tree.txt"
+
+          "$apksigner" verify --verbose --print-certs "$output_apk" | tee "$output_dir/signature.txt"
+          if grep -Fqi "Android Debug" "$output_dir/signature.txt"; then
+            echo "Refusing APK signed with Android debug certificate." >&2
+            exit 1
+          fi
+          sha256sum "$output_apk" | tee "$output_dir/sha256.txt"
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoltBytes-TV-V1-${{ env.RELEASE_VERSION }}
+          path: release/android-tv-v1/
+          if-no-files-found: error
+          retention-days: 30
+
