@@ -18,11 +18,44 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 data class ProductionQrChallenge(
-    val id: String,
+    val pairingId: String,
+    val pollToken: String,
     val approvalUrl: String,
     val userCode: String,
     val expiresAt: String?,
+    val pollIntervalSeconds: Long,
 )
+
+internal fun parseProductionQrChallenge(
+    response: JSONObject,
+    resolveUrl: (String) -> String,
+): ProductionQrChallenge {
+    val payload = response.payload()
+    val pairingId = payload.firstString("pairingId", "requestId", "challengeId", "id")
+        ?: error("QR-login mangler pairing-id")
+    val pollToken = payload.firstString("pollToken")
+        ?: error("QR-login mangler polling-token")
+    val approvalPath = payload.firstString(
+        "approveUrl",
+        "approvalUrl",
+        "approvePath",
+        "verificationUriComplete",
+        "url",
+    ) ?: error("QR-login mangler godkendelses-URL")
+    return ProductionQrChallenge(
+        pairingId = pairingId,
+        pollToken = pollToken,
+        approvalUrl = resolveUrl(approvalPath),
+        userCode = payload.firstString("userCode", "code") ?: "",
+        expiresAt = payload.firstString("expiresAt", "expires"),
+        pollIntervalSeconds = payload.optLong("pollIntervalSeconds", 2L).coerceIn(1L, 10L),
+    )
+}
+
+internal fun qrPollPayload(challenge: ProductionQrChallenge): JSONObject =
+    JSONObject()
+        .put("pairingId", challenge.pairingId)
+        .put("pollToken", challenge.pollToken)
 
 class ProductionApi(context: Context) {
     private val store = ProductionSessionStore(context)
@@ -75,24 +108,15 @@ class ProductionApi(context: Context) {
                 .put("platform", "android-tv")
                 .put("appVersion", "1.0.0"),
             authenticated = false,
-        ).payload()
-        return ProductionQrChallenge(
-            id = response.firstString("requestId", "challengeId", "id", "deviceCode")
-                ?: error("QR-login mangler request-id"),
-            approvalUrl = resolvePublicUrl(
-                response.firstString("approvalUrl", "approveUrl", "verificationUriComplete", "url")
-                    ?: error("QR-login mangler godkendelses-URL"),
-            ),
-            userCode = response.firstString("userCode", "code") ?: "",
-            expiresAt = response.firstString("expiresAt", "expires"),
         )
+        return parseProductionQrChallenge(response, ::resolvePublicUrl)
     }
 
-    suspend fun pollQr(challengeId: String): Boolean {
+    suspend fun pollQr(challenge: ProductionQrChallenge): Boolean {
         val response = request(
             "POST",
             "auth/tv/poll",
-            JSONObject().put("requestId", challengeId).put("challengeId", challengeId).put("deviceCode", challengeId),
+            qrPollPayload(challenge),
             authenticated = false,
             refreshOnUnauthorized = false,
         )

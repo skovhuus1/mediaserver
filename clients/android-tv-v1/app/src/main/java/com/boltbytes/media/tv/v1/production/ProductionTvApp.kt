@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import com.boltbytes.media.tv.v1.ui.V1AmbientBackground
 import com.boltbytes.media.tv.v1.ui.V1Button
 import com.boltbytes.media.tv.v1.ui.V1Colors
@@ -289,12 +290,13 @@ private fun ProductionHubScreen(state: ProductionUiState, viewModel: ProductionV
     }
     val hero = state.selectedHero ?: visibleRows.firstOrNull()?.cards?.firstOrNull()
     V1AmbientBackground(accent = V1Colors.Blue) {
-        hero?.backdropUrl?.let { url ->
+        (hero?.backdropUrl ?: hero?.posterUrl)?.let { url ->
             AsyncImage(
                 model = viewModel.api.resolvePublicUrl(url),
                 contentDescription = null,
                 modifier = Modifier.fillMaxWidth().fillMaxHeight(0.55f).align(Alignment.TopCenter),
                 alpha = 0.46f,
+                contentScale = ContentScale.Crop,
             )
             Box(
                 Modifier.fillMaxWidth().fillMaxHeight(0.66f).align(Alignment.TopCenter)
@@ -430,9 +432,10 @@ private fun ProductionMediaCard(card: ProductionCard, viewModel: ProductionViewM
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxWidth().height(174.dp).background(V1Colors.Elevated)) {
                 AsyncImage(
-                    model = card.posterUrl?.let(viewModel.api::resolvePublicUrl),
+                    model = (card.posterUrl ?: card.backdropUrl)?.let(viewModel.api::resolvePublicUrl),
                     contentDescription = card.title,
                     modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
                 )
                 card.badge?.let { badge ->
                     V1Pill(badge, modifier = Modifier.align(Alignment.TopEnd).padding(7.dp), color = V1Colors.Gold, emphasized = true)
@@ -477,8 +480,8 @@ private fun ProductionTitleScreen(state: ProductionUiState, viewModel: Productio
     val title = state.title
     var selectedSeason by remember(title?.id) { mutableStateOf(title?.seasons?.firstOrNull()?.number ?: 1) }
     V1AmbientBackground(accent = V1Colors.GoldDeep) {
-        title?.backdropUrl?.let { url ->
-            AsyncImage(model = viewModel.api.resolvePublicUrl(url), contentDescription = null, modifier = Modifier.fillMaxWidth().fillMaxHeight(0.64f).align(Alignment.TopCenter), alpha = 0.42f)
+        (title?.backdropUrl ?: title?.posterUrl)?.let { url ->
+            AsyncImage(model = viewModel.api.resolvePublicUrl(url), contentDescription = null, modifier = Modifier.fillMaxWidth().fillMaxHeight(0.64f).align(Alignment.TopCenter), alpha = 0.42f, contentScale = ContentScale.Crop)
             Box(Modifier.fillMaxWidth().fillMaxHeight(0.7f).background(Brush.verticalGradient(listOf(Color.Transparent, V1Colors.Background))))
         }
         LazyColumn(
@@ -531,7 +534,7 @@ private fun ProductionTitleScreen(state: ProductionUiState, viewModel: Productio
                                 items(title.people, key = { "${it.name}-${it.role}" }) { person ->
                                     V1GlassPanel(Modifier.width(142.dp).height(178.dp), radius = 18.dp) {
                                         Column(Modifier.fillMaxSize().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            AsyncImage(model = person.imageUrl?.let(viewModel.api::resolvePublicUrl), contentDescription = null, modifier = Modifier.size(100.dp).clip(CircleShape).background(V1Colors.Elevated))
+                                            AsyncImage(model = person.imageUrl?.let(viewModel.api::resolvePublicUrl), contentDescription = null, modifier = Modifier.size(100.dp).clip(CircleShape).background(V1Colors.Elevated), contentScale = ContentScale.Crop)
                                             Spacer(Modifier.height(8.dp))
                                             Text(person.name, color = V1Colors.Text, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                                             Text(person.role, color = V1Colors.Muted, fontSize = 8.sp, maxLines = 1)
@@ -560,7 +563,7 @@ private fun ProductionEpisodeCard(episode: ProductionEpisode, viewModel: Product
     ) { focused ->
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxWidth().height(112.dp).background(V1Colors.Elevated)) {
-                AsyncImage(model = episode.artworkUrl?.let(viewModel.api::resolvePublicUrl), contentDescription = null, modifier = Modifier.fillMaxSize())
+                AsyncImage(model = episode.artworkUrl?.let(viewModel.api::resolvePublicUrl), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 if (episode.progress > 0f) {
                     Box(Modifier.fillMaxWidth().height(4.dp).align(Alignment.BottomCenter).background(V1Colors.Border)) {
                         Box(Modifier.fillMaxWidth(episode.progress).fillMaxHeight().background(V1Colors.Gold))

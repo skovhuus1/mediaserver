@@ -136,8 +136,8 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
                 val challenge = api.startQr()
                 mutableState.update { it.copy(qr = challenge, message = null) }
                 while (true) {
-                    delay(2_000L)
-                    if (api.pollQr(challenge.id)) {
+                    delay(challenge.pollIntervalSeconds * 1_000L)
+                    if (api.pollQr(challenge)) {
                         val currentGeneration = ++generation
                         installAccount(api.me(), currentGeneration)
                         return@launch

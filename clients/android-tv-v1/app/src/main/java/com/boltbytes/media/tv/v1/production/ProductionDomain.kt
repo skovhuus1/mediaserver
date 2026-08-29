@@ -230,17 +230,28 @@ internal fun parseHome(json: JSONObject): ProductionHome {
 
 internal fun parseSearch(json: JSONObject): List<ProductionCard> {
     val payload = json.payload()
-    return payload.firstArray("items", "results", "titles", "media")?.objects().orEmpty().mapNotNull(::parseCard)
+    val direct = payload.firstArray("items", "results", "titles", "media")?.objects().orEmpty()
+    if (direct.isNotEmpty()) return direct.mapNotNull(::parseCard)
+    val groups = payload.optJSONObject("groups") ?: return emptyList()
+    return buildList {
+        addAll(groups.firstArray("titles")?.objects().orEmpty().mapNotNull(::parseCard))
+        addAll(groups.firstArray("episodes")?.objects().orEmpty().mapNotNull(::parseCard))
+    }.distinctBy { it.id }
 }
 
 internal fun parseCard(item: JSONObject): ProductionCard? {
     val target = item.optJSONObject("target")
+    val playback = item.optJSONObject("playback")
+    val playbackMedia = playback?.optJSONObject("media")
     val id = item.firstString("mediaId", "id", "targetKey")
         ?: target?.firstString("key", "id", "mediaId")
+        ?: playbackMedia?.firstString("id", "mediaId")
         ?: return null
-    val duration = item.firstLong("durationMs", "runtimeMs", "duration")
+    val duration = item.firstPresentLong("durationMs", "runtimeMs", "duration")
+        ?: playbackMedia?.optJSONObject("file")?.firstPresentLong("durationMs")
+        ?: 0L
     val position = item.firstLong("positionMs", "progressMs", "resumePositionMs", "startPositionMs")
-    val raw = item.optDouble("progress", 0.0).toFloat()
+    val raw = item.optDouble("progress", item.optDouble("progressPercent", 0.0)).toFloat()
     val progress = when {
         raw > 1f -> raw / 100f
         raw > 0f -> raw
@@ -249,7 +260,9 @@ internal fun parseCard(item: JSONObject): ProductionCard? {
     }.coerceIn(0f, 1f)
     val season = item.optInt("seasonNumber").takeIf { it > 0 }
     val episode = item.optInt("episodeNumber").takeIf { it > 0 }
-    val subtitle = item.firstString("subtitle", "tagline") ?: listOfNotNull(
+    val seriesTitle = item.firstString("seriesTitle", "seriesDisplayTitle", "showTitle")
+    val subtitle = item.firstString("subtitle", "tagline", "matchReason") ?: listOfNotNull(
+        seriesTitle,
         season?.let { "Sæson $it" },
         episode?.let { "Afsnit $it" },
         item.firstString("year", "releaseYear"),
@@ -260,19 +273,43 @@ internal fun parseCard(item: JSONObject): ProductionCard? {
         id = id,
         title = item.firstString("title", "name", "displayTitle") ?: "Uden titel",
         subtitle = subtitle,
-        type = item.firstString("mediaType", "type", "targetType") ?: target?.optString("type").orEmpty(),
-        posterUrl = artwork(item, "posterUrl", "poster", "thumbUrl", "thumbnailUrl"),
-        backdropUrl = artwork(item, "backdropUrl", "backdrop", "heroUrl", "fanartUrl"),
+        type = item.firstString("mediaType", "type", "targetType")
+            ?: target?.firstString("type")
+            ?: playbackMedia?.firstString("type")
+            ?: if (season != null || episode != null) "episode" else "media",
+        posterUrl = artwork(
+            item,
+            "posterUrl",
+            "posterPath",
+            "seasonPosterPath",
+            "poster",
+            "thumbUrl",
+            "thumbnailUrl",
+            "imagePath",
+            "episodeStillPath",
+            "stillPath",
+        ),
+        backdropUrl = artwork(
+            item,
+            "backdropUrl",
+            "backdropPath",
+            "episodeStillPath",
+            "stillPath",
+            "imagePath",
+            "backdrop",
+            "heroUrl",
+            "fanartUrl",
+        ),
         progress = progress,
         durationMs = duration,
-        badge = item.firstString("badge", "countLabel", "statusLabel"),
+        badge = item.firstString("badge", "badgeCount", "countLabel", "statusLabel"),
         year = item.firstString("year", "releaseYear"),
         genres = genres,
         seasonNumber = season,
         episodeNumber = episode,
         startPositionMs = position,
         seriesId = item.firstString("seriesId", "parentId", "showId"),
-        seriesTitle = item.firstString("seriesTitle", "seriesDisplayTitle", "showTitle"),
+        seriesTitle = seriesTitle,
         releasedAt = item.firstString("releasedAt", "releaseDate", "airDate"),
         addedAt = item.firstString("addedAt", "createdAt", "importedAt"),
     )
@@ -301,10 +338,20 @@ private fun collapseEpisodeCards(
 }
 
 internal fun parseTitle(json: JSONObject): ProductionTitle {
-    val item = json.payload()
-    val id = item.firstString("id", "mediaId") ?: error("Titel mangler id")
-    val topEpisodes = item.firstArray("episodes")?.objects().orEmpty().mapNotNull(::parseEpisode)
-    val seasons = item.firstArray("seasons")?.objects().orEmpty().mapNotNull { season ->
+    val payload = json.payload()
+    val item = payload.optJSONObject("title") ?: payload
+    val playback = payload.optJSONObject("playback")
+    val playbackMedia = playback?.optJSONObject("media")
+    val viewerState = payload.optJSONObject("viewerState")
+    val series = payload.optJSONObject("series")
+    val discovery = payload.optJSONObject("discovery")
+    val id = item.firstString("id", "mediaId")
+        ?: playbackMedia?.firstString("id", "mediaId")
+        ?: error("Titel mangler id")
+    val topEpisodes = (series?.firstArray("episodes") ?: payload.firstArray("episodes") ?: item.firstArray("episodes"))
+        ?.objects().orEmpty().mapNotNull(::parseEpisode)
+    val seasons = (series?.firstArray("seasons") ?: payload.firstArray("seasons") ?: item.firstArray("seasons"))
+        ?.objects().orEmpty().mapNotNull { season ->
         val number = season.optInt("seasonNumber", season.optInt("number")).takeIf { it > 0 }
             ?: return@mapNotNull null
         val episodes = season.firstArray("episodes", "items")?.objects().orEmpty().mapNotNull(::parseEpisode)
@@ -312,39 +359,49 @@ internal fun parseTitle(json: JSONObject): ProductionTitle {
     }.ifEmpty {
         topEpisodes.groupBy { it.seasonNumber }.toSortedMap().map { ProductionSeason(it.key, it.value) }
     }
-    val people = item.firstArray("cast", "people", "crew")?.objects().orEmpty().map { person ->
+    val people = (discovery?.firstArray("people") ?: item.firstArray("cast", "people", "crew"))
+        ?.objects().orEmpty().map { person ->
         ProductionPerson(
             name = person.firstString("name", "title") ?: "Ukendt",
-            role = person.firstString("role", "character", "department") ?: "Medvirkende",
-            imageUrl = artwork(person, "imageUrl", "profileUrl", "photoUrl"),
+            role = person.firstString("role", "character", "job", "department") ?: "Medvirkende",
+            imageUrl = artwork(person, "imageUrl", "profileUrl", "profilePath", "photoUrl", "imagePath"),
         )
     }
+    val mode = payload.firstString("mode")
+    val startPositionMs = viewerState?.firstPresentLong("positionMs", "resumePositionMs", "progressMs")
+        ?: playback?.firstPresentLong("positionMs", "resumePositionMs", "progressMs")
+        ?: item.firstLong("positionMs", "resumePositionMs", "progressMs")
     return ProductionTitle(
         id = id,
         title = item.firstString("title", "name", "displayTitle") ?: "Uden titel",
         summary = item.firstString("summary", "description", "overview") ?: "",
-        type = item.firstString("mediaType", "type") ?: "movie",
+        type = if (mode == "series") "series" else item.firstString("mediaType", "type") ?: "movie",
         year = item.firstString("year", "releaseYear"),
-        contentRating = item.firstString("contentRating", "rating"),
+        contentRating = item.firstString("contentRating", "certification"),
         durationMs = item.firstLong("durationMs", "runtimeMs", "duration"),
-        posterUrl = artwork(item, "posterUrl", "poster", "thumbUrl"),
-        backdropUrl = artwork(item, "backdropUrl", "backdrop", "heroUrl", "fanartUrl"),
+        posterUrl = artwork(item, "posterUrl", "posterPath", "seasonPosterPath", "poster", "thumbUrl"),
+        backdropUrl = artwork(item, "backdropUrl", "backdropPath", "episodeStillPath", "backdrop", "heroUrl", "fanartUrl"),
         genres = item.firstArray("genres")?.strings().orEmpty(),
         seasons = seasons,
-        resumeEpisode = item.optJSONObject("resumeEpisode")?.let(::parseEpisode),
-        nextEpisode = item.optJSONObject("nextEpisode")?.let(::parseEpisode),
-        related = item.firstArray("related", "similar", "recommendations")?.objects().orEmpty().mapNotNull(::parseCard),
+        resumeEpisode = (series?.optJSONObject("resumeEpisode") ?: payload.optJSONObject("resumeEpisode") ?: item.optJSONObject("resumeEpisode"))?.let(::parseEpisode),
+        nextEpisode = (series?.optJSONObject("nextEpisode") ?: payload.optJSONObject("nextEpisode") ?: item.optJSONObject("nextEpisode"))?.let(::parseEpisode),
+        related = (payload.firstArray("related", "similar", "recommendations") ?: item.firstArray("related", "similar", "recommendations"))
+            ?.objects().orEmpty().mapNotNull(::parseCard),
         people = people,
-        inWatchlist = item.firstBoolean("inWatchlist", "watchlisted"),
-        startPositionMs = item.firstLong("positionMs", "resumePositionMs", "progressMs"),
+        inWatchlist = viewerState?.firstBoolean("inWatchlist", "watchlisted")
+            ?: item.firstBoolean("inWatchlist", "watchlisted"),
+        startPositionMs = startPositionMs,
     )
 }
 
 internal fun parseEpisode(item: JSONObject): ProductionEpisode? {
-    val id = item.firstString("id", "mediaId") ?: return null
-    val duration = item.firstLong("durationMs", "runtimeMs", "duration")
+    val playbackMedia = item.optJSONObject("playback")?.optJSONObject("media")
+    val id = item.firstString("id", "mediaId") ?: playbackMedia?.firstString("id", "mediaId") ?: return null
+    val duration = item.firstPresentLong("durationMs", "runtimeMs", "duration")
+        ?: playbackMedia?.optJSONObject("file")?.firstPresentLong("durationMs")
+        ?: 0L
     val position = item.firstLong("positionMs", "progressMs", "resumePositionMs")
-    val raw = item.optDouble("progress", 0.0).toFloat()
+    val raw = item.optDouble("progress", item.optDouble("progressPercent", 0.0)).toFloat()
     val progress = when {
         raw > 1f -> raw / 100f
         raw > 0f -> raw
@@ -360,7 +417,19 @@ internal fun parseEpisode(item: JSONObject): ProductionEpisode? {
         durationMs = duration,
         progress = progress,
         startPositionMs = position,
-        artworkUrl = artwork(item, "backdropUrl", "thumbnailUrl", "thumbUrl", "posterUrl"),
+        artworkUrl = artwork(
+            item,
+            "stillUrl",
+            "stillPath",
+            "episodeStillPath",
+            "backdropUrl",
+            "backdropPath",
+            "imagePath",
+            "thumbnailUrl",
+            "thumbUrl",
+            "posterUrl",
+            "posterPath",
+        ),
         watched = item.firstBoolean("watched", "isWatched"),
     )
 }
@@ -483,10 +552,23 @@ internal fun parsePreferences(json: JSONObject): ProductionPreferences {
     )
 }
 
+private fun JSONObject.firstPresentLong(vararg names: String): Long? {
+    for (name in names) if (has(name) && !isNull(name)) return optLong(name)
+    return null
+}
+
 private fun artwork(item: JSONObject, vararg names: String): String? {
-    item.firstString(*names)?.let { return it }
+    for (name in names) imageValue(item, name)?.let { return it }
     val art = item.optJSONObject("artwork") ?: item.optJSONObject("images") ?: return null
-    return art.firstString(*names, "url", "poster", "backdrop", "primary")
+    for (name in names) imageValue(art, name)?.let { return it }
+    return listOf("url", "path", "src", "poster", "backdrop", "primary")
+        .firstNotNullOfOrNull { name -> imageValue(art, name) }
+}
+
+private fun imageValue(item: JSONObject, name: String): String? = when (val value = item.opt(name)) {
+    is String -> value.trim().takeIf { it.isNotEmpty() && it != "null" }
+    is JSONObject -> value.firstString("url", "path", "src")
+    else -> null
 }
 
 private fun parseInstant(value: String?): Instant? = try {
