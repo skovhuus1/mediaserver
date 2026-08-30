@@ -121,9 +121,15 @@ internal fun shouldStartNextEpisodeCountdown(
 }
 
 internal fun isCreditsMarkerType(type: String): Boolean = when (type.trim().lowercase()) {
-    "credits", "credit", "end_credits", "end-credits", "rulletekst" -> true
+    "credits", "credit", "endcredits", "end_credits", "end-credits", "credit_roll", "outro", "rulletekst" -> true
     else -> false
 }
+
+internal fun shouldHoldEndedPlaybackForNextEpisode(
+    countdownCancelled: Boolean,
+    autoplay: Boolean,
+    nextEpisodeId: String?,
+): Boolean = !countdownCancelled && autoplay && !nextEpisodeId.isNullOrBlank()
 
 private enum class SubtitleTextSize(val label: String, val fontSizeSp: Int) {
     Small("Lille", 24),
@@ -183,6 +189,7 @@ private class ProductionSubtitleStyleStore(context: Context) {
 }
 
 private data class PlayerEngineState(
+    val phase: ProductionPlaybackPhase = ProductionPlaybackPhase.Idle,
     val preparing: Boolean = true,
     val buffering: Boolean = false,
     val playing: Boolean = false,
@@ -195,6 +202,8 @@ private data class PlayerEngineState(
     val subtitleCues: List<ProductionSubtitleCue> = emptyList(),
     val selectedSubtitleTrackId: String? = null,
     val subtitleStatusMessage: String? = null,
+    val liveChannelName: String? = null,
+    val liveChannelIndex: Int = 0,
 )
 
 private class ProductionPlaybackEngine(
@@ -209,10 +218,12 @@ private class ProductionPlaybackEngine(
     private val restarting = AtomicBoolean(false)
     private val reconfiguring = AtomicBoolean(false)
     private val switchingChannel = AtomicBoolean(false)
+    private val runtime = ProductionPlaybackStateMachine()
     private var heartbeatJob: Job? = null
     private var progressJob: Job? = null
     private var variantMonitorJob: Job? = null
     private var subtitleLoadJob: Job? = null
+    private var recoveryJob: Job? = null
     private var channelIndex = request.channelIndex
     private var automaticRecoveryAttempts = 0
     private var selectedQualityMode = preferences.qualityMode.lowercase()
@@ -238,10 +249,47 @@ private class ProductionPlaybackEngine(
             playbackParameters = playbackParameters.withSpeed(preferences.playbackRate)
         }
 
-    private val mutableState = MutableStateFlow(PlayerEngineState())
+    private val mutableState = MutableStateFlow(
+        PlayerEngineState(
+            liveChannelName = request.channelNames.getOrNull(channelIndex) ?: request.title,
+            liveChannelIndex = channelIndex,
+        ),
+    )
     val state: StateFlow<PlayerEngineState> = mutableState.asStateFlow()
 
+    private fun transition(event: ProductionPlaybackEvent) {
+        val next = runtime.transition(event)
+        mutableState.value = mutableState.value.copy(
+            phase = next.phase,
+            playWhenReady = next.playWhenReady,
+        )
+        publishDiagnostics()
+    }
+
+    fun publishDiagnostics() {
+        val authorization = mutableState.value.authorization
+        val runtimeState = runtime.state
+        ProductionPlaybackDiagnosticsStore.update { current ->
+            current.copy(
+                phase = runtimeState.phase,
+                mediaId = request.mediaId,
+                sessionId = authorization?.sessionId,
+                streamMethod = authorization?.streamMethod,
+                contentType = authorization?.contentType,
+                videoHeight = mutableState.value.activeVideoHeight,
+                videoBitrate = mutableState.value.activeVideoBitrate,
+                positionMs = absolutePositionMs(),
+                bufferAheadMs = (absoluteBufferedPositionMs() - absolutePositionMs()).coerceAtLeast(0L),
+                stallCount = runtimeState.stallCount,
+                retryAttempt = runtimeState.retryAttempt,
+                droppedFrames = player.videoDecoderCounters?.droppedBufferCount ?: 0,
+                lastError = runtimeState.lastError ?: current.lastError,
+            )
+        }
+    }
+
     suspend fun start() {
+        transition(ProductionPlaybackEvent.Authorize)
         authorizeAndStart(request.startPositionMs)
     }
 
@@ -250,6 +298,7 @@ private class ProductionPlaybackEngine(
             var authorization = if (request.live) api.authorizeLive(request.mediaId) else {
                 api.authorizeVod(request.mediaId, positionMs, preferences)
             }
+            transition(ProductionPlaybackEvent.Prepare)
             mutableState.value = mutableState.value.copy(authorization = authorization, preparing = true, error = null)
             startLeases()
             val preparation = if (request.live) {
@@ -266,7 +315,9 @@ private class ProductionPlaybackEngine(
             loadAuthorization(authorization, positionMs)
             monitorVariantReadiness(authorization, preparation)
         } catch (error: Exception) {
-            mutableState.value = mutableState.value.copy(preparing = false, buffering = false, error = error.message ?: "Afspilningen kunne ikke startes")
+            val message = error.message ?: "Afspilningen kunne ikke startes"
+            transition(ProductionPlaybackEvent.Fail(message))
+            mutableState.value = mutableState.value.copy(preparing = false, buffering = false, error = message)
         }
     }
 
@@ -397,6 +448,7 @@ private class ProductionPlaybackEngine(
 
     fun retry() {
         automaticRecoveryAttempts = 0
+        transition(ProductionPlaybackEvent.Recover(0))
         restartPlayback()
     }
 
@@ -615,6 +667,8 @@ private class ProductionPlaybackEngine(
                 channelIndex = targetIndex
                 mutableState.value = mutableState.value.copy(
                     authorization = switched,
+                    liveChannelName = request.channelNames.getOrNull(targetIndex) ?: request.title,
+                    liveChannelIndex = targetIndex,
                     preparing = true,
                     buffering = false,
                     error = null,
@@ -642,6 +696,8 @@ private class ProductionPlaybackEngine(
         heartbeatJob?.cancel()
         progressJob?.cancel()
         variantMonitorJob?.cancel()
+        recoveryJob?.cancel()
+        transition(ProductionPlaybackEvent.Release)
         val authorization = mutableState.value.authorization
         val position = absolutePositionMs()
         val duration = absoluteDurationMs()
@@ -661,6 +717,12 @@ private class ProductionPlaybackEngine(
 
     override fun onPlaybackStateChanged(playbackState: Int) {
         val ended = playbackState == Player.STATE_ENDED
+        when (playbackState) {
+            Player.STATE_BUFFERING -> transition(ProductionPlaybackEvent.Buffer)
+            Player.STATE_READY -> transition(if (player.playWhenReady) ProductionPlaybackEvent.Play else ProductionPlaybackEvent.Ready)
+            Player.STATE_ENDED -> transition(ProductionPlaybackEvent.End)
+            Player.STATE_IDLE -> if (mutableState.value.authorization != null) transition(ProductionPlaybackEvent.Prepare)
+        }
         mutableState.value = mutableState.value.copy(
             preparing = playbackState == Player.STATE_IDLE,
             buffering = playbackState == Player.STATE_BUFFERING,
@@ -671,6 +733,12 @@ private class ProductionPlaybackEngine(
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (isPlaying) {
+            automaticRecoveryAttempts = 0
+            transition(ProductionPlaybackEvent.Play)
+        } else if (!player.playWhenReady && player.playbackState == Player.STATE_READY) {
+            transition(ProductionPlaybackEvent.Pause)
+        }
         mutableState.value = mutableState.value.copy(
             playing = isPlaying,
             playWhenReady = player.playWhenReady,
@@ -678,6 +746,9 @@ private class ProductionPlaybackEngine(
     }
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        if (!playWhenReady && player.playbackState == Player.STATE_READY) {
+            transition(ProductionPlaybackEvent.Pause)
+        }
         mutableState.value = mutableState.value.copy(
             playing = player.isPlaying,
             playWhenReady = playWhenReady,
@@ -693,19 +764,22 @@ private class ProductionPlaybackEngine(
     }
 
     override fun onPlayerError(error: PlaybackException) {
-        if (
-            error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
-            automaticRecoveryAttempts < 1 &&
-            !finished.get()
-        ) {
+        if (isRecoverablePlaybackError(error.errorCodeName) && automaticRecoveryAttempts < 3 && !finished.get()) {
             automaticRecoveryAttempts += 1
-            restartPlayback()
+            transition(ProductionPlaybackEvent.Recover(automaticRecoveryAttempts))
+            recoveryJob?.cancel()
+            recoveryJob = scope.launch {
+                delay(ProductionNetworkRetryPolicy.delayMs(automaticRecoveryAttempts))
+                restartPlayback()
+            }
             return
         }
+        val message = productionPlaybackErrorMessage(error.errorCodeName)
+        transition(ProductionPlaybackEvent.Fail(error.errorCodeName))
         mutableState.value = mutableState.value.copy(
             preparing = false,
             buffering = false,
-            error = "Afspilningen stoppede: ${error.errorCodeName}",
+            error = message,
         )
     }
 
@@ -768,6 +842,7 @@ internal fun ProductionPlayerScreen(
     var playbackLifecycleActive by remember {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
+    var liveChannelOverlayVisible by remember { mutableStateOf(request.live) }
     val creditsStartMs = engineState.authorization?.markers
         ?.filter { isCreditsMarkerType(it.type) }
         ?.minOfOrNull { it.startMs }
@@ -802,6 +877,7 @@ internal fun ProductionPlayerScreen(
                 positionMs = engine.absolutePositionMs()
                 bufferedMs = engine.absoluteBufferedPositionMs().coerceAtLeast(positionMs)
             }
+            engine.publishDiagnostics()
             delay(400L)
         }
     }
@@ -810,6 +886,14 @@ internal fun ProductionPlayerScreen(
         if (!engineState.playWhenReady) {
             positionMs = engine.absolutePositionMs()
             bufferedMs = engine.absoluteBufferedPositionMs().coerceAtLeast(positionMs)
+        }
+    }
+
+    LaunchedEffect(engineState.liveChannelIndex, engineState.liveChannelName) {
+        if (request.live) {
+            liveChannelOverlayVisible = true
+            delay(2_500L)
+            liveChannelOverlayVisible = false
         }
     }
 
@@ -858,16 +942,26 @@ internal fun ProductionPlayerScreen(
     LaunchedEffect(engineState.ended) {
         if (engineState.ended && !endedHandled) {
             endedHandled = true
-            engine.finishAsync(true)
             when {
-                nextEpisodeCountdown >= 0 -> Unit
-                nextEpisodeCountdownCancelled -> onExit()
-                preferences.autoplay && !request.nextEpisodeId.isNullOrBlank() -> {
+                shouldHoldEndedPlaybackForNextEpisode(
+                    countdownCancelled = nextEpisodeCountdownCancelled,
+                    autoplay = preferences.autoplay,
+                    nextEpisodeId = request.nextEpisodeId,
+                ) -> {
                     option = null
                     controlsVisible = false
-                    nextEpisodeCountdown = PRODUCTION_NEXT_EPISODE_COUNTDOWN_SECONDS
+                    if (nextEpisodeCountdown < 0) {
+                        nextEpisodeCountdown = PRODUCTION_NEXT_EPISODE_COUNTDOWN_SECONDS
+                    }
                 }
-                else -> onEnded()
+                nextEpisodeCountdownCancelled -> {
+                    engine.finishAsync(true)
+                    onExit()
+                }
+                else -> {
+                    engine.finishAsync(true)
+                    onEnded()
+                }
             }
         }
     }
@@ -1021,6 +1115,36 @@ internal fun ProductionPlayerScreen(
             }
         }
 
+        if (request.live && liveChannelOverlayVisible) {
+            V1GlassPanel(
+                Modifier.align(Alignment.TopStart).padding(start = 48.dp, top = 42.dp).width(390.dp).height(112.dp),
+                radius = 18.dp,
+            ) {
+                Column(
+                    Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 17.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        V1Pill("LIVE", color = V1Colors.Danger, emphasized = true)
+                        Text(
+                            "Kanal ${engineState.liveChannelIndex + 1} af ${request.channelIds.size.coerceAtLeast(1)}",
+                            color = V1Colors.Muted,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Text(
+                        engineState.liveChannelName ?: request.title,
+                        color = V1Colors.Text,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
         activeMarker?.let { marker ->
             V1Button(
                 label = when (marker.type.lowercase()) {
@@ -1053,7 +1177,7 @@ internal fun ProductionPlayerScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(request.title, color = V1Colors.Text, fontSize = 20.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(engineState.liveChannelName ?: request.title, color = V1Colors.Text, fontSize = 20.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(if (request.live) "LIVE" else "${formatTime(positionMs)} / ${formatTime(durationMs)}", color = if (request.live) V1Colors.Danger else V1Colors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         }
                         V1Pill("Kvalitet: $qualityStatus", color = V1Colors.Gold, emphasized = true)
@@ -1088,9 +1212,14 @@ internal fun ProductionPlayerScreen(
             BackHandler {
                 nextEpisodeCountdown = -1
                 nextEpisodeCountdownCancelled = true
-                controlsVisible = true
-                lastInteraction = android.os.SystemClock.elapsedRealtime()
-                playFocus.requestFocus()
+                if (engineState.ended) {
+                    engine.finishAsync(true)
+                    onExit()
+                } else {
+                    controlsVisible = true
+                    lastInteraction = android.os.SystemClock.elapsedRealtime()
+                    playFocus.requestFocus()
+                }
             }
             ProductionNextEpisodeCountdown(
                 title = request.nextEpisodeTitle ?: "Næste afsnit",
@@ -1103,9 +1232,14 @@ internal fun ProductionPlayerScreen(
                 onCancel = {
                     nextEpisodeCountdown = -1
                     nextEpisodeCountdownCancelled = true
-                    controlsVisible = true
-                    lastInteraction = android.os.SystemClock.elapsedRealtime()
-                    playFocus.requestFocus()
+                    if (engineState.ended) {
+                        engine.finishAsync(true)
+                        onExit()
+                    } else {
+                        controlsVisible = true
+                        lastInteraction = android.os.SystemClock.elapsedRealtime()
+                        playFocus.requestFocus()
+                    }
                 },
             )
         }

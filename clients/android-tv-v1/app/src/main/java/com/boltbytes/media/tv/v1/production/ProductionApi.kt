@@ -5,7 +5,10 @@ import android.hardware.display.DisplayManager
 import android.media.MediaCodecList
 import android.net.ConnectivityManager
 import android.os.Build
+import com.boltbytes.media.tv.v1.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -16,6 +19,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -94,7 +98,7 @@ class ProductionApi(context: Context) {
                 .put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
                 .put("deviceType", "tv")
                 .put("platform", "android-tv")
-                .put("appVersion", "1.0.0"),
+                .put("appVersion", BuildConfig.VERSION_NAME),
             authenticated = false,
         )
         installTokens(response)
@@ -110,7 +114,7 @@ class ProductionApi(context: Context) {
                 .put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
                 .put("deviceType", "tv")
                 .put("platform", "android-tv")
-                .put("appVersion", "1.0.0"),
+                .put("appVersion", BuildConfig.VERSION_NAME),
             authenticated = false,
         )
         return parseProductionQrChallenge(response, ::resolvePublicUrl)
@@ -556,7 +560,7 @@ class ProductionApi(context: Context) {
     ): JSONObject {
         val token = if (authenticated) tokens?.accessToken else null
         return try {
-            execute(method, path, body, token)
+            executeWithRetry(method, path, body, token)
         } catch (error: ProductionApiException) {
             if (authenticated && refreshOnUnauthorized && error.status == 401 && tokens != null) {
                 try {
@@ -565,9 +569,42 @@ class ProductionApi(context: Context) {
                     if (refreshError.status == 401 || refreshError.status == 403) clearSession()
                     throw refreshError
                 }
-                execute(method, path, body, tokens?.accessToken)
+                executeWithRetry(method, path, body, tokens?.accessToken)
             } else {
                 throw error
+            }
+        }
+    }
+
+    private suspend fun executeWithRetry(
+        method: String,
+        path: String,
+        body: JSONObject?,
+        bearer: String?,
+    ): JSONObject {
+        if (!ProductionNetworkRetryPolicy.isSafeMethod(method)) {
+            return execute(method, path, body, bearer)
+        }
+        var attempt = 1
+        while (true) {
+            try {
+                val response = execute(method, path, body, bearer)
+                ProductionPlaybackDiagnosticsStore.update { it.copy(networkOnline = true) }
+                return response
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                ProductionPlaybackDiagnosticsStore.update {
+                    it.copy(
+                        networkOnline = error !is IOException,
+                        lastError = error.message,
+                    )
+                }
+                if (!ProductionNetworkRetryPolicy.isTransientFailure(error) || attempt >= ProductionNetworkRetryPolicy.maxAttempts) {
+                    if (error is ProductionApiException) throw error
+                    throw ProductionApiException("Netværksforbindelsen blev afbrudt. Prøv igen.", 0)
+                }
+                delay(ProductionNetworkRetryPolicy.delayMs(attempt))
+                attempt += 1
             }
         }
     }

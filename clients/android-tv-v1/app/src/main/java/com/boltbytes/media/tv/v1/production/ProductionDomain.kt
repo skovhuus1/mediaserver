@@ -105,6 +105,7 @@ data class ProductionAuthorization(
     val preparationStatusUrl: String? = null,
     val subtitlePreparationStatusUrl: String? = null,
     val streamTimelineOffsetMs: Long = 0L,
+    val streamMethod: String? = null,
 )
 
 data class ProductionPreparationStatus(
@@ -534,6 +535,8 @@ internal fun parseAuthorization(json: JSONObject, resolver: (String) -> String):
         streamTimelineOffsetMs = item.firstLong("streamTimelineOffsetMs", "timelineOffsetMs")
             .takeIf { it > 0L }
             ?: stream.firstLong("streamTimelineOffsetMs", "timelineOffsetMs"),
+        streamMethod = stream.firstString("streamMethod", "method", "playbackMethod")
+            ?: item.firstString("streamMethod", "method", "playbackMethod"),
     )
 }
 

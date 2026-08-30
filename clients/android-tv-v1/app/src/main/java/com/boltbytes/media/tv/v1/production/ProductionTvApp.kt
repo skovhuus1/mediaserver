@@ -48,6 +48,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,6 +75,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.boltbytes.media.tv.v1.ui.V1AmbientBackground
 import com.boltbytes.media.tv.v1.ui.V1Button
 import com.boltbytes.media.tv.v1.ui.V1Colors
@@ -88,7 +93,24 @@ import kotlinx.coroutines.delay
 fun ProductionTvApp(viewModel: ProductionViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val activity = LocalActivity.current
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     BackHandler(enabled = state.route != ProductionRoute.Boot) { viewModel.back() }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.resumePendingUpdateInstall()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(state.home) {
+        val urls = state.home.rows.flatMap { row ->
+            row.cards.flatMap { card -> listOf(card.posterUrl, card.backdropUrl) }
+        }.map { it?.let(viewModel.api::resolvePublicUrl) }
+        ProductionImagePipeline.prefetch(context, urls)
+    }
 
     Box(Modifier.fillMaxSize().background(V1Colors.Background)) {
         when (val route = state.route) {
@@ -482,11 +504,19 @@ private fun ProductionMediaRow(
                 val focusRequester = remember(originKey) {
                     focusRequesters.getOrPut(originKey) { FocusRequester() }
                 }
+                val rememberedFocus = ProductionFocusMemory.restore("hub")
+                LaunchedEffect(originKey, rememberedFocus) {
+                    if (rememberedFocus == originKey) {
+                        delay(120L)
+                        runCatching { focusRequester.requestFocus() }
+                    }
+                }
                 ProductionMediaCard(
                     card = card,
                     viewModel = viewModel,
                     directPlayback = directPlayback,
                     focusRequester = focusRequester,
+                    originKey = originKey,
                     onLongClick = { onOpenContext(originKey, card) },
                 )
             }
@@ -500,6 +530,7 @@ private fun ProductionMediaCard(
     viewModel: ProductionViewModel,
     directPlayback: Boolean,
     focusRequester: FocusRequester,
+    originKey: String,
     onLongClick: () -> Unit,
 ) {
     V1FocusSurface(
@@ -511,7 +542,10 @@ private fun ProductionMediaCard(
             }
         },
         onLongClick = onLongClick,
-        onFocused = { viewModel.selectHero(card) },
+        onFocused = {
+            ProductionFocusMemory.remember("hub", originKey)
+            viewModel.selectHero(card)
+        },
         modifier = Modifier.focusRequester(focusRequester).width(154.dp).height(232.dp),
         radius = 16.dp,
         focusedScale = 1.055f,

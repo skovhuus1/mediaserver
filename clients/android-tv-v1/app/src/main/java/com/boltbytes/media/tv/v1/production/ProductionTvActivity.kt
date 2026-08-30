@@ -10,6 +10,7 @@ import com.boltbytes.media.tv.v1.ui.BoltBytesTvTheme
 class ProductionTvActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ProductionImagePipeline.install(applicationContext)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or

@@ -36,9 +36,19 @@ class ProductionNextEpisodeCountdownTest {
     fun onlyCreditsMarkerTypesCanDriveTheEarlyTrigger() {
         assertTrue(isCreditsMarkerType("credits"))
         assertTrue(isCreditsMarkerType("END_CREDITS"))
+        assertTrue(isCreditsMarkerType("credit_roll"))
+        assertTrue(isCreditsMarkerType("outro"))
         assertTrue(isCreditsMarkerType("rulletekst"))
         assertFalse(isCreditsMarkerType("intro"))
         assertFalse(isCreditsMarkerType("recap"))
         assertFalse(isCreditsMarkerType("subtitle"))
+    }
+
+    @Test
+    fun endedPlaybackIsHeldUntilCountdownCompletes() {
+        assertTrue(shouldHoldEndedPlaybackForNextEpisode(false, true, "episode-2"))
+        assertFalse(shouldHoldEndedPlaybackForNextEpisode(true, true, "episode-2"))
+        assertFalse(shouldHoldEndedPlaybackForNextEpisode(false, false, "episode-2"))
+        assertFalse(shouldHoldEndedPlaybackForNextEpisode(false, true, null))
     }
 }

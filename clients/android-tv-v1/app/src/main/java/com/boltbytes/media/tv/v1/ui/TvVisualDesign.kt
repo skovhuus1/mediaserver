@@ -27,10 +27,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +51,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 object V1Colors {
     val Background = Color(0xFF05070A)
@@ -175,6 +180,11 @@ fun V1FocusSurface(
     var focused by remember { mutableStateOf(false) }
     var centerDownAt by remember { mutableLongStateOf(0L) }
     var longPressHandled by remember { mutableStateOf(false) }
+    var longPressJob by remember { mutableStateOf<Job?>(null) }
+    val longPressScope = rememberCoroutineScope()
+    DisposableEffect(Unit) {
+        onDispose { longPressJob?.cancel() }
+    }
     val scale by animateFloatAsState(
         targetValue = if (focused) focusedScale else 1f,
         animationSpec = tween(130),
@@ -218,6 +228,8 @@ fun V1FocusSurface(
                 if (state.isFocused) {
                     onFocused()
                 } else {
+                    longPressJob?.cancel()
+                    longPressJob = null
                     centerDownAt = 0L
                     longPressHandled = false
                 }
@@ -241,6 +253,15 @@ fun V1FocusSurface(
                             longPressHandled = false
                             if (onLongClick == null) {
                                 onClick()
+                            } else {
+                                longPressJob?.cancel()
+                                longPressJob = longPressScope.launch {
+                                    delay(550L)
+                                    if (centerDownAt != 0L && !longPressHandled) {
+                                        longPressHandled = true
+                                        onLongClick()
+                                    }
+                                }
                             }
                         } else if (
                             onLongClick != null &&
@@ -253,6 +274,8 @@ fun V1FocusSurface(
                         true
                     }
                     KeyEventType.KeyUp -> {
+                        longPressJob?.cancel()
+                        longPressJob = null
                         if (onLongClick != null && !longPressHandled) {
                             val heldFor = SystemClock.elapsedRealtime() - centerDownAt
                             if (heldFor >= 550L) {

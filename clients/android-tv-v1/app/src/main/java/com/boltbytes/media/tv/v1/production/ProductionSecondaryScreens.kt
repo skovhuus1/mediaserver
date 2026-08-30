@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -454,7 +455,10 @@ internal fun ProductionSettingsScreen(state: ProductionUiState, viewModel: Produ
                                 item { ProductionToggle("Anbefalinger", "Brug din historik til personlige rækker", value.recommendations) { viewModel.updatePreferences(value.copy(recommendations = it)) } }
                                 item { ProductionChoice("Afspilningshastighed", "${value.playbackRate}x", listOf("0.75x", "1.0x", "1.25x", "1.5x", "2.0x")) { label -> viewModel.updatePreferences(value.copy(playbackRate = label.removeSuffix("x").toFloat())) } }
                             }
-                            else -> item { ProductionUpdatePanel(state.updateState, viewModel) }
+                            else -> {
+                                item { ProductionUpdatePanel(state.updateState, viewModel) }
+                                item { ProductionDiagnosticsPanel() }
+                            }
                         }
                     }
                 }
@@ -499,6 +503,28 @@ private fun ProductionUpdatePanel(update: ProductionUpdateState, viewModel: Prod
                     is ProductionUpdateState.Downloading -> Unit
                     else -> V1Button("Søg efter opdatering", viewModel::checkForUpdate, icon = Icons.Rounded.Refresh)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProductionDiagnosticsPanel() {
+    val diagnostics by ProductionPlaybackDiagnosticsStore.state.collectAsStateWithLifecycle()
+    V1GlassPanel(Modifier.fillMaxWidth().height(285.dp), radius = 17.dp) {
+        Column(
+            Modifier.fillMaxSize().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Playback-diagnostik", color = V1Colors.Text, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            Text("Fase: ${diagnostics.phase}", color = V1Colors.Gold, fontSize = 10.sp)
+            Text("Session: ${diagnostics.sessionId?.take(12) ?: "Ingen"}", color = V1Colors.Muted, fontSize = 9.sp)
+            Text("Metode: ${diagnostics.streamMethod ?: "Ukendt"} · Netværk: ${if (diagnostics.networkOnline) "Online" else "Offline"}", color = V1Colors.Muted, fontSize = 9.sp)
+            Text("Kvalitet: ${diagnostics.videoHeight?.let { "${it}p" } ?: "Auto"} · ${diagnostics.videoBitrate?.let { "${it / 1000} kbps" } ?: "ukendt bitrate"}", color = V1Colors.Muted, fontSize = 9.sp)
+            Text("Buffer foran: ${diagnostics.bufferAheadMs / 1000}s · stalls: ${diagnostics.stallCount} · retry: ${diagnostics.retryAttempt}", color = V1Colors.Muted, fontSize = 9.sp)
+            Text("Tabte frames: ${diagnostics.droppedFrames}", color = V1Colors.Muted, fontSize = 9.sp)
+            diagnostics.lastError?.takeIf(String::isNotBlank)?.let { error ->
+                Text("Seneste fejl: $error", color = V1Colors.Danger, fontSize = 9.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
     }

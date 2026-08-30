@@ -136,6 +136,14 @@ class ProductionUpdateManager(private val context: Context) {
         )
     }
 
+    fun resumePendingInstall() {
+        val pending = mutableState.value as? ProductionUpdateState.PermissionRequired ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()) {
+            mutableState.value = ProductionUpdateState.Ready(pending.version, pending.file)
+            install()
+        }
+    }
+
     private suspend fun fetchRelease(): GitHubRelease = withContext(Dispatchers.IO) {
         val releases = executeArray(RELEASES_URL)
         val response = (0 until releases.length()).mapNotNull(releases::optJSONObject)
@@ -229,13 +237,18 @@ class ProductionUpdateManager(private val context: Context) {
     }
 
     private fun verifyCandidate(file: File, expectedHash: String) {
-        require(file.isFile && file.length() > 0L) { "Den downloadede APK er tom" }
-        require(sha256(file) == expectedHash) { "APK'ens SHA-256 matcher ikke releasen" }
-        val candidate = archivePackage(file) ?: error("Filen er ikke en læsbar Android APK")
-        val current = currentPackage()
-        require(candidate.packageName == EXPECTED_PACKAGE) { "APK'en har forkert package-id: ${candidate.packageName}" }
-        require(versionCode(candidate) > versionCode(current)) { "APK-versionen er ikke nyere end den installerede version" }
-        require(signerDigests(candidate) == signerDigests(current)) { "APK'en er signeret med et andet certifikat" }
+        try {
+            require(file.isFile && file.length() > 0L) { "Den downloadede APK er tom" }
+            require(sha256(file) == expectedHash) { "APK'ens SHA-256 matcher ikke releasen" }
+            val candidate = archivePackage(file) ?: error("Filen er ikke en læsbar Android APK")
+            val current = currentPackage()
+            require(candidate.packageName == EXPECTED_PACKAGE) { "APK'en har forkert package-id: ${candidate.packageName}" }
+            require(versionCode(candidate) > versionCode(current)) { "APK-versionen er ikke nyere end den installerede version" }
+            require(signerDigests(candidate) == signerDigests(current)) { "APK'en er signeret med et andet certifikat" }
+        } catch (error: Throwable) {
+            file.delete()
+            throw error
+        }
     }
 
     private fun executeArray(url: String): JSONArray {

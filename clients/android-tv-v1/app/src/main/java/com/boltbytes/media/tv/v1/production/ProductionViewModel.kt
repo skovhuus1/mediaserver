@@ -36,11 +36,13 @@ data class ProductionPlaybackRequest(
     val mediaId: String,
     val title: String,
     val startPositionMs: Long = 0L,
+    val seriesId: String? = null,
     val nextEpisodeId: String? = null,
     val nextEpisodeTitle: String? = null,
     val live: Boolean = false,
     val channelIds: List<String> = emptyList(),
     val channelIndex: Int = 0,
+    val channelNames: List<String> = emptyList(),
 )
 
 data class ProductionUiState(
@@ -224,15 +226,32 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
 
     fun playCard(card: ProductionCard, fromBeginning: Boolean = false) {
         closeContext()
-        navigate(
-            ProductionRoute.Player(
-                ProductionPlaybackRequest(
-                    mediaId = card.id,
-                    title = card.title,
-                    startPositionMs = if (fromBeginning) 0L else card.startPositionMs,
-                ),
-            ),
+        val initialRequest = ProductionPlaybackRequest(
+            mediaId = card.id,
+            title = card.title,
+            startPositionMs = if (fromBeginning) 0L else card.startPositionMs,
+            seriesId = card.seriesId,
         )
+        navigate(ProductionRoute.Player(initialRequest))
+        val seriesId = card.seriesId ?: return
+        viewModelScope.launch {
+            runCatching { loadTitleCached(seriesId) }.onSuccess { title ->
+                val episode = orderedEpisodes(title).firstOrNull { it.id == card.id } ?: return@onSuccess
+                val hydratedRequest = episodePlaybackRequest(
+                    title = title,
+                    episode = episode,
+                    startPositionMs = initialRequest.startPositionMs,
+                )
+                mutableState.update { current ->
+                    val route = current.route as? ProductionRoute.Player
+                    if (route?.request?.mediaId == card.id) {
+                        current.copy(route = ProductionRoute.Player(hydratedRequest))
+                    } else {
+                        current
+                    }
+                }
+            }
+        }
     }
 
     fun playTitle(fromBeginning: Boolean = false) {
@@ -240,55 +259,96 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
         val episode = title.resumeEpisode ?: title.nextEpisode ?: title.seasons.firstOrNull()?.episodes?.firstOrNull()
         val mediaId = if (title.type.contains("series", true) || title.seasons.isNotEmpty()) episode?.id ?: return else title.id
         val label = episode?.let { "${title.title} · S${it.seasonNumber} A${it.episodeNumber}" } ?: title.title
+        val request = if (episode != null) {
+            episodePlaybackRequest(
+                title = title,
+                episode = episode,
+                startPositionMs = if (fromBeginning) 0L else episode.startPositionMs,
+            )
+        } else {
+            ProductionPlaybackRequest(
+                mediaId = mediaId,
+                title = label,
+                startPositionMs = if (fromBeginning) 0L else title.startPositionMs,
+            )
+        }
         navigate(
-            ProductionRoute.Player(
-                ProductionPlaybackRequest(
-                    mediaId = mediaId,
-                    title = label,
-                    startPositionMs = if (fromBeginning) 0L else episode?.startPositionMs ?: title.startPositionMs,
-                    nextEpisodeId = title.nextEpisode?.id?.takeIf { it != mediaId },
-                    nextEpisodeTitle = title.nextEpisode?.title,
-                ),
-            ),
+            ProductionRoute.Player(request),
         )
     }
 
     fun playEpisode(episode: ProductionEpisode, fromBeginning: Boolean = false) {
         val title = mutableState.value.title
-        val allEpisodes = title?.seasons.orEmpty().flatMap { it.episodes }
-        val index = allEpisodes.indexOfFirst { it.id == episode.id }
-        val next = allEpisodes.getOrNull(index + 1)
+        val request = if (title != null) {
+            episodePlaybackRequest(
+                title = title,
+                episode = episode,
+                startPositionMs = if (fromBeginning) 0L else episode.startPositionMs,
+            )
+        } else {
+            ProductionPlaybackRequest(
+                mediaId = episode.id,
+                title = episode.title,
+                startPositionMs = if (fromBeginning) 0L else episode.startPositionMs,
+            )
+        }
         navigate(
-            ProductionRoute.Player(
-                ProductionPlaybackRequest(
-                    mediaId = episode.id,
-                    title = "${title?.title ?: episode.title} · S${episode.seasonNumber} A${episode.episodeNumber}",
-                    startPositionMs = if (fromBeginning) 0L else episode.startPositionMs,
-                    nextEpisodeId = next?.id,
-                    nextEpisodeTitle = next?.title,
-                ),
-            ),
+            ProductionRoute.Player(request),
+        )
+    }
+
+    private fun orderedEpisodes(title: ProductionTitle): List<ProductionEpisode> =
+        title.seasons
+            .sortedBy { it.number }
+            .flatMap { season -> season.episodes.sortedBy { it.episodeNumber } }
+
+    private fun episodePlaybackRequest(
+        title: ProductionTitle,
+        episode: ProductionEpisode,
+        startPositionMs: Long,
+    ): ProductionPlaybackRequest {
+        val episodes = orderedEpisodes(title)
+        val currentIndex = episodes.indexOfFirst { it.id == episode.id }
+        val next = episodes.getOrNull(currentIndex + 1)
+        return ProductionPlaybackRequest(
+            mediaId = episode.id,
+            title = "${title.title} · S${episode.seasonNumber} A${episode.episodeNumber}",
+            startPositionMs = startPositionMs,
+            seriesId = title.id,
+            nextEpisodeId = next?.id,
+            nextEpisodeTitle = next?.let { "${title.title} · S${it.seasonNumber} A${it.episodeNumber}" },
         )
     }
 
     fun playerEnded(request: ProductionPlaybackRequest) {
         val autoplay = mutableState.value.preferences.autoplay
-        if (autoplay && request.nextEpisodeId != null) {
-            mutableState.update {
-                it.copy(
-                    route = ProductionRoute.Player(
-                        request.copy(
-                            mediaId = request.nextEpisodeId,
-                            title = request.nextEpisodeTitle ?: "Næste afsnit",
-                            startPositionMs = 0L,
-                            nextEpisodeId = null,
-                            nextEpisodeTitle = null,
-                        ),
-                    ),
-                )
-            }
-        } else {
+        val nextEpisodeId = request.nextEpisodeId
+        if (!autoplay || nextEpisodeId.isNullOrBlank()) {
             closePlayer()
+            return
+        }
+        viewModelScope.launch {
+            val chainedRequest = request.seriesId?.let { seriesId ->
+                runCatching { loadTitleCached(seriesId) }.getOrNull()?.let { title ->
+                    orderedEpisodes(title).firstOrNull { it.id == nextEpisodeId }?.let { episode ->
+                        episodePlaybackRequest(title, episode, 0L)
+                    }
+                }
+            } ?: request.copy(
+                mediaId = nextEpisodeId,
+                title = request.nextEpisodeTitle ?: "Næste afsnit",
+                startPositionMs = 0L,
+                nextEpisodeId = null,
+                nextEpisodeTitle = null,
+            )
+            mutableState.update { current ->
+                val route = current.route as? ProductionRoute.Player
+                if (route?.request?.mediaId == request.mediaId) {
+                    current.copy(route = ProductionRoute.Player(chainedRequest))
+                } else {
+                    current
+                }
+            }
         }
     }
 
@@ -390,6 +450,7 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
                     live = true,
                     channelIds = channels.map { it.id },
                     channelIndex = channels.indexOfFirst { it.id == channel.id }.coerceAtLeast(0),
+                    channelNames = channels.map { it.name },
                 ),
             ),
         )
@@ -476,6 +537,10 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
 
     fun installUpdate() {
         updateManager.install()
+    }
+
+    fun resumePendingUpdateInstall() {
+        updateManager.resumePendingInstall()
     }
 
     fun toggleWatchlist() {
