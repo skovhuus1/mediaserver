@@ -83,6 +83,7 @@ describe('HLS stream generations', () => {
         startupVariantIndex: 0,
         readyVariants: 0,
         variantCount: 0,
+        allVariantsReady: false,
       });
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -136,6 +137,7 @@ describe('HLS stream generations', () => {
         startupVariantIndex: 0,
         readyVariants: 1,
         variantCount: 2,
+        allVariantsReady: false,
       });
     } finally {
       await rm(root, { recursive: true, force: true });

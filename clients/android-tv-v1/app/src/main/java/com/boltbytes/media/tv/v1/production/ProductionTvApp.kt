@@ -405,6 +405,7 @@ private fun ProductionHero(hero: ProductionCard?, onOpen: () -> Unit, onPlay: ()
 
 @Composable
 private fun ProductionMediaRow(row: ProductionRow, viewModel: ProductionViewModel) {
+    val directPlayback = row.startsPlaybackDirectly()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             Box(Modifier.width(4.dp).height(18.dp).background(V1Colors.Gold, RoundedCornerShape(4.dp)))
@@ -413,17 +414,17 @@ private fun ProductionMediaRow(row: ProductionRow, viewModel: ProductionViewMode
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(horizontal = 5.dp, vertical = 6.dp)) {
             items(row.cards, key = { "${row.id}-${it.id}" }) { card ->
-                ProductionMediaCard(card, viewModel)
+                ProductionMediaCard(card, viewModel, directPlayback)
             }
         }
     }
 }
 
 @Composable
-private fun ProductionMediaCard(card: ProductionCard, viewModel: ProductionViewModel) {
+private fun ProductionMediaCard(card: ProductionCard, viewModel: ProductionViewModel, directPlayback: Boolean) {
     V1FocusSurface(
         onClick = {
-            if (card.startPositionMs > 0L && !card.seriesId.isNullOrBlank()) {
+            if (directPlayback) {
                 viewModel.playCard(card)
             } else {
                 viewModel.openCard(card)

@@ -105,6 +105,37 @@ class ProductionContractsTest {
     }
 
     @Test
+    fun continueWatchingUsesEpisodePlaybackIdAndDirectAction() {
+        val row = parseHome(
+            JSONObject().put(
+                "rows",
+                JSONArray().put(
+                    JSONObject()
+                        .put("id", "continue")
+                        .put("title", "Fortsæt med at se")
+                        .put(
+                            "items",
+                            JSONArray().put(
+                                JSONObject()
+                                    .put("mediaId", "episode-42")
+                                    .put("targetKey", "series-7")
+                                    .put("title", "Afsnit 2")
+                                    .put("type", "episode")
+                                    .put("positionMs", 420_000L)
+                                    .put("durationMs", 2_400_000L)
+                                    .put("playback", JSONObject().put("id", "episode-42")),
+                            ),
+                        ),
+                ),
+            ),
+        ).rows.single()
+
+        assertTrue(row.startsPlaybackDirectly())
+        assertEquals("episode-42", row.cards.single().id)
+        assertEquals(420_000L, row.cards.single().startPositionMs)
+    }
+
+    @Test
     fun titleEpisodesAreGroupedIntoSeasons() {
         val title = parseTitle(
             JSONObject()
@@ -228,6 +259,8 @@ class ProductionContractsTest {
             JSONObject()
                 .put("sessionId", "session")
                 .put("streamUrl", "/api/v1/playback/stream.m3u8")
+                .put("transcodeStatusUrl", "/api/v1/playback/status?token=secret")
+                .put("streamTimelineOffsetMs", 420_000L)
                 .put(
                     "markers",
                     JSONArray()
@@ -239,6 +272,20 @@ class ProductionContractsTest {
         assertEquals("intro", authorization.markers.single().type)
         assertEquals(70_000L, authorization.markers.single().endMs)
         assertTrue(authorization.streamUrl.startsWith("https://"))
+        assertEquals("https://media.boltbytes.com/api/v1/playback/status?token=secret", authorization.preparationStatusUrl)
+        assertEquals(420_000L, authorization.streamTimelineOffsetMs)
+
+        val status = parsePreparationStatus(
+            JSONObject()
+                .put("state", "ready")
+                .put("readySegments", 3)
+                .put("requiredSegments", 3)
+                .put("readyVariants", 1)
+                .put("variantCount", 2)
+                .put("allVariantsReady", false),
+        )
+        assertEquals("ready", status.state)
+        assertFalse(status.allVariantsReady)
     }
 
     @Test

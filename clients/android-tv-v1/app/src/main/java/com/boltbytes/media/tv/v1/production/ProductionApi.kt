@@ -238,6 +238,16 @@ class ProductionApi(context: Context) {
         return parseAuthorization(response, ::resolvePublicUrl)
     }
 
+    suspend fun playbackPreparation(statusUrl: String): ProductionPreparationStatus =
+        parsePreparationStatus(
+            request(
+                "GET",
+                statusUrl,
+                authenticated = false,
+                refreshOnUnauthorized = false,
+            ),
+        )
+
     private fun supportedVideoCodecs(): List<String> = runCatching {
         MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
             .filterNot { it.isEncoder }

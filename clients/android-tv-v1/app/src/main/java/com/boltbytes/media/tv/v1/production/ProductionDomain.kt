@@ -94,6 +94,18 @@ data class ProductionAuthorization(
     val audioTracks: List<ProductionTrack>,
     val subtitleTracks: List<ProductionTrack>,
     val markers: List<ProductionMarker>,
+    val preparationStatusUrl: String? = null,
+    val streamTimelineOffsetMs: Long = 0L,
+)
+
+data class ProductionPreparationStatus(
+    val state: String,
+    val message: String,
+    val readySegments: Int,
+    val requiredSegments: Int,
+    val readyVariants: Int,
+    val variantCount: Int,
+    val allVariantsReady: Boolean,
 )
 
 data class ProductionProgram(
@@ -227,6 +239,11 @@ internal fun parseHome(json: JSONObject): ProductionHome {
     val hero = payload.optJSONObject("hero")?.let(::parseCard) ?: rows.firstOrNull()?.cards?.firstOrNull()
     return ProductionHome(hero, rows)
 }
+
+internal fun ProductionRow.startsPlaybackDirectly(): Boolean =
+    id.equals("continue", ignoreCase = true) ||
+        title.contains("fortsæt", ignoreCase = true) ||
+        title.contains("continue", ignoreCase = true)
 
 internal fun parseSearch(json: JSONObject): List<ProductionCard> {
     val payload = json.payload()
@@ -473,6 +490,31 @@ internal fun parseAuthorization(json: JSONObject, resolver: (String) -> String):
                     endMs = end,
                 )
             },
+        preparationStatusUrl = (
+            item.firstString("transcodeStatusUrl", "preparationStatusUrl", "statusUrl")
+                ?: stream.firstString("transcodeStatusUrl", "preparationStatusUrl", "statusUrl")
+            )?.let(resolver),
+        streamTimelineOffsetMs = item.firstLong("streamTimelineOffsetMs", "timelineOffsetMs")
+            .takeIf { it > 0L }
+            ?: stream.firstLong("streamTimelineOffsetMs", "timelineOffsetMs"),
+    )
+}
+
+internal fun parsePreparationStatus(json: JSONObject): ProductionPreparationStatus {
+    val item = json.payload()
+    val readyVariants = item.optInt("readyVariants", 0).coerceAtLeast(0)
+    val variantCount = item.optInt("variantCount", 0).coerceAtLeast(0)
+    return ProductionPreparationStatus(
+        state = item.firstString("state", "status") ?: "queued",
+        message = item.firstString("message", "detail") ?: "Forbereder afspilning",
+        readySegments = item.optInt("readySegments", 0).coerceAtLeast(0),
+        requiredSegments = item.optInt("requiredSegments", 0).coerceAtLeast(0),
+        readyVariants = readyVariants,
+        variantCount = variantCount,
+        allVariantsReady = item.optBoolean(
+            "allVariantsReady",
+            variantCount > 0 && readyVariants >= variantCount,
+        ),
     )
 }
 

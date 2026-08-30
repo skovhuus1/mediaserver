@@ -4,6 +4,12 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.7 - 2026-08-30
+
+- Retter HLS-resume, saa den genererede nulbaserede stream ikke soeges en ekstra gang til den globale episodeposition.
+- Udvider transcode-status med readiness for alle annoncerede renditions, saa TV-klienten starter paa en stabil baseline og foerst frigiver Auto-kvalitet, naar alle varianter er klar.
+- TV V1 opretter en frisk playback-session ved HTTP-streamfejl og bruger episodekortet direkte fra Fortsaet med at se.
+
 ## 0.3.6 - 2026-08-26
 
 - Tilfoejer daglige tidsvinduer for playback-analyse med IANA-tidszone, nattevinduer og manuel pause som hoejeste prioritet.

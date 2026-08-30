@@ -141,15 +141,16 @@ export class TranscodeStreamService {
       const startupVariants = startupPolicy === 'baseline_first'
         ? variants.slice(0, 1)
         : variants;
-      for (const variant of startupVariants) {
+      const inspectedVariants = new Map<string, Promise<number>>();
+      const inspectVariant = (variant: string) => {
+        const existing = inspectedVariants.get(variant);
+        if (existing) return existing;
+        const inspection = (async () => {
         if (!isAllowedHlsAsset(variant) || !variant.endsWith('.m3u8')) {
           throw new Error('HLS master contains an invalid variant');
         }
         const playlist = await readFile(this.assetPath(session.id, variant, jobGeneration), 'utf8');
         const segments = hlsPlaylistSegments(playlist);
-        readySegments = readySegments === 0
-          ? segments.length
-          : Math.min(readySegments, segments.length);
         if (!isHlsStartupBufferReady(playlist, requiredStartupSegments)) {
           throw new Error('HLS variant does not have a stable startup buffer');
         }
@@ -159,8 +160,17 @@ export class TranscodeStreamService {
             ...segments.slice(0, requiredStartupSegments),
           ].map((asset) => access(this.assetPath(session.id, asset, jobGeneration))),
         );
-        readyVariants += 1;
-      }
+          return segments.length;
+        })();
+        inspectedVariants.set(variant, inspection);
+        return inspection;
+      };
+      const startupSegmentCounts = await Promise.all(startupVariants.map(inspectVariant));
+      readySegments = Math.min(...startupSegmentCounts);
+      const variantReadiness = await Promise.all(
+        variants.map((variant) => inspectVariant(variant).then(() => true).catch(() => false)),
+      );
+      readyVariants = variantReadiness.filter(Boolean).length;
       return {
         state: 'ready',
         message: session.method === 'direct_stream' ? 'Direct Stream HLS is ready' : 'Transcoded HLS is ready',
@@ -171,6 +181,7 @@ export class TranscodeStreamService {
         startupVariantIndex: 0,
         readyVariants,
         variantCount,
+        allVariantsReady: variantCount > 0 && readyVariants === variantCount,
       };
     } catch {
       // The event playlists grow atomically while FFmpeg prepares a stable startup buffer.
@@ -191,6 +202,7 @@ export class TranscodeStreamService {
       startupVariantIndex: 0,
       readyVariants,
       variantCount,
+      allVariantsReady: false,
     };
   }
 

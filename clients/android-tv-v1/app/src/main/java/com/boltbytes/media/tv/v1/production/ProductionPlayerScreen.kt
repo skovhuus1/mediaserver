@@ -114,9 +114,12 @@ private class ProductionPlaybackEngine(
     private val trackSelector = DefaultTrackSelector(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val finished = AtomicBoolean(false)
+    private val restarting = AtomicBoolean(false)
     private var heartbeatJob: Job? = null
     private var progressJob: Job? = null
+    private var variantMonitorJob: Job? = null
     private var channelIndex = request.channelIndex
+    private var automaticRecoveryAttempts = 0
 
     val player: ExoPlayer = ExoPlayer.Builder(context)
         .setTrackSelector(trackSelector)
@@ -140,23 +143,77 @@ private class ProductionPlaybackEngine(
     val state: StateFlow<PlayerEngineState> = mutableState.asStateFlow()
 
     suspend fun start() {
+        authorizeAndStart(request.startPositionMs)
+    }
+
+    private suspend fun authorizeAndStart(positionMs: Long) {
         try {
             val authorization = if (request.live) api.authorizeLive(request.mediaId) else {
-                api.authorizeVod(request.mediaId, request.startPositionMs, preferences)
+                api.authorizeVod(request.mediaId, positionMs, preferences)
             }
             mutableState.value = mutableState.value.copy(authorization = authorization, preparing = true, error = null)
-            loadAuthorization(authorization, request.startPositionMs)
             startLeases()
+            val preparation = awaitPreparation(authorization)
+            val stageLowestRendition = !request.live &&
+                preferences.qualityMode.equals("auto", ignoreCase = true) &&
+                preparation?.allVariantsReady == false
+            forceLowestBitrate(stageLowestRendition)
+            loadAuthorization(authorization, positionMs)
+            monitorVariantReadiness(authorization, preparation)
         } catch (error: Exception) {
             mutableState.value = mutableState.value.copy(preparing = false, buffering = false, error = error.message ?: "Afspilningen kunne ikke startes")
         }
+    }
+
+    private suspend fun awaitPreparation(authorization: ProductionAuthorization): ProductionPreparationStatus? {
+        val statusUrl = authorization.preparationStatusUrl ?: return null
+        val deadline = android.os.SystemClock.elapsedRealtime() + 120_000L
+        while (!finished.get()) {
+            val status = api.playbackPreparation(statusUrl)
+            when (status.state.lowercase()) {
+                "ready" -> return status
+                "failed" -> error(status.message)
+            }
+            if (android.os.SystemClock.elapsedRealtime() >= deadline) {
+                error("Serveren nåede ikke at klargøre streamen")
+            }
+            delay(500L)
+        }
+        return null
+    }
+
+    private fun monitorVariantReadiness(
+        authorization: ProductionAuthorization,
+        preparation: ProductionPreparationStatus?,
+    ) {
+        variantMonitorJob?.cancel()
+        val statusUrl = authorization.preparationStatusUrl ?: return
+        if (preparation?.allVariantsReady != false || !preferences.qualityMode.equals("auto", ignoreCase = true)) return
+        variantMonitorJob = scope.launch {
+            while (isActive && !finished.get()) {
+                delay(1_000L)
+                val status = runCatching { api.playbackPreparation(statusUrl) }.getOrNull() ?: continue
+                if (status.state.equals("failed", ignoreCase = true)) return@launch
+                if (status.allVariantsReady) {
+                    forceLowestBitrate(false)
+                    return@launch
+                }
+            }
+        }
+    }
+
+    private fun forceLowestBitrate(enabled: Boolean) {
+        trackSelector.parameters = trackSelector.buildUponParameters()
+            .setForceLowestBitrate(enabled)
+            .build()
     }
 
     private fun loadAuthorization(authorization: ProductionAuthorization, positionMs: Long) {
         val item = MediaItem.Builder().setUri(authorization.streamUrl).apply {
             authorization.contentType?.takeIf(String::isNotBlank)?.let { setMimeType(it) }
         }.build()
-        player.setMediaItem(item, positionMs.coerceAtLeast(0L))
+        val localPositionMs = (positionMs - authorization.streamTimelineOffsetMs).coerceAtLeast(0L)
+        player.setMediaItem(item, localPositionMs)
         player.prepare()
         player.playWhenReady = true
     }
@@ -169,8 +226,8 @@ private class ProductionPlaybackEngine(
                 val authorization = mutableState.value.authorization
                 if (authorization != null) {
                     runCatching {
-                        if (request.live) api.heartbeatLive(authorization.sessionId, authorization.streamToken, player.currentPosition)
-                        else api.heartbeatVod(authorization.sessionId, player.currentPosition, player.isPlaying)
+                        if (request.live) api.heartbeatLive(authorization.sessionId, authorization.streamToken, absolutePositionMs())
+                        else api.heartbeatVod(authorization.sessionId, absolutePositionMs(), player.isPlaying)
                     }
                 }
                 delay(5_000L)
@@ -181,7 +238,7 @@ private class ProductionPlaybackEngine(
                 while (isActive && !finished.get()) {
                     delay(15_000L)
                     val authorization = mutableState.value.authorization ?: continue
-                    runCatching { api.progressVod(authorization.sessionId, player.currentPosition, safeDuration(), false) }
+                    runCatching { api.progressVod(authorization.sessionId, absolutePositionMs(), absoluteDurationMs(), false) }
                 }
             }
         }
@@ -201,20 +258,50 @@ private class ProductionPlaybackEngine(
     }
 
     fun seekTo(positionMs: Long) {
-        if (player.isCurrentMediaItemSeekable) player.seekTo(positionMs.coerceAtLeast(0L))
+        if (!player.isCurrentMediaItemSeekable) return
+        val offset = mutableState.value.authorization?.streamTimelineOffsetMs ?: 0L
+        player.seekTo((positionMs - offset).coerceAtLeast(0L))
     }
 
     fun retry() {
-        if (mutableState.value.authorization == null || player.currentMediaItem == null) {
-            scope.launch { start() }
-            return
+        automaticRecoveryAttempts = 0
+        restartPlayback()
+    }
+
+    private fun restartPlayback() {
+        if (!restarting.compareAndSet(false, true) || finished.get()) return
+        scope.launch {
+            val resumePositionMs = absolutePositionMs().coerceAtLeast(request.startPositionMs)
+            val resumeDurationMs = absoluteDurationMs()
+            val previous = mutableState.value.authorization
+            heartbeatJob?.cancel()
+            progressJob?.cancel()
+            variantMonitorJob?.cancel()
+            player.stop()
+            if (previous != null) {
+                if (request.live) {
+                    runCatching { api.releaseLive(previous.sessionId, previous.streamToken) }
+                } else {
+                    runCatching { api.progressVod(previous.sessionId, resumePositionMs, resumeDurationMs, false) }
+                    runCatching { api.releaseVod(previous.sessionId) }
+                }
+            }
+            mutableState.value = mutableState.value.copy(
+                authorization = null,
+                preparing = true,
+                buffering = false,
+                error = null,
+            )
+            try {
+                authorizeAndStart(resumePositionMs)
+            } finally {
+                restarting.set(false)
+            }
         }
-        mutableState.value = mutableState.value.copy(error = null, preparing = true)
-        player.prepare()
-        player.play()
     }
 
     fun setQuality(label: String) {
+        forceLowestBitrate(false)
         val builder = player.trackSelectionParameters.buildUpon()
         when (label) {
             "Auto", "Original" -> builder.setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
@@ -263,9 +350,10 @@ private class ProductionPlaybackEngine(
         if (!finished.compareAndSet(false, true)) return
         heartbeatJob?.cancel()
         progressJob?.cancel()
+        variantMonitorJob?.cancel()
         val authorization = mutableState.value.authorization
-        val position = player.currentPosition.coerceAtLeast(0L)
-        val duration = safeDuration()
+        val position = absolutePositionMs()
+        val duration = absoluteDurationMs()
         player.playWhenReady = false
         player.release()
         scope.launch {
@@ -295,6 +383,15 @@ private class ProductionPlaybackEngine(
     }
 
     override fun onPlayerError(error: PlaybackException) {
+        if (
+            error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
+            automaticRecoveryAttempts < 1 &&
+            !finished.get()
+        ) {
+            automaticRecoveryAttempts += 1
+            restartPlayback()
+            return
+        }
         mutableState.value = mutableState.value.copy(
             preparing = false,
             buffering = false,
@@ -303,6 +400,15 @@ private class ProductionPlaybackEngine(
     }
 
     private fun safeDuration(): Long = player.duration.takeIf { it != C.TIME_UNSET && it > 0L } ?: 0L
+    fun absolutePositionMs(): Long = (
+        (mutableState.value.authorization?.streamTimelineOffsetMs ?: 0L) + player.currentPosition.coerceAtLeast(0L)
+        ).coerceAtLeast(0L)
+    fun absoluteDurationMs(): Long = (
+        (mutableState.value.authorization?.streamTimelineOffsetMs ?: 0L) + safeDuration()
+        ).coerceAtLeast(0L)
+    fun absoluteBufferedPositionMs(): Long = (
+        (mutableState.value.authorization?.streamTimelineOffsetMs ?: 0L) + player.bufferedPosition.coerceAtLeast(0L)
+        ).coerceAtLeast(0L)
 }
 
 @Composable
@@ -350,9 +456,9 @@ internal fun ProductionPlayerScreen(
 
     LaunchedEffect(engine) {
         while (true) {
-            positionMs = engine.player.currentPosition.coerceAtLeast(0L)
-            durationMs = engine.player.duration.takeIf { it != C.TIME_UNSET && it > 0L } ?: 0L
-            bufferedMs = engine.player.bufferedPosition.coerceAtLeast(positionMs)
+            positionMs = engine.absolutePositionMs()
+            durationMs = engine.absoluteDurationMs()
+            bufferedMs = engine.absoluteBufferedPositionMs().coerceAtLeast(positionMs)
             delay(400L)
         }
     }
