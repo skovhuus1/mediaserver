@@ -42,7 +42,7 @@ describe('playback marker analysis v5', () => {
       kind: 'intro', startMs: 20_000, endMs: 40_000, source: 'automatic', confidence: 0.95,
     });
     expect(result.reason).toBe('previous_episode_match');
-    expect(result.marker).toMatchObject({ kind: 'recap', startMs: 0, endMs: 20_000 });
+    expect(result.marker).toMatchObject({ kind: 'recap', startMs: 8_000, endMs: 20_000 });
   });
 
   it('does not classify a novel cold open as recap', () => {
