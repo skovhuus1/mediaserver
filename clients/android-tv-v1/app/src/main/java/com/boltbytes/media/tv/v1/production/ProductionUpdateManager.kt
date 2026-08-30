@@ -76,25 +76,28 @@ class ProductionUpdateManager(private val context: Context) {
         val available = mutableState.value as? ProductionUpdateState.Available ?: return
         var stage = "Forberedelse af opdatering"
         try {
-            stage = "Hentning af releaseoplysninger"
-            val release = fetchRelease()
-            require(release.version == available.version) { "Den seneste release ændrede sig. Kontrollér igen." }
-            stage = "Hentning af checksum"
-            val expectedHash = parseReleaseChecksum(fetchText(release.checksumUrl), release.apkName)
-            stage = "Oprettelse af opdateringsmappe"
-            val externalRoot = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            val directory = externalRoot?.let { File(it, "updates") } ?: File(context.filesDir, "updates")
-            require(directory.exists() || directory.mkdirs()) { "Opdateringsmappen kunne ikke oprettes" }
-            val temporary = File(directory, "${release.apkName}.part")
-            val target = File(directory, release.apkName)
-            stage = "Download af APK"
-            downloadFile(release.apkUrl, temporary, release.version)
-            stage = "Validering af APK"
-            verifyCandidate(temporary, expectedHash.lowercase())
-            if (target.exists()) target.delete()
-            stage = "Færdiggørelse af APK"
-            require(temporary.renameTo(target)) { "Den validerede APK kunne ikke færdiggøres" }
-            mutableState.value = ProductionUpdateState.Ready(release.version, target)
+            val completed = withContext(Dispatchers.IO) {
+                stage = "Hentning af releaseoplysninger"
+                val release = fetchRelease()
+                require(release.version == available.version) { "Den seneste release ændrede sig. Kontrollér igen." }
+                stage = "Hentning af checksum"
+                val expectedHash = parseReleaseChecksum(fetchText(release.checksumUrl), release.apkName)
+                stage = "Oprettelse af opdateringsmappe"
+                val externalRoot = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                val directory = externalRoot?.let { File(it, "updates") } ?: File(context.filesDir, "updates")
+                require(directory.exists() || directory.mkdirs()) { "Opdateringsmappen kunne ikke oprettes" }
+                val temporary = File(directory, "${release.apkName}.part")
+                val target = File(directory, release.apkName)
+                stage = "Download af APK"
+                downloadFile(release.apkUrl, temporary, release.version)
+                stage = "Validering af APK"
+                verifyCandidate(temporary, expectedHash.lowercase())
+                if (target.exists()) target.delete()
+                stage = "Færdiggørelse af APK"
+                require(temporary.renameTo(target)) { "Den validerede APK kunne ikke færdiggøres" }
+                ProductionUpdateState.Ready(release.version, target)
+            }
+            mutableState.value = completed
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
