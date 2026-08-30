@@ -29,12 +29,20 @@ describe('playback marker analysis v5', () => {
 
   it('detects recap only when the opening reuses previous episode frames before a proven intro', () => {
     const opening = fingerprint(['0000000000000001', '0000000000000002', '0000000000000003', '0000000000000004', '0000000000000005', '0000000000000006', '0000000000000007', '0000000000000008', '0000000000000009', '000000000000000a']);
-    const previous = fingerprint(['fffffffffffffff1', '0000000000000001', '0000000000000002', '0000000000000003'], 5);
+    const previous = fingerprint([
+      'fffffffffffffff1',
+      '0000000000000001',
+      '0000000000000002',
+      '0000000000000003',
+      '0000000000000004',
+      '0000000000000005',
+      '0000000000000006',
+    ]);
     const result = analyzePreviousEpisodeRecap(opening, [previous], {
       kind: 'intro', startMs: 20_000, endMs: 40_000, source: 'automatic', confidence: 0.95,
     });
     expect(result.reason).toBe('previous_episode_match');
-    expect(result.marker).toMatchObject({ kind: 'recap', startMs: 0, endMs: 20_000 });
+    expect(result.marker).toMatchObject({ kind: 'recap', startMs: 8_000, endMs: 20_000 });
   });
 
   it('does not classify a novel cold open as recap', () => {

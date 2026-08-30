@@ -1,6 +1,6 @@
 export type TimelineMarkerKind = 'intro' | 'recap' | 'credits';
 
-export const playbackMarkerAnalysisVersion = 6;
+export const playbackMarkerAnalysisVersion = 7;
 
 export type TimelineMarker = {
   kind: TimelineMarkerKind;
@@ -19,7 +19,7 @@ export type TrickplayCue = {
 };
 
 export type FrameFingerprint = {
-  version?: 1 | 2 | 3 | 4;
+  version?: 1 | 2 | 3 | 4 | 5;
   intervalSeconds: number;
   offsetSeconds: number;
   hashes: string[];
@@ -155,6 +155,7 @@ type RepeatedSegmentMatch = {
   startIndex: number;
   length: number;
   matchRatio: number;
+  matchedFrames: number;
 };
 
 function analyzeRepeatedSegment(
@@ -291,7 +292,7 @@ function bestAlignedSequence(
         && matchRatio >= options.minimumSequenceMatchRatio
         && diverseEnough
         && (!best || length > best.length || (length === best.length && matchRatio > best.matchRatio))
-      ) best = { startIndex: runStart, length, matchRatio };
+      ) best = { startIndex: runStart, length, matchRatio, matchedFrames: matchedIndexes.length };
     };
 
     for (let left = minimumPrimaryIndex; left <= maximumPrimaryIndex; left += 1) {
@@ -351,44 +352,54 @@ export function analyzePreviousEpisodeRecap(
   if (candidateEndMs < 20_000) {
     return diagnostics('not-detected', 'no_intro_boundary', previousEpisodes.length, 0, usableFrameRatio, null, null);
   }
-  const references = previousEpisodes.filter((candidate) => candidate.hashes.length > 0);
+  const references = previousEpisodes.filter((candidate) => (
+    candidate.hashes.length > 0
+    && (candidate.version ?? 1) === (opening.version ?? 1)
+    && candidate.intervalSeconds === opening.intervalSeconds
+  ));
   if (!references.length) {
     return diagnostics('pending', 'insufficient_previous_episodes', 0, 0, usableFrameRatio, null, null);
   }
-  const maximumHashDistance = options.maximumHashDistance ?? 10;
-  const minimumFrameQuality = options.minimumFrameQuality ?? 0.16;
-  const candidateIndexes = opening.hashes.flatMap((_, index) => {
-    const frameMs = (opening.offsetSeconds + index * opening.intervalSeconds) * 1_000;
-    return frameMs < candidateEndMs && frameIsUsable(opening, index, minimumFrameQuality) ? [index] : [];
+  const minimumMatchedFrames = options.minimumMatchedFrames ?? Math.max(3, Math.ceil(6 / opening.intervalSeconds));
+  const matches = references.flatMap((reference) => {
+    const match = bestAlignedSequence(opening, reference, {
+      maximumEndSeconds: candidateEndMs / 1_000,
+      maximumGapFrames: 2,
+      maximumHashDistance: options.maximumHashDistance ?? 10,
+      maximumStartSeconds: candidateEndMs / 1_000,
+      minimumFrameQuality: options.minimumFrameQuality ?? 0.16,
+      minimumFrames: minimumMatchedFrames,
+      minimumSequenceMatchRatio: options.minimumSupportRatio ?? 0.67,
+      minimumStartSeconds: 0,
+      temporalToleranceFrames: 1,
+    });
+    return match ? [match] : [];
   });
-  const matchedIndexes = candidateIndexes.filter((index) => references.some((reference) => reference.hashes.some((_, referenceIndex) => (
-    frameIsUsable(reference, referenceIndex, minimumFrameQuality)
-    && hammingDistance(opening.hashes[index]!, reference.hashes[referenceIndex]!) <= maximumHashDistance
-  ))));
-  const minimumMatchedFrames = options.minimumMatchedFrames ?? 3;
-  const supportRatio = candidateIndexes.length ? matchedIndexes.length / candidateIndexes.length : 0;
-  const firstMatchedMs = matchedIndexes.length
-    ? Math.round((opening.offsetSeconds + matchedIndexes[0]! * opening.intervalSeconds) * 1_000)
+  const firstMatch = matches.sort((left, right) => left.startIndex - right.startIndex)[0];
+  const firstMatchedMs = firstMatch
+    ? Math.round((opening.offsetSeconds + firstMatch.startIndex * opening.intervalSeconds) * 1_000)
     : Number.POSITIVE_INFINITY;
-  if (
-    firstMatchedMs > 5_000
-    || matchedIndexes.length < minimumMatchedFrames
-    || supportRatio < (options.minimumSupportRatio ?? 0.25)
-  ) {
-    return diagnostics('not-detected', 'no_repeated_sequence', references.length, matchedIndexes.length, usableFrameRatio, null, null);
+  const supportCount = matches.reduce((total, match) => total + match.matchedFrames, 0);
+  if (!firstMatch || firstMatchedMs > 10_000 || supportCount < minimumMatchedFrames) {
+    return diagnostics('not-detected', 'no_repeated_sequence', references.length, supportCount, usableFrameRatio, null, null);
   }
-  const confidence = Math.min(0.98, 0.79 + supportRatio * 0.2 + Math.min(0.08, matchedIndexes.length / 25 * 0.08));
+  const alignmentQuality = median(matches.map((match) => match.matchRatio));
+  const referenceSupport = matches.length / references.length;
+  const confidence = Math.min(
+    0.98,
+    0.76 + alignmentQuality * 0.1 + referenceSupport * 0.06 + Math.min(0.06, supportCount / 30 * 0.06),
+  );
   if (confidence < (options.minimumConfidence ?? 0.85)) {
-    return diagnostics('not-detected', 'no_repeated_sequence', references.length, matchedIndexes.length, usableFrameRatio, null, null);
+    return diagnostics('not-detected', 'no_repeated_sequence', references.length, supportCount, usableFrameRatio, null, null);
   }
   const marker: TimelineMarker = {
     kind: 'recap',
-    startMs: 0,
+    startMs: firstMatchedMs <= 5_000 ? 0 : firstMatchedMs,
     endMs: candidateEndMs,
     source: 'automatic',
     confidence,
   };
-  return diagnostics('detected', 'previous_episode_match', references.length, matchedIndexes.length, usableFrameRatio, confidence, marker);
+  return diagnostics('detected', 'previous_episode_match', references.length, supportCount, usableFrameRatio, confidence, marker);
 }
 
 export type CreditsTailSample = {

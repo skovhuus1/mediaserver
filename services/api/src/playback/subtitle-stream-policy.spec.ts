@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   embeddedSubtitleDescriptors,
+  decodeSubtitleBuffer,
   sidecarSubtitleDescriptor,
   subtitleToWebVtt,
 } from './subtitle-stream-policy';
@@ -12,6 +13,8 @@ describe('subtitle stream policy', () => {
       label: 'Dansk (tvungen)',
       format: 'srt',
       forced: true,
+      hearingImpaired: false,
+      default: false,
     });
     expect(sidecarSubtitleDescriptor('Movie (2026).mkv', 'Another Movie.da.srt')).toBeNull();
   });
@@ -22,6 +25,8 @@ describe('subtitle stream policy', () => {
       label: 'Dansk (hørehæmmede)',
       format: 'vtt',
       forced: false,
+      hearingImpaired: true,
+      default: false,
     });
     expect(sidecarSubtitleDescriptor('Show.S01E01.mkv', 'Dansk.forced.srt')).toBeNull();
     expect(sidecarSubtitleDescriptor('Show.S01E01.mkv', 'Dansk.forced.srt', {
@@ -31,12 +36,20 @@ describe('subtitle stream policy', () => {
       label: 'Dansk (tvungen)',
       format: 'srt',
       forced: true,
+      hearingImpaired: false,
+      default: false,
     });
   });
 
   it('converts SRT timestamps to valid WebVTT', () => {
     expect(subtitleToWebVtt('1\r\n00:00:00,100 --> 00:00:01,200\r\nHej\r\n', 'srt'))
       .toBe('WEBVTT\n\n1\n00:00:00.100 --> 00:00:01.200\nHej\n');
+  });
+
+  it('decodes UTF-16 and Windows-1252 subtitle files without losing Danish letters', () => {
+    const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('ÆØÅ', 'utf16le')]);
+    expect(decodeSubtitleBuffer(utf16)).toBe('ÆØÅ');
+    expect(decodeSubtitleBuffer(Buffer.from([0xc6, 0xd8, 0xc5]))).toBe('ÆØÅ');
   });
 
   it('only exposes embedded text subtitle codecs', () => {
@@ -50,6 +63,8 @@ describe('subtitle stream policy', () => {
       language: 'da',
       label: 'Dansk',
       forced: false,
+      hearingImpaired: false,
+      default: false,
     }]);
   });
 
@@ -67,6 +82,8 @@ describe('subtitle stream policy', () => {
       language: 'en',
       label: 'Engelsk (tvungen)',
       forced: true,
+      hearingImpaired: false,
+      default: false,
     }]);
   });
 
@@ -83,6 +100,8 @@ describe('subtitle stream policy', () => {
       language: 'da',
       label: 'Dansk (tvungen, hørehæmmede)',
       forced: true,
+      hearingImpaired: true,
+      default: false,
     }]);
   });
 });

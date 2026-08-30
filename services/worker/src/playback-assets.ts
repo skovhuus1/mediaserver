@@ -26,12 +26,13 @@ const columns = 5;
 const rows = 5;
 const fingerprintIntervalSeconds = 2;
 const fingerprintOffsetSeconds = 0;
-const fingerprintVersion = 4;
+const fingerprintVersion = 5;
 
 type PlaybackFingerprintSet = {
-  version: 4;
+  version: 5;
   opening: FrameFingerprint;
   whole: FrameFingerprint;
+  ending: FrameFingerprint;
 };
 
 type PlaybackAnalysisCommit = {
@@ -265,7 +266,7 @@ async function discoverMarkers(
         .filter((candidate) => episodeComesBefore(candidate, media))
         .sort((left, right) => (right.seasonNumber ?? 0) - (left.seasonNumber ?? 0) || (right.episodeNumber ?? 0) - (left.episodeNumber ?? 0))
         .slice(0, 3)
-        .map((candidate) => candidate.fingerprint.whole);
+        .map((candidate) => candidate.fingerprint.ending);
       const detection = analyzePreviousEpisodeRecap(
         fingerprint.opening,
         previousEpisodes,
@@ -333,16 +334,19 @@ function episodeSeriesWhere(media: EpisodeSeriesIdentity): Prisma.MediaItemWhere
 }
 
 export function pendingSeasonReanalysisMediaIds(
-  assets: readonly { mediaId: string; manifest: Prisma.JsonValue; sourceCurrent: boolean }[],
+  assets: readonly { mediaId: string; manifest: Prisma.JsonValue; sourceCurrent: boolean; recapCanConverge?: boolean }[],
   activeMediaIds: ReadonlySet<string>,
 ): string[] {
   return assets.flatMap((asset) => {
     if (!asset.sourceCurrent || activeMediaIds.has(asset.mediaId)) return [];
     const analysis = jsonObject(jsonObject(asset.manifest).analysis);
     const intro = jsonObject(analysis.intro);
+    const recap = jsonObject(analysis.recap);
     return analysis.markerAnalysisVersion === playbackMarkerAnalysisVersion
-      && intro.state === 'pending'
-      && intro.reason === 'insufficient_references'
+      && (
+        (intro.state === 'pending' && intro.reason === 'insufficient_references')
+        || (asset.recapCanConverge === true && recap.state === 'pending' && recap.reason === 'insufficient_previous_episodes')
+      )
       ? [asset.mediaId]
       : [];
   });
@@ -377,15 +381,23 @@ async function enqueuePendingSeasonReanalysis(prisma: PrismaClient, media: Episo
         mediaId: true,
         manifest: true,
         sourceModifiedAt: true,
-        media: { select: { file: { select: { modifiedAt: true } } } },
+        media: { select: { episodeNumber: true, file: { select: { modifiedAt: true } } } },
       },
       orderBy: { media: { episodeNumber: 'asc' } },
       take: 48,
     });
+    const sourceCurrentEpisodeNumbers = cohort.flatMap((asset) => (
+      playbackFingerprintMatchesSource(asset.sourceModifiedAt, asset.media.file?.modifiedAt ?? null)
+      && asset.media.episodeNumber !== null
+        ? [asset.media.episodeNumber]
+        : []
+    ));
     const currentCohort = cohort.map((asset) => ({
       mediaId: asset.mediaId,
       manifest: asset.manifest,
       sourceCurrent: playbackFingerprintMatchesSource(asset.sourceModifiedAt, asset.media.file?.modifiedAt ?? null),
+      recapCanConverge: asset.media.episodeNumber !== null
+        && sourceCurrentEpisodeNumbers.some((episodeNumber) => episodeNumber < asset.media.episodeNumber!),
     }));
     if (currentCohort.filter((asset) => asset.sourceCurrent).length < 3) return;
     const pendingIds = pendingSeasonReanalysisMediaIds(currentCohort, new Set()).filter((mediaId) => mediaId !== media.id);
@@ -505,7 +517,13 @@ async function createFingerprintSet(sourcePath: string, durationMs: number): Pro
     offsetSeconds: 0,
     durationSeconds,
   });
-  return { version: fingerprintVersion, opening, whole };
+  const endingDurationSeconds = Math.min(12 * 60, durationSeconds);
+  const ending = await createFingerprint(sourcePath, {
+    intervalSeconds: fingerprintIntervalSeconds,
+    offsetSeconds: Math.max(0, durationSeconds - endingDurationSeconds),
+    durationSeconds: endingDurationSeconds,
+  });
+  return { version: fingerprintVersion, opening, whole, ending };
 }
 
 async function createFingerprint(
@@ -633,7 +651,7 @@ function playbackFingerprint(value: Prisma.JsonValue): FrameFingerprint | null {
     : undefined;
   return Number.isFinite(intervalSeconds) && Number.isFinite(offsetSeconds)
     ? {
-        version: parsed.version === 4 ? 4 : parsed.version === 3 ? 3 : parsed.version === 2 ? 2 : 1,
+        version: parsed.version === 5 ? 5 : parsed.version === 4 ? 4 : parsed.version === 3 ? 3 : parsed.version === 2 ? 2 : 1,
         intervalSeconds,
         offsetSeconds,
         hashes: parsed.hashes as string[],
@@ -644,13 +662,14 @@ function playbackFingerprint(value: Prisma.JsonValue): FrameFingerprint | null {
 
 function playbackFingerprintSet(value: Prisma.JsonValue): PlaybackFingerprintSet | null {
   const parsed = jsonObject(value);
-  if (parsed.version === fingerprintVersion && parsed.opening && parsed.whole) {
+  if (parsed.version === fingerprintVersion && parsed.opening && parsed.whole && parsed.ending) {
     const opening = playbackFingerprint(parsed.opening as Prisma.JsonValue);
     const whole = playbackFingerprint(parsed.whole as Prisma.JsonValue);
-    if (opening && whole) return { version: fingerprintVersion, opening, whole };
+    const ending = playbackFingerprint(parsed.ending as Prisma.JsonValue);
+    if (opening && whole && ending) return { version: fingerprintVersion, opening, whole, ending };
   }
   const legacy = playbackFingerprint(value);
-  return legacy ? { version: fingerprintVersion, opening: legacy, whole: legacy } : null;
+  return legacy ? { version: fingerprintVersion, opening: legacy, whole: legacy, ending: legacy } : null;
 }
 
 function jsonObject(value: unknown): Record<string, unknown> {

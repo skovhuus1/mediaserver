@@ -1,5 +1,5 @@
 import { ForbiddenException, HttpException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { buildAdaptiveQualityPlan, detectVideoSignalProfile, isHevcCodec, resolveCpuTranscodeProfile, type AuthenticatedUser } from '@boltbytes/contracts';
+import { buildAdaptiveQualityPlan, chooseDefaultWebVttSubtitle, detectVideoSignalProfile, isHevcCodec, resolveCpuTranscodeProfile, type AuthenticatedUser } from '@boltbytes/contracts';
 import { availableParallelism } from 'node:os';
 import { isPrivileged } from '../common/auth';
 import { correlationId } from '../common/request-context';
@@ -260,6 +260,11 @@ export class PlaybackService {
       preferredAudioLanguages,
     );
     const selectedAudioTrack = selectPlaybackAudioTrack(audioTracks, undefined);
+    const preferredSubtitleLanguages = stringArray(
+      profilePreferences?.preferredSubtitleLanguages,
+      ['da', 'en'],
+    );
+    const subtitleMode = (profilePreferences?.subtitleMode ?? 'auto') as 'auto' | 'always' | 'forced' | 'off';
     const requestedUpscaleMode = (
       dto.capabilities.upscaleMode ?? device.upscaleMode ?? 'server'
     ) as 'off' | 'device' | 'server';
@@ -418,6 +423,12 @@ export class PlaybackService {
         true,
       );
       const embeddedSubtitles = subtitleTracks.some((track) => track.id.startsWith('embedded-'));
+      const recommendedSubtitleTrackId = chooseDefaultWebVttSubtitle(
+        subtitleTracks,
+        preferredSubtitleLanguages,
+        subtitleMode,
+        selectedAudioTrack?.language,
+      );
       if (decision.method === 'direct_play' && embeddedSubtitles) {
         try {
           await this.transcodeStream.enqueueSubtitles(session.id, actor.accountId);
@@ -435,6 +446,7 @@ export class PlaybackService {
         streamTimelineOffsetMs: decision.method === 'direct_play' ? 0 : startPositionMs,
         contentType: decision.method === 'direct_play' ? this.directContentType(media.container) : 'application/x-mpegURL',
         subtitleTracks,
+        recommendedSubtitleTrackId,
         audioTracks: audioTracksWithSelection(audioTracks, selectedAudioTrack),
         selectedAudioTrackId: selectedAudioTrack?.id ?? null,
         ...(embeddedSubtitles
@@ -450,8 +462,8 @@ export class PlaybackService {
           playbackRate: device.playbackRate,
           hdrMode: device.hdrMode,
           preferredAudioLanguages,
-          preferredSubtitleLanguages: profilePreferences?.preferredSubtitleLanguages ?? ['da', 'en'],
-          subtitleMode: profilePreferences?.subtitleMode ?? 'auto',
+          preferredSubtitleLanguages,
+          subtitleMode,
           autoplayNext: profilePreferences?.autoplayNext ?? true,
           subtitleStyle: profilePreferences?.subtitleStyle ?? 'broadcast',
           subtitleTextColor: profilePreferences?.subtitleTextColor ?? '#FFFFFF',

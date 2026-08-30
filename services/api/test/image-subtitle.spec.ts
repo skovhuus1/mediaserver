@@ -30,12 +30,16 @@ describe('image subtitle descriptors', () => {
         language: 'da',
         label: 'Dansk (hdmv_pgs_subtitle)',
         forced: true,
+        hearingImpaired: false,
+        default: false,
       },
       {
         streamIndex: 6,
         language: 'en',
         label: 'Engelsk (dvd_subtitle)',
         forced: false,
+        hearingImpaired: false,
+        default: false,
       },
     ]);
   });
@@ -68,6 +72,8 @@ describe('image subtitle descriptors', () => {
           language: 'da',
           label: 'Dansk (tvungen)',
           forced: true,
+          hearingImpaired: false,
+          default: false,
           src: '/api/v1/playback/sessions/session-1/subtitles/sidecar-0.vtt?token=token-1',
         }),
       ]);
