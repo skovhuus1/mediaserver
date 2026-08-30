@@ -71,4 +71,18 @@ class ProductionPlaybackConfigurationTest {
         assertFalse(payload.has("subtitleTrackId"))
         assertEquals("off", payload.getString("upscaleMode"))
     }
+
+    @Test
+    fun parsesSubtitlePreparationWithoutTreatingUnavailableTracksAsReady() {
+        val status = parseSubtitlePreparationStatus(
+            JSONObject()
+                .put("state", "ready")
+                .put("message", "Unavailable tracks omitted")
+                .put("unavailableTrackIds", JSONArray().put("embedded-4")),
+        )
+
+        assertEquals("ready", status.state)
+        assertTrue(status.unavailableTrackIds.contains("embedded-4"))
+        assertFalse(status.unavailableTrackIds.contains("embedded-5"))
+    }
 }

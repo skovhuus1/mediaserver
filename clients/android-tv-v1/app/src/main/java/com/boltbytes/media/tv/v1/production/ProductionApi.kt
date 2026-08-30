@@ -248,6 +248,45 @@ class ProductionApi(context: Context) {
             ),
         )
 
+    suspend fun livePreparation(statusUrl: String): ProductionLivePreparationStatus =
+        parseLivePreparationStatus(
+            request(
+                "GET",
+                statusUrl,
+                authenticated = false,
+                refreshOnUnauthorized = false,
+            ),
+            ::resolvePublicUrl,
+        )
+
+    suspend fun subtitlePreparation(statusUrl: String): ProductionSubtitlePreparationStatus =
+        parseSubtitlePreparationStatus(
+            request(
+                "GET",
+                statusUrl,
+                authenticated = false,
+                refreshOnUnauthorized = false,
+            ),
+        )
+
+    suspend fun fetchSubtitleWebVtt(sourceUrl: String): String = withContext(Dispatchers.IO) {
+        val builder = Request.Builder()
+            .url(resolvePublicUrl(sourceUrl))
+            .header("Accept", "text/vtt")
+            .header("X-BB-Client", "android-tv-v1")
+            .header("X-BB-Device-Id", deviceId)
+        client.newCall(builder.build()).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw ProductionApiException("Undertekstsporet er ikke klar (${response.code})", response.code)
+            }
+            if (!body.trimStart { it.isWhitespace() || it == '\uFEFF' }.startsWith("WEBVTT")) {
+                throw ProductionApiException("Undertekstsporet er ikke gyldigt WebVTT", 422)
+            }
+            body
+        }
+    }
+
     private fun supportedVideoCodecs(): List<String> = runCatching {
         MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
             .filterNot { it.isEncoder }
@@ -353,6 +392,8 @@ class ProductionApi(context: Context) {
             audioTracks = configured.audioTracks.ifEmpty { current.audioTracks },
             subtitleTracks = configured.subtitleTracks.ifEmpty { current.subtitleTracks },
             markers = configured.markers.ifEmpty { current.markers },
+            subtitlePreparationStatusUrl = configured.subtitlePreparationStatusUrl
+                ?: current.subtitlePreparationStatusUrl,
         )
     }
 
@@ -369,7 +410,7 @@ class ProductionApi(context: Context) {
             JSONObject()
                 .put("channelId", channelId)
                 .put("isCastSession", false)
-                .put("preferredMethod", "auto"),
+                .put("preferredMethod", "direct_stream"),
         )
         return parseAuthorization(response, ::resolvePublicUrl)
     }
@@ -386,7 +427,7 @@ class ProductionApi(context: Context) {
             JSONObject()
                 .put("channelId", channelId)
                 .put("streamToken", streamToken)
-                .put("preferredMethod", "auto"),
+                .put("preferredMethod", "direct_stream"),
         )
         return parseAuthorization(response, ::resolvePublicUrl)
     }

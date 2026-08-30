@@ -646,6 +646,7 @@ export class PlaybackService {
           type: 'playback.transcode',
           status: { in: ['queued', 'running'] },
           payload: { path: ['sessionId'], equals: session.id },
+          NOT: { payload: { path: ['streamMode'], equals: 'subtitle_only' } },
         },
         data: { status: 'failed', leaseExpiresAt: null },
       }),

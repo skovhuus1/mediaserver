@@ -103,6 +103,7 @@ data class ProductionAuthorization(
     val subtitleTracks: List<ProductionTrack>,
     val markers: List<ProductionMarker>,
     val preparationStatusUrl: String? = null,
+    val subtitlePreparationStatusUrl: String? = null,
     val streamTimelineOffsetMs: Long = 0L,
 )
 
@@ -114,6 +115,19 @@ data class ProductionPreparationStatus(
     val readyVariants: Int,
     val variantCount: Int,
     val allVariantsReady: Boolean,
+)
+
+data class ProductionLivePreparationStatus(
+    val state: String,
+    val message: String,
+    val audioTracks: List<ProductionTrack>,
+    val subtitleTracks: List<ProductionTrack>,
+)
+
+data class ProductionSubtitlePreparationStatus(
+    val state: String,
+    val message: String,
+    val unavailableTrackIds: Set<String>,
 )
 
 data class ProductionProgram(
@@ -473,6 +487,7 @@ internal fun parseAuthorization(json: JSONObject, resolver: (String) -> String):
     val item = json.payload()
     val lease = item.optJSONObject("lease")
     val stream = item.optJSONObject("stream") ?: item.optJSONObject("playback") ?: item
+    val tracks = item.optJSONObject("tracks") ?: stream.optJSONObject("tracks")
     val rawUrl = stream.firstString("streamUrl", "url", "manifestUrl")
         ?: item.firstString("streamUrl", "url", "manifestUrl")
         ?: error("Serveren returnerede ingen stream-URL")
@@ -486,8 +501,18 @@ internal fun parseAuthorization(json: JSONObject, resolver: (String) -> String):
             ?: lease?.firstString("streamToken", "token")
             ?: stream.firstString("streamToken", "token"),
         contentType = stream.firstString("contentType", "mimeType") ?: item.firstString("contentType", "mimeType"),
-        audioTracks = parseTracks(item.firstArray("audioTracks") ?: stream.firstArray("audioTracks"), resolver),
-        subtitleTracks = parseTracks(item.firstArray("subtitleTracks", "subtitles") ?: stream.firstArray("subtitleTracks", "subtitles"), resolver),
+        audioTracks = parseTracks(
+            item.firstArray("audioTracks")
+                ?: stream.firstArray("audioTracks")
+                ?: tracks?.firstArray("audio", "audioTracks"),
+            resolver,
+        ),
+        subtitleTracks = parseTracks(
+            item.firstArray("subtitleTracks", "subtitles")
+                ?: stream.firstArray("subtitleTracks", "subtitles")
+                ?: tracks?.firstArray("subtitles", "subtitleTracks"),
+            resolver,
+        ),
         markers = (item.firstArray("markers", "skipMarkers") ?: stream.firstArray("markers", "skipMarkers"))
             ?.objects().orEmpty().mapNotNull { marker ->
                 val start = marker.firstLong("startMs", "startTimeMs", "start")
@@ -502,9 +527,29 @@ internal fun parseAuthorization(json: JSONObject, resolver: (String) -> String):
             item.firstString("transcodeStatusUrl", "preparationStatusUrl", "statusUrl")
                 ?: stream.firstString("transcodeStatusUrl", "preparationStatusUrl", "statusUrl")
             )?.let(resolver),
+        subtitlePreparationStatusUrl = (
+            item.firstString("subtitlePreparationStatusUrl", "subtitleStatusUrl")
+                ?: stream.firstString("subtitlePreparationStatusUrl", "subtitleStatusUrl")
+            )?.let(resolver),
         streamTimelineOffsetMs = item.firstLong("streamTimelineOffsetMs", "timelineOffsetMs")
             .takeIf { it > 0L }
             ?: stream.firstLong("streamTimelineOffsetMs", "timelineOffsetMs"),
+    )
+}
+
+internal fun parseSubtitlePreparationStatus(json: JSONObject): ProductionSubtitlePreparationStatus {
+    val item = json.payload()
+    val unavailable = item.optJSONArray("unavailableTrackIds")
+    return ProductionSubtitlePreparationStatus(
+        state = item.firstString("state", "status") ?: "queued",
+        message = item.firstString("message", "detail") ?: "Forbereder undertekster",
+        unavailableTrackIds = buildSet {
+            if (unavailable != null) {
+                for (index in 0 until unavailable.length()) {
+                    unavailable.optString(index).takeIf(String::isNotBlank)?.let(::add)
+                }
+            }
+        },
     )
 }
 
@@ -522,6 +567,34 @@ internal fun parsePreparationStatus(json: JSONObject): ProductionPreparationStat
         allVariantsReady = item.optBoolean(
             "allVariantsReady",
             variantCount > 0 && readyVariants >= variantCount,
+        ),
+    )
+}
+
+internal fun parseLivePreparationStatus(
+    json: JSONObject,
+    resolver: (String) -> String,
+): ProductionLivePreparationStatus {
+    val item = json.payload()
+    val tracks = item.optJSONObject("tracks")
+    val state = item.firstString("state", "status") ?: "preparing"
+    return ProductionLivePreparationStatus(
+        state = state,
+        message = item.firstString("error", "message", "detail")
+            ?: when (state.lowercase()) {
+                "ready", "active" -> "Live TV-streamen er klar"
+                "failed" -> "Live TV-streamen kunne ikke klargøres"
+                "released", "expired", "cancelled" -> "Live TV-sessionen er afsluttet"
+                else -> "Forbereder Live TV-streamen"
+            },
+        audioTracks = parseTracks(
+            tracks?.firstArray("audio", "audioTracks") ?: item.firstArray("audioTracks"),
+            resolver,
+        ),
+        subtitleTracks = parseTracks(
+            tracks?.firstArray("subtitles", "subtitleTracks")
+                ?: item.firstArray("subtitleTracks", "subtitles"),
+            resolver,
         ),
     )
 }

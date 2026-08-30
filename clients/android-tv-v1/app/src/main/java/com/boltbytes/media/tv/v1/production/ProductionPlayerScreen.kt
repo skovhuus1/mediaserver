@@ -4,10 +4,6 @@ package com.boltbytes.media.tv.v1.production
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.Color as AndroidColor
-import android.graphics.Typeface
-import android.net.Uri
-import android.os.Looper
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -64,6 +60,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,26 +70,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.C
-import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.decoder.DecoderInputBuffer
 import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.ExoPlaybackException
-import androidx.media3.exoplayer.FormatHolder
-import androidx.media3.exoplayer.Renderer
-import androidx.media3.exoplayer.RendererConfiguration
-import androidx.media3.exoplayer.source.MediaSource.MediaPeriodId
-import androidx.media3.exoplayer.source.SampleStream
-import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
-import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import com.boltbytes.media.tv.v1.ui.V1Button
 import com.boltbytes.media.tv.v1.ui.V1Colors
@@ -109,9 +95,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.util.ArrayList
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 
 private enum class PlayerOption { Quality, Audio, Subtitles, Upscaling }
 
@@ -141,29 +125,28 @@ internal fun isCreditsMarkerType(type: String): Boolean = when (type.trim().lowe
     else -> false
 }
 
-private enum class SubtitleTextSize(val label: String, val fraction: Float) {
-    Small("Lille", 0.040f),
-    Normal("Normal", 0.050f),
-    Large("Stor", 0.060f),
-    ExtraLarge("Ekstra stor", 0.070f),
+private enum class SubtitleTextSize(val label: String, val fontSizeSp: Int) {
+    Small("Lille", 24),
+    Normal("Normal", 29),
+    Large("Stor", 35),
+    ExtraLarge("Ekstra stor", 42),
 }
 
-private enum class SubtitleTextColor(val label: String, val color: Int) {
-    White("Hvid", AndroidColor.WHITE),
-    WarmWhite("Varm hvid", 0xFFFFF4D6.toInt()),
-    Yellow("Gul", 0xFFFFE16B.toInt()),
-    Cyan("Lys blå", 0xFF9CEBFF.toInt()),
+private enum class SubtitleTextColor(val label: String, val color: Color) {
+    White("Hvid", Color.White),
+    WarmWhite("Varm hvid", Color(0xFFFFF4D6)),
+    Yellow("Gul", Color(0xFFFFE16B)),
+    Cyan("Lys blå", Color(0xFF9CEBFF)),
 }
 
 private enum class SubtitleBackground(
     val label: String,
-    val color: Int,
-    val edgeType: Int,
+    val color: Color,
 ) {
-    None("Ingen", AndroidColor.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_OUTLINE),
-    Shadow("Skygge", AndroidColor.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW),
-    Dim("Sort 60 %", 0x99000000.toInt(), CaptionStyleCompat.EDGE_TYPE_NONE),
-    Solid("Sort 85 %", 0xD9000000.toInt(), CaptionStyleCompat.EDGE_TYPE_NONE),
+    None("Ingen", Color.Transparent),
+    Shadow("Skygge", Color.Black.copy(alpha = 0.30f)),
+    Dim("Sort 60 %", Color.Black.copy(alpha = 0.60f)),
+    Solid("Sort 85 %", Color.Black.copy(alpha = 0.85f)),
 }
 
 private data class ProductionSubtitleStyle(
@@ -199,88 +182,6 @@ private class ProductionSubtitleStyleStore(context: Context) {
         enumValues<T>().firstOrNull { it.name == value } ?: fallback
 }
 
-private class SubtitleOffsetSampleStream(
-    private val delegate: SampleStream,
-    private val timingOffsetUs: AtomicLong,
-) : SampleStream by delegate {
-    override fun readData(formatHolder: FormatHolder, buffer: DecoderInputBuffer, readFlags: Int): Int {
-        val result = delegate.readData(formatHolder, buffer, readFlags)
-        if (result == C.RESULT_BUFFER_READ && !buffer.isEndOfStream && buffer.timeUs != C.TIME_UNSET) {
-            buffer.timeUs += timingOffsetUs.get()
-        }
-        return result
-    }
-
-    override fun skipData(positionUs: Long): Int =
-        delegate.skipData((positionUs - timingOffsetUs.get()).coerceAtLeast(0L))
-}
-
-private class SubtitleOffsetRenderer(
-    private val delegate: Renderer,
-    private val timingOffsetUs: AtomicLong,
-) : Renderer by delegate {
-    @Throws(ExoPlaybackException::class)
-    override fun enable(
-        configuration: RendererConfiguration,
-        formats: Array<Format>,
-        stream: SampleStream,
-        positionUs: Long,
-        joining: Boolean,
-        mayRenderStartOfStream: Boolean,
-        startPositionUs: Long,
-        offsetUs: Long,
-        mediaPeriodId: MediaPeriodId,
-    ) {
-        delegate.enable(
-            configuration,
-            formats,
-            SubtitleOffsetSampleStream(stream, timingOffsetUs),
-            positionUs,
-            joining,
-            mayRenderStartOfStream,
-            startPositionUs,
-            offsetUs,
-            mediaPeriodId,
-        )
-    }
-
-    @Throws(ExoPlaybackException::class)
-    override fun replaceStream(
-        formats: Array<Format>,
-        stream: SampleStream,
-        startPositionUs: Long,
-        offsetUs: Long,
-        mediaPeriodId: MediaPeriodId,
-    ) {
-        delegate.replaceStream(
-            formats,
-            SubtitleOffsetSampleStream(stream, timingOffsetUs),
-            startPositionUs,
-            offsetUs,
-            mediaPeriodId,
-        )
-    }
-}
-
-private class SubtitleOffsetRenderersFactory(
-    context: Context,
-    private val timingOffsetUs: AtomicLong,
-) : DefaultRenderersFactory(context) {
-    override fun buildTextRenderers(
-        context: Context,
-        output: TextOutput,
-        outputLooper: Looper,
-        extensionRendererMode: Int,
-        out: ArrayList<Renderer>,
-    ) {
-        val firstTextRenderer = out.size
-        super.buildTextRenderers(context, output, outputLooper, extensionRendererMode, out)
-        for (index in firstTextRenderer until out.size) {
-            out[index] = SubtitleOffsetRenderer(out[index], timingOffsetUs)
-        }
-    }
-}
-
 private data class PlayerEngineState(
     val preparing: Boolean = true,
     val buffering: Boolean = false,
@@ -290,6 +191,9 @@ private data class PlayerEngineState(
     val ended: Boolean = false,
     val activeVideoHeight: Int? = null,
     val activeVideoBitrate: Int? = null,
+    val subtitleCues: List<ProductionSubtitleCue> = emptyList(),
+    val selectedSubtitleTrackId: String? = null,
+    val subtitleStatusMessage: String? = null,
 )
 
 private class ProductionPlaybackEngine(
@@ -297,18 +201,17 @@ private class ProductionPlaybackEngine(
     private val api: ProductionApi,
     private val request: ProductionPlaybackRequest,
     private val preferences: ProductionPreferences,
-    initialSubtitleOffsetMs: Int,
 ) : Player.Listener {
     private val trackSelector = DefaultTrackSelector(context)
-    private val subtitleTimingOffsetUs = AtomicLong(initialSubtitleOffsetMs.toLong() * 1_000L)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val finished = AtomicBoolean(false)
     private val restarting = AtomicBoolean(false)
     private val reconfiguring = AtomicBoolean(false)
+    private val switchingChannel = AtomicBoolean(false)
     private var heartbeatJob: Job? = null
     private var progressJob: Job? = null
     private var variantMonitorJob: Job? = null
-    private var subtitleRefreshJob: Job? = null
+    private var subtitleLoadJob: Job? = null
     private var channelIndex = request.channelIndex
     private var automaticRecoveryAttempts = 0
     private var selectedQualityMode = preferences.qualityMode.lowercase()
@@ -316,10 +219,7 @@ private class ProductionPlaybackEngine(
     private var selectedAudioTrackId: String? = null
     private var selectedSubtitleTrack: ProductionTrack? = null
 
-    val player: ExoPlayer = ExoPlayer.Builder(
-        context,
-        SubtitleOffsetRenderersFactory(context, subtitleTimingOffsetUs),
-    )
+    val player: ExoPlayer = ExoPlayer.Builder(context)
         .setTrackSelector(trackSelector)
         .setLoadControl(
             DefaultLoadControl.Builder().setBufferDurationsMs(
@@ -346,12 +246,18 @@ private class ProductionPlaybackEngine(
 
     private suspend fun authorizeAndStart(positionMs: Long) {
         try {
-            val authorization = if (request.live) api.authorizeLive(request.mediaId) else {
+            var authorization = if (request.live) api.authorizeLive(request.mediaId) else {
                 api.authorizeVod(request.mediaId, positionMs, preferences)
             }
             mutableState.value = mutableState.value.copy(authorization = authorization, preparing = true, error = null)
             startLeases()
-            val preparation = awaitPreparation(authorization)
+            val preparation = if (request.live) {
+                authorization = awaitLivePreparation(authorization)
+                mutableState.value = mutableState.value.copy(authorization = authorization)
+                null
+            } else {
+                awaitPreparation(authorization)
+            }
             val stageLowestRendition = !request.live &&
                 preferences.qualityMode.equals("auto", ignoreCase = true) &&
                 preparation?.allVariantsReady == false
@@ -361,6 +267,29 @@ private class ProductionPlaybackEngine(
         } catch (error: Exception) {
             mutableState.value = mutableState.value.copy(preparing = false, buffering = false, error = error.message ?: "Afspilningen kunne ikke startes")
         }
+    }
+
+    private suspend fun awaitLivePreparation(
+        authorization: ProductionAuthorization,
+    ): ProductionAuthorization {
+        val statusUrl = authorization.preparationStatusUrl
+            ?: error("Serveren returnerede ingen Live TV-statusadresse")
+        val deadline = android.os.SystemClock.elapsedRealtime() + 60_000L
+        while (!finished.get()) {
+            val status = api.livePreparation(statusUrl)
+            when (status.state.lowercase()) {
+                "ready", "active" -> return authorization.copy(
+                    audioTracks = status.audioTracks.ifEmpty { authorization.audioTracks },
+                    subtitleTracks = status.subtitleTracks.ifEmpty { authorization.subtitleTracks },
+                )
+                "failed", "released", "expired", "cancelled" -> error(status.message)
+            }
+            if (android.os.SystemClock.elapsedRealtime() >= deadline) {
+                error("Live TV-streamen blev ikke klar inden for 60 sekunder")
+            }
+            delay(500L)
+        }
+        error("Live TV-afspilningen blev afbrudt")
     }
 
     private suspend fun awaitPreparation(authorization: ProductionAuthorization): ProductionPreparationStatus? {
@@ -409,25 +338,15 @@ private class ProductionPlaybackEngine(
     private fun loadAuthorization(authorization: ProductionAuthorization, positionMs: Long) {
         val item = MediaItem.Builder().setUri(authorization.streamUrl).apply {
             authorization.contentType?.takeIf(String::isNotBlank)?.let { setMimeType(it) }
-            authorization.subtitleTracks
-                .filter { it.delivery == "webvtt" && !it.sourceUrl.isNullOrBlank() }
-                .map { track ->
-                    MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.sourceUrl!!))
-                        .setId(track.id)
-                        .setLabel(track.label)
-                        .setLanguage(track.language)
-                        .setMimeType(track.contentType ?: "text/vtt")
-                        .setSelectionFlags(if (track.forced) C.SELECTION_FLAG_FORCED else 0)
-                        .build()
-                }
-                .takeIf { it.isNotEmpty() }
-                ?.let(::setSubtitleConfigurations)
         }.build()
         val localPositionMs = (positionMs - authorization.streamTimelineOffsetMs).coerceAtLeast(0L)
         player.setMediaItem(item, localPositionMs)
-        applyClientSubtitleSelection(selectedSubtitleTrack?.takeIf { it.delivery == "webvtt" })
-        player.prepare()
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
         player.playWhenReady = true
+        player.prepare()
+        player.play()
     }
 
     private fun startLeases() {
@@ -551,23 +470,74 @@ private class ProductionPlaybackEngine(
 
     fun setSubtitles(track: ProductionTrack?) {
         val wasBurnIn = selectedSubtitleTrack?.delivery == "burn_in"
+        subtitleLoadJob?.cancel()
         selectedSubtitleTrack = track
-        if (!request.live && (wasBurnIn || track?.delivery == "burn_in")) {
-            requestVodReconfiguration()
-            return
+        mutableState.value = mutableState.value.copy(
+            subtitleCues = emptyList(),
+            selectedSubtitleTrackId = track?.id,
+            subtitleStatusMessage = null,
+        )
+        when {
+            !request.live && (wasBurnIn || track?.delivery == "burn_in") -> requestVodReconfiguration()
+            track == null -> Unit
+            track.delivery == "webvtt" -> loadClientSubtitle(track)
+            else -> publishSubtitleFailure(track, "Undertekstformatet understøttes ikke")
         }
-        applyClientSubtitleSelection(track)
     }
 
-    private fun applyClientSubtitleSelection(track: ProductionTrack?) {
-        val builder = player.trackSelectionParameters.buildUpon()
-        if (track == null) {
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-        } else {
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-            builder.setPreferredTextLanguage(track.language)
+    private fun loadClientSubtitle(track: ProductionTrack) {
+        val sourceUrl = track.sourceUrl
+        if (sourceUrl.isNullOrBlank()) {
+            publishSubtitleFailure(track, "Undertekstsporet mangler en gyldig kilde")
+            return
         }
-        player.trackSelectionParameters = builder.build()
+        subtitleLoadJob?.cancel()
+        mutableState.value = mutableState.value.copy(
+            selectedSubtitleTrackId = track.id,
+            subtitleStatusMessage = "Forbereder ${track.label}…",
+        )
+        subtitleLoadJob = scope.launch {
+            val maxAttempts = if (track.id.startsWith("embedded-")) 45 else 3
+            var lastMessage = "Undertekstsporet kunne ikke indlæses"
+            for (attempt in 0 until maxAttempts) {
+                if (finished.get() || selectedSubtitleTrack?.id != track.id) return@launch
+                val fetched = runCatching { api.fetchSubtitleWebVtt(sourceUrl) }
+                if (fetched.isSuccess) {
+                    val parsed = runCatching { parseProductionWebVtt(fetched.getOrThrow()) }
+                    if (parsed.isSuccess) {
+                        mutableState.value = mutableState.value.copy(
+                            subtitleCues = parsed.getOrThrow(),
+                            selectedSubtitleTrackId = track.id,
+                            subtitleStatusMessage = null,
+                        )
+                        return@launch
+                    }
+                    lastMessage = parsed.exceptionOrNull()?.message ?: "Undertekstsporet er ugyldigt"
+                } else {
+                    lastMessage = fetched.exceptionOrNull()?.message ?: lastMessage
+                }
+                val statusUrl = mutableState.value.authorization?.subtitlePreparationStatusUrl
+                if (track.id.startsWith("embedded-") && statusUrl != null) {
+                    val status = runCatching { api.subtitlePreparation(statusUrl) }.getOrNull()
+                    if (status?.unavailableTrackIds?.contains(track.id) == true) {
+                        lastMessage = "Undertekstsporet kunne ikke udtrækkes fra mediet"
+                        break
+                    }
+                }
+                if (attempt + 1 < maxAttempts) delay(1_000L)
+            }
+            if (selectedSubtitleTrack?.id == track.id) publishSubtitleFailure(track, lastMessage)
+        }
+    }
+
+    private fun publishSubtitleFailure(track: ProductionTrack, message: String) {
+        if (selectedSubtitleTrack?.id != track.id) return
+        selectedSubtitleTrack = null
+        mutableState.value = mutableState.value.copy(
+            subtitleCues = emptyList(),
+            selectedSubtitleTrackId = null,
+            subtitleStatusMessage = "$message. Videoen fortsætter.",
+        )
     }
 
     private fun requestVodReconfiguration() {
@@ -597,49 +567,72 @@ private class ProductionPlaybackEngine(
                 forceLowestBitrate(stageLowestRendition)
                 loadAuthorization(configured, positionMs)
                 monitorVariantReadiness(configured, preparation)
+                mutableState.value = mutableState.value.copy(
+                    selectedSubtitleTrackId = selectedSubtitleTrack?.id,
+                    subtitleStatusMessage = null,
+                )
+                selectedSubtitleTrack?.takeIf { it.delivery == "webvtt" }?.let(::loadClientSubtitle)
                 automaticRecoveryAttempts = 0
             } catch (error: Exception) {
-                mutableState.value = mutableState.value.copy(
-                    preparing = false,
-                    buffering = false,
-                    error = error.message ?: "Afspilningsvalget kunne ikke anvendes",
-                )
+                player.playWhenReady = true
+                val selectedSubtitle = selectedSubtitleTrack
+                if (selectedSubtitle?.delivery == "burn_in") {
+                    publishSubtitleFailure(selectedSubtitle, error.message ?: "Burn-in kunne ikke startes")
+                } else {
+                    mutableState.value = mutableState.value.copy(
+                        preparing = false,
+                        buffering = false,
+                        error = null,
+                        subtitleStatusMessage = "Valget kunne ikke anvendes: ${error.message ?: "ukendt fejl"}",
+                    )
+                }
             } finally {
                 reconfiguring.set(false)
             }
         }
     }
 
-    fun setSubtitleTimingOffset(offsetMs: Int) {
-        subtitleTimingOffsetUs.set(offsetMs.coerceIn(-10_000, 10_000).toLong() * 1_000L)
-        subtitleRefreshJob?.cancel()
-        subtitleRefreshJob = scope.launch {
-            delay(180L)
-            val selectedParameters = player.trackSelectionParameters
-            try {
-                player.trackSelectionParameters = selectedParameters.buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    .build()
-                delay(40L)
-            } finally {
-                if (!finished.get()) player.trackSelectionParameters = selectedParameters
-            }
-        }
-    }
-
     fun switchChannel(direction: Int) {
-        if (!request.live || request.channelIds.isEmpty()) return
+        if (
+            !request.live ||
+            request.channelIds.isEmpty() ||
+            !switchingChannel.compareAndSet(false, true)
+        ) return
         val targetIndex = (channelIndex + direction).mod(request.channelIds.size)
-        val authorization = mutableState.value.authorization ?: return
+        val authorization = mutableState.value.authorization
+        if (authorization == null) {
+            switchingChannel.set(false)
+            return
+        }
         scope.launch {
-            runCatching { api.switchLive(authorization.sessionId, request.channelIds[targetIndex], authorization.streamToken) }
-                .onSuccess { switched ->
-                    channelIndex = targetIndex
-                    mutableState.value = mutableState.value.copy(authorization = switched, preparing = true, error = null)
-                    loadAuthorization(switched, 0L)
-                    startLeases()
-                }
-                .onFailure { error -> mutableState.value = mutableState.value.copy(error = error.message ?: "Kanalen kunne ikke skiftes") }
+            try {
+                val switched = api.switchLive(
+                    authorization.sessionId,
+                    request.channelIds[targetIndex],
+                    authorization.streamToken,
+                )
+                channelIndex = targetIndex
+                mutableState.value = mutableState.value.copy(
+                    authorization = switched,
+                    preparing = true,
+                    buffering = false,
+                    error = null,
+                )
+                startLeases()
+                val ready = awaitLivePreparation(switched)
+                if (finished.get()) return@launch
+                mutableState.value = mutableState.value.copy(authorization = ready)
+                loadAuthorization(ready, 0L)
+                automaticRecoveryAttempts = 0
+            } catch (error: Exception) {
+                mutableState.value = mutableState.value.copy(
+                    preparing = false,
+                    buffering = false,
+                    error = error.message ?: "Kanalen kunne ikke skiftes",
+                )
+            } finally {
+                switchingChannel.set(false)
+            }
         }
     }
 
@@ -745,11 +738,10 @@ internal fun ProductionPlayerScreen(
             api = api,
             request = request,
             preferences = preferences,
-            initialSubtitleOffsetMs = subtitleStyle.timingOffsetMs,
         )
     }
     val engineState by engine.state.collectAsStateWithLifecycle()
-    var controlsVisible by remember(request.mediaId) { mutableStateOf(true) }
+    var controlsVisible by remember(request.mediaId) { mutableStateOf(false) }
     var option by remember(request.mediaId) { mutableStateOf<PlayerOption?>(null) }
     var positionMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
@@ -891,13 +883,20 @@ internal fun ProductionPlayerScreen(
     } else {
         selectedQuality
     }
+    val activeSubtitleText = activeProductionSubtitleText(
+        cues = engineState.subtitleCues,
+        positionMs = positionMs,
+        timingOffsetMs = subtitleStyle.timingOffsetMs,
+    )
+
+    LaunchedEffect(engineState.selectedSubtitleTrackId) {
+        selectedSubtitleId = engineState.selectedSubtitleTrackId
+    }
 
     fun updateSubtitleStyle(updated: ProductionSubtitleStyle) {
         val normalized = updated.copy(timingOffsetMs = updated.timingOffsetMs.coerceIn(-10_000, 10_000))
-        val timingChanged = normalized.timingOffsetMs != subtitleStyle.timingOffsetMs
         subtitleStyle = normalized
         subtitleStyleStore.save(normalized)
-        if (timingChanged) engine.setSubtitleTimingOffset(normalized.timingOffsetMs)
     }
 
     BackHandler {
@@ -964,15 +963,33 @@ internal fun ProductionPlayerScreen(
                 PlayerView(it).apply {
                     player = engine.player
                     useController = false
-                    applyProductionSubtitleStyle(this, subtitleStyle, controlsVisible)
                 }
             },
             update = {
                 it.player = engine.player
-                applyProductionSubtitleStyle(it, subtitleStyle, controlsVisible)
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        activeSubtitleText?.let { text ->
+            ProductionSubtitleOverlay(
+                text = text,
+                style = subtitleStyle,
+                controlsVisible = controlsVisible,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+
+        engineState.subtitleStatusMessage?.let { message ->
+            V1GlassPanel(
+                Modifier.align(Alignment.TopCenter).padding(top = 42.dp).width(520.dp).height(54.dp),
+                radius = 27.dp,
+            ) {
+                Box(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentAlignment = Alignment.Center) {
+                    Text(message, color = V1Colors.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                }
+            }
+        }
 
         if (seekIndicator != 0) {
             V1GlassPanel(Modifier.align(Alignment.Center).width(172.dp).height(86.dp), radius = 43.dp) {
@@ -1085,7 +1102,7 @@ internal fun ProductionPlayerScreen(
                 subtitleStyle = subtitleStyle,
                 onQuality = { selectedQuality = it; engine.setQuality(it); option = null; controlsVisible = true },
                 onAudio = { selectedAudioId = it.id; engine.setAudio(it); option = null; controlsVisible = true },
-                onSubtitles = { selectedSubtitleId = it?.id; engine.setSubtitles(it); option = null; controlsVisible = true },
+                onSubtitles = { engine.setSubtitles(it); option = null; controlsVisible = true },
                 onSubtitleStyle = ::updateSubtitleStyle,
                 onClose = { option = null; controlsVisible = true },
             )
@@ -1199,6 +1216,36 @@ private fun ProductionNextEpisodeCountdown(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ProductionSubtitleOverlay(
+    text: String,
+    style: ProductionSubtitleStyle,
+    controlsVisible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .padding(
+                start = 120.dp,
+                end = 120.dp,
+                bottom = if (controlsVisible) 274.dp else 30.dp,
+            )
+            .background(style.background.color, RoundedCornerShape(10.dp))
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = style.textColor.color,
+            fontSize = style.size.fontSizeSp.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            lineHeight = (style.size.fontSizeSp + 5).sp,
+            maxLines = 4,
+        )
     }
 }
 
@@ -1477,29 +1524,6 @@ private fun Modifier.blockHorizontalFocusExit(): Modifier = onPreviewKeyEvent { 
         AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
         -> true
         else -> false
-    }
-}
-
-private fun applyProductionSubtitleStyle(
-    playerView: PlayerView,
-    style: ProductionSubtitleStyle,
-    controlsVisible: Boolean,
-) {
-    playerView.subtitleView?.apply {
-        setApplyEmbeddedStyles(false)
-        setApplyEmbeddedFontSizes(false)
-        setFractionalTextSize(style.size.fraction)
-        setBottomPaddingFraction(if (controlsVisible) 0.255f else 0.025f)
-        setStyle(
-            CaptionStyleCompat(
-                style.textColor.color,
-                style.background.color,
-                AndroidColor.TRANSPARENT,
-                style.background.edgeType,
-                AndroidColor.BLACK,
-                Typeface.DEFAULT_BOLD,
-            ),
-        )
     }
 }
 

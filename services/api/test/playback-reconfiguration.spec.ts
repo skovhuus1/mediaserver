@@ -96,6 +96,12 @@ describe('playback session reconfiguration', () => {
       },
     );
 
+    expect(prisma.systemJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        NOT: { payload: { path: ['streamMode'], equals: 'subtitle_only' } },
+      }),
+    }));
+
     expect(result).toMatchObject({
       accepted: true,
       sessionId: 'session-1',

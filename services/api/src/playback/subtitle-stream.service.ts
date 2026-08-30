@@ -106,11 +106,7 @@ export class SubtitleStreamService {
     ));
     if (ready.every(Boolean)) return { state: 'ready', message: 'Embedded subtitles are ready', unavailableTrackIds: [] };
     const job = await this.prisma.systemJob.findFirst({
-      where: {
-        accountId: session.accountId,
-        type: 'playback.transcode',
-        payload: { path: ['sessionId'], equals: session.id },
-      },
+      where: subtitlePreparationJobFilter(session.accountId, session.id),
       include: { attempts: { orderBy: { number: 'desc' }, take: 1 } },
       orderBy: { createdAt: 'desc' },
     });
@@ -236,6 +232,17 @@ export class SubtitleStreamService {
     }
     return session;
   }
+}
+
+export function subtitlePreparationJobFilter(accountId: string, sessionId: string) {
+  return {
+    accountId,
+    type: 'playback.transcode' as const,
+    AND: [
+      { payload: { path: ['sessionId'], equals: sessionId } },
+      { payload: { path: ['streamMode'], equals: 'subtitle_only' } },
+    ],
+  };
 }
 
 type SubtitlePreparationManifest = {
