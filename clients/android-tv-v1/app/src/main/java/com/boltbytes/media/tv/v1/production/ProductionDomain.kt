@@ -47,6 +47,12 @@ data class ProductionHome(
     val rows: List<ProductionRow>,
 )
 
+data class ProductionCatalogPage(
+    val cards: List<ProductionCard>,
+    val page: Int,
+    val totalPages: Int,
+)
+
 data class ProductionEpisode(
     val id: String,
     val title: String,
@@ -277,6 +283,15 @@ internal fun parseSearch(json: JSONObject): List<ProductionCard> {
         addAll(groups.firstArray("titles")?.objects().orEmpty().mapNotNull(::parseCard))
         addAll(groups.firstArray("episodes")?.objects().orEmpty().mapNotNull(::parseCard))
     }.distinctBy { it.id }
+}
+
+internal fun parseCatalogPage(json: JSONObject): ProductionCatalogPage {
+    val payload = json.payload()
+    return ProductionCatalogPage(
+        cards = parseSearch(json),
+        page = payload.optInt("page", 1).coerceAtLeast(1),
+        totalPages = payload.optInt("totalPages", 1).coerceAtLeast(1),
+    )
 }
 
 internal fun parseCard(item: JSONObject): ProductionCard? {

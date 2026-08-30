@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
@@ -51,7 +53,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,11 +73,17 @@ import java.time.format.DateTimeFormatter
 @Composable
 internal fun ProductionSearchScreen(state: ProductionUiState, viewModel: ProductionViewModel) {
     val searchFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
     ProductionInitialFocus(
         key = state.contextCard?.id,
         ready = state.contextCard == null,
         requester = searchFocus,
     )
+    LaunchedEffect(Unit) {
+        delay(180L)
+        searchFocus.requestFocus()
+        keyboard?.show()
+    }
     V1AmbientBackground(accent = V1Colors.Blue) {
         Column(
             Modifier.fillMaxSize().padding(horizontal = 58.dp, vertical = 32.dp),
@@ -86,6 +96,13 @@ internal fun ProductionSearchScreen(state: ProductionUiState, viewModel: Product
                 leadingIcon = { Icon(Icons.Rounded.Search, null) },
                 placeholder = { Text("Titel, serie, skuespiller eller genre") },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(
+                    onSearch = {
+                        viewModel.search(state.searchQuery)
+                        keyboard?.hide()
+                    },
+                ),
                 modifier = Modifier.focusRequester(searchFocus).fillMaxWidth(),
             )
             if (state.searchQuery.length < 2) {

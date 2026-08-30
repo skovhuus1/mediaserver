@@ -69,6 +69,7 @@ data class ProductionUiState(
     val updateState: ProductionUpdateState = ProductionUpdateState.Idle,
     val loadingTitle: Boolean = false,
     val searching: Boolean = false,
+    val libraryLoading: Boolean = false,
     val loadingGenre: Boolean = false,
     val loadingGuide: Boolean = false,
     val loadingNotifications: Boolean = false,
@@ -91,12 +92,14 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
     private var liveRefreshJob: Job? = null
     private var titlePrefetchJob: Job? = null
     private var searchJob: Job? = null
+    private var libraryJob: Job? = null
     private var guideLoadJob: Job? = null
     private var notificationsLoadJob: Job? = null
     private var downloadsLoadJob: Job? = null
     private val titleCache = mutableMapOf<String, CachedContent<ProductionTitle>>()
     private val titleRequests = mutableMapOf<String, Deferred<ProductionTitle>>()
     private val genreCache = mutableMapOf<String, CachedContent<List<ProductionCard>>>()
+    private val libraryCache = mutableMapOf<String, List<ProductionCard>>()
 
     init {
         viewModelScope.launch {
@@ -187,9 +190,85 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun selectHubFilter(filter: String) {
+        if (filter == "all_movies" || filter == "all_series") {
+            loadLibrary(filter.removePrefix("all_"))
+            return
+        }
+        libraryJob?.cancel()
         val selected = filteredCards(mutableState.value.home, filter).firstOrNull()
-        mutableState.update { it.copy(hubFilter = filter, selectedHero = selected) }
+        mutableState.update {
+            it.copy(
+                hubFilter = filter,
+                selectedHero = selected,
+                libraryLoading = false,
+            )
+        }
         selected?.let(::scheduleTitlePrefetch)
+    }
+
+    private fun loadLibrary(filter: String) {
+        val activeFilter = "all_$filter"
+        val rowId = "catalog_$filter"
+        val rowTitle = if (filter == "movies") "Alle film" else "Alle TV-serier"
+        val cached = libraryCache[filter]
+        if (cached != null) {
+            mutableState.update { current ->
+                current.copy(
+                    home = current.home.copy(
+                        rows = current.home.rows.filterNot { it.id == rowId } +
+                            ProductionRow(rowId, rowTitle, cached, null),
+                    ),
+                    hubFilter = activeFilter,
+                    selectedHero = cached.firstOrNull(),
+                    libraryLoading = false,
+                )
+            }
+            cached.firstOrNull()?.let(::scheduleTitlePrefetch)
+            return
+        }
+
+        libraryJob?.cancel()
+        mutableState.update {
+            it.copy(
+                hubFilter = activeFilter,
+                selectedHero = null,
+                libraryLoading = true,
+            )
+        }
+        libraryJob = viewModelScope.launch {
+            runCatching { api.catalog(filter) }
+                .onSuccess { cards ->
+                    libraryCache[filter] = cards
+                    mutableState.update { current ->
+                        val home = current.home.copy(
+                            rows = current.home.rows.filterNot { it.id == rowId } +
+                                ProductionRow(rowId, rowTitle, cards, null),
+                        )
+                        if (current.hubFilter == activeFilter) {
+                            current.copy(
+                                home = home,
+                                selectedHero = cards.firstOrNull(),
+                                libraryLoading = false,
+                            )
+                        } else {
+                            current.copy(home = home, libraryLoading = false)
+                        }
+                    }
+                    if (mutableState.value.hubFilter == activeFilter) {
+                        cards.firstOrNull()?.let(::scheduleTitlePrefetch)
+                    }
+                }
+                .onFailure { error ->
+                    if (error !is CancellationException) {
+                        mutableState.update {
+                            it.copy(
+                                libraryLoading = false,
+                                message = error.message ?: "Biblioteket kunne ikke hentes",
+                            )
+                        }
+                    }
+                }
+        }
     }
 
     fun openTitle(id: String) {

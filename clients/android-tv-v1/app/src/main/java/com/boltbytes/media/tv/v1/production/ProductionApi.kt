@@ -178,6 +178,29 @@ class ProductionApi(context: Context) {
     suspend fun search(query: String): List<ProductionCard> =
         parseSearch(request("GET", "experience/search?q=${encode(query)}"))
 
+    suspend fun catalog(type: String): List<ProductionCard> {
+        val catalogType = when (type) {
+            "movies" -> "movie"
+            "series" -> "series"
+            else -> error("Unsupported catalog type: $type")
+        }
+        val cards = mutableListOf<ProductionCard>()
+        var page = 1
+        var totalPages: Int
+        do {
+            val result = parseCatalogPage(
+                request(
+                    "GET",
+                    "media/catalog?type=${encode(catalogType)}&sort=title&page=$page&pageSize=100",
+                ),
+            )
+            cards += result.cards
+            totalPages = result.totalPages
+            page += 1
+        } while (page <= totalPages && page <= 200)
+        return cards.distinctBy(ProductionCard::id)
+    }
+
     suspend fun title(id: String): ProductionTitle {
         val base = parseTitle(request("GET", "experience/titles/${encodePath(id)}"))
         if (base.seasons.none { it.episodes.isEmpty() }) return base

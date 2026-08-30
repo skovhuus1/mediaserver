@@ -5,8 +5,9 @@ Separat native Android TV-klient i Kotlin og Jetpack Compose. Release-id er `com
 ## Aktuel status
 
 - Cinematic TV-design og D-pad-navigation er implementeret for login, profiler, hub, genre, titel, player, Live TV, downloads, notifikationer og indstillinger.
+- Film- og serieforsiderne bevarer de kuraterede rækker og tilbyder separate `Alle film`/`Alle TV-serier`-faner med pagineret katalogindlæsning. Søgning åbner med TV-fokus og søger i hele biblioteket.
 - Native lint kompilerer skærmene og kontrollerer Android TV-manifestet.
-- Der findes endnu ingen unit-testkilder; `testDebugUnitTest` rapporterer derfor `NO-SOURCE`.
+- Produktionskontrakterne har unit-tests for blandt andet katalogparsing, søgning, playbackmarkører og API-modeller.
 - Typed API/session, rigtigt email/QR-login og den autoritative Media3-playbackmotor er fortsat integrationsgates. Den nuværende APK er en interaktiv V1-oplevelsesprototype og må ikke beskrives som funktionelt produktionsfærdig.
 
 ## Lokal kvalitetskontrol

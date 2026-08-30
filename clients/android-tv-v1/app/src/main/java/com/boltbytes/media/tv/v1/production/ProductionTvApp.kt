@@ -314,16 +314,20 @@ private fun ProductionHubScreen(state: ProductionUiState, viewModel: ProductionV
     var contextOriginKey by remember { mutableStateOf<String?>(null) }
     var previousContextCardId by remember { mutableStateOf<String?>(null) }
     val visibleRows = remember(state.home, state.hubFilter) {
-        state.home.rows.mapNotNull { row ->
-            val cards = row.cards.filter { card ->
-                when (state.hubFilter) {
-                    "movies" -> card.type.contains("movie", true) || card.type.contains("film", true)
-                    "series" -> card.type.contains("series", true) || card.type.contains("episode", true)
-                    "continue" -> card.progress in 0.001f..0.949f
-                    else -> true
+        if (state.hubFilter == "all_movies" || state.hubFilter == "all_series") {
+            state.home.rows.filter { it.id == "catalog_${state.hubFilter.removePrefix("all_")}" }
+        } else {
+            state.home.rows.mapNotNull { row ->
+                val cards = row.cards.filter { card ->
+                    when (state.hubFilter) {
+                        "movies" -> card.type.contains("movie", true) || card.type.contains("film", true)
+                        "series" -> card.type.contains("series", true) || card.type.contains("episode", true)
+                        "continue" -> card.progress in 0.001f..0.949f
+                        else -> true
+                    }
                 }
+                if (cards.isEmpty()) null else row.copy(cards = cards)
             }
-            if (cards.isEmpty()) null else row.copy(cards = cards)
         }
     }
     val hero = state.selectedHero ?: visibleRows.firstOrNull()?.cards?.firstOrNull()
@@ -369,6 +373,24 @@ private fun ProductionHubScreen(state: ProductionUiState, viewModel: ProductionV
                 Modifier.fillMaxSize().padding(start = 28.dp, end = 36.dp, top = 30.dp, bottom = 22.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
+                if (state.hubFilter in setOf("movies", "series", "all_movies", "all_series")) {
+                    item(key = "library-tabs") {
+                        val movies = state.hubFilter.endsWith("movies")
+                        val showingAll = state.hubFilter.startsWith("all_")
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            V1Button(
+                                "Forside",
+                                { viewModel.selectHubFilter(if (movies) "movies" else "series") },
+                                primary = !showingAll,
+                            )
+                            V1Button(
+                                if (movies) "Alle film" else "Alle TV-serier",
+                                { viewModel.selectHubFilter(if (movies) "all_movies" else "all_series") },
+                                primary = showingAll,
+                            )
+                        }
+                    }
+                }
                 item {
                     ProductionHero(
                         hero = hero,
@@ -377,8 +399,19 @@ private fun ProductionHubScreen(state: ProductionUiState, viewModel: ProductionV
                         playFocusRequester = heroFocus,
                     )
                 }
-                if (visibleRows.isEmpty()) {
-                    item { ProductionEmptyState("Ingen titler her endnu", "Prøv Hjem eller Søg for at finde noget at se.") }
+                if (state.libraryLoading) {
+                    item {
+                        ProductionInlineLoading(
+                            if (state.hubFilter == "all_movies") "Henter alle film" else "Henter alle TV-serier",
+                        )
+                    }
+                } else if (visibleRows.isEmpty()) {
+                    item {
+                        ProductionEmptyState(
+                            if (state.hubFilter == "all_movies") "Ingen film fundet" else if (state.hubFilter == "all_series") "Ingen TV-serier fundet" else "Ingen titler her endnu",
+                            if (state.hubFilter == "all_movies" || state.hubFilter == "all_series") "Hele biblioteket er hentet, men denne kategori er tom." else "Prøv Hjem eller Søg for at finde noget at se.",
+                        )
+                    }
                 }
                 visibleRows.forEach { row ->
                     item(key = row.id) {
@@ -414,13 +447,16 @@ private fun ProductionRail(state: ProductionUiState, viewModel: ProductionViewMo
         Triple("profile", "Min profil", Icons.Rounded.Person),
     )
     Column(
-        Modifier.width(76.dp).fillMaxHeight().background(Color(0xD90A0E13)).padding(vertical = 18.dp, horizontal = 8.dp),
+        Modifier.width(206.dp).fillMaxHeight().background(Color(0xE60A0E13)).padding(vertical = 18.dp, horizontal = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text("BB", color = V1Colors.Gold, fontSize = 16.sp, fontWeight = FontWeight.Black)
+        Text("BOLTBYTES", color = V1Colors.Gold, fontSize = 14.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
         Spacer(Modifier.height(8.dp))
         items.forEach { (id, label, icon) ->
+            val selected = state.hubFilter == id ||
+                (id == "movies" && state.hubFilter == "all_movies") ||
+                (id == "series" && state.hubFilter == "all_series")
             V1FocusSurface(
                 onClick = {
                     when (id) {
@@ -434,25 +470,39 @@ private fun ProductionRail(state: ProductionUiState, viewModel: ProductionViewMo
                         "profile" -> viewModel.openProfiles()
                     }
                 },
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.fillMaxWidth().height(44.dp),
                 radius = 15.dp,
-                focusedScale = 1.06f,
+                focusedScale = 1.025f,
             ) { focused ->
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(icon, label, tint = if (focused || state.hubFilter == id) V1Colors.Gold else V1Colors.Muted, modifier = Modifier.size(19.dp))
-                    if (id == "notifications" && state.unreadCount > 0) {
-                        Box(
-                            Modifier.align(Alignment.TopEnd).size(17.dp).background(V1Colors.Danger, CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) { Text(state.unreadCount.coerceAtMost(9).toString(), color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black) }
+                Row(
+                    Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(11.dp),
+                ) {
+                    Box(Modifier.size(23.dp), contentAlignment = Alignment.Center) {
+                        Icon(icon, null, tint = if (focused || selected) V1Colors.Gold else V1Colors.Muted, modifier = Modifier.size(19.dp))
+                        if (id == "notifications" && state.unreadCount > 0) {
+                            Box(
+                                Modifier.align(Alignment.TopEnd).size(14.dp).background(V1Colors.Danger, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) { Text(state.unreadCount.coerceAtMost(9).toString(), color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Black) }
+                        }
                     }
+                    Text(
+                        label,
+                        color = if (focused || selected) V1Colors.Text else V1Colors.Muted,
+                        fontSize = 13.sp,
+                        fontWeight = if (focused || selected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                    )
                 }
             }
         }
         Spacer(Modifier.weight(1f))
-        V1FocusSurface(onClick = viewModel::logout, modifier = Modifier.size(44.dp), radius = 15.dp) { focused ->
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Logout, "Log ud", tint = if (focused) V1Colors.Gold else V1Colors.Muted)
+        V1FocusSurface(onClick = viewModel::logout, modifier = Modifier.fillMaxWidth().height(44.dp), radius = 15.dp, focusedScale = 1.025f) { focused ->
+            Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                Icon(Icons.Rounded.Logout, null, tint = if (focused) V1Colors.Gold else V1Colors.Muted, modifier = Modifier.size(19.dp))
+                Text("Log ud", color = if (focused) V1Colors.Text else V1Colors.Muted, fontSize = 13.sp, fontWeight = if (focused) FontWeight.Bold else FontWeight.Medium)
             }
         }
     }

@@ -254,6 +254,25 @@ class ProductionContractsTest {
     }
 
     @Test
+    fun catalogPageKeepsAllItemsAndPagination() {
+        val page = parseCatalogPage(
+            JSONObject()
+                .put("page", 2)
+                .put("totalPages", 4)
+                .put(
+                    "items",
+                    JSONArray()
+                        .put(JSONObject().put("id", "movie-1").put("title", "A Film").put("type", "movie"))
+                        .put(JSONObject().put("id", "movie-2").put("title", "B Film").put("type", "movie")),
+                ),
+        )
+
+        assertEquals(2, page.page)
+        assertEquals(4, page.totalPages)
+        assertEquals(listOf("movie-1", "movie-2"), page.cards.map { it.id })
+    }
+
+    @Test
     fun playbackMarkersRemainTypedAndBounded() {
         val authorization = parseAuthorization(
             JSONObject()
