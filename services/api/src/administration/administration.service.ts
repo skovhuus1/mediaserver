@@ -631,17 +631,26 @@ export class AdministrationService {
 
   async listPlaybackAnalysis(actor: AuthenticatedUser, query: PlaybackAnalysisQueryDto) {
     const search = query.q?.trim();
-    const media = await this.prisma.mediaItem.findMany({
-      where: {
-        accountId: actor.accountId,
-        ...(search ? {
-          OR: [
-            { title: { contains: search, mode: 'insensitive' } },
-            { seriesTitle: { contains: search, mode: 'insensitive' } },
-            { seriesDisplayTitle: { contains: search, mode: 'insensitive' } },
-          ],
-        } : {}),
-      },
+    const searchWhere: Prisma.MediaItemWhereInput = search ? {
+      OR: [
+        { title: { contains: search, mode: 'insensitive' } },
+        { seriesTitle: { contains: search, mode: 'insensitive' } },
+        { seriesDisplayTitle: { contains: search, mode: 'insensitive' } },
+      ],
+    } : {};
+    const baseWhere: Prisma.MediaItemWhereInput = { accountId: actor.accountId, ...searchWhere };
+    const statusWhere: Prisma.MediaItemWhereInput = query.status === 'all'
+      ? {}
+      : query.status === 'missing'
+        ? { playbackAsset: { is: null } }
+        : { playbackAsset: { is: { status: query.status } } };
+    const where: Prisma.MediaItemWhereInput = { ...baseWhere, ...statusWhere };
+    const page = query.page ?? 1;
+    const take = query.take ?? 40;
+    const offset = (page - 1) * take;
+    const [media, total, allTotal, statusGroups] = await Promise.all([
+      this.prisma.mediaItem.findMany({
+      where,
       select: {
         id: true,
         title: true,
@@ -672,7 +681,20 @@ export class AdministrationService {
         },
       },
       orderBy: { updatedAt: 'desc' },
-    });
+      skip: offset,
+      take,
+      }),
+      this.prisma.mediaItem.count({ where }),
+      this.prisma.mediaItem.count({ where: baseWhere }),
+      this.prisma.mediaPlaybackAsset.groupBy({
+        by: ['status'],
+        where: {
+          accountId: actor.accountId,
+          ...(search ? { media: { is: searchWhere } } : {}),
+        },
+        _count: { _all: true },
+      }),
+    ]);
     const normalized = media.map((item) => ({
       id: item.id,
       title: item.seriesDisplayTitle ?? item.seriesTitle ?? item.title,
@@ -699,11 +721,22 @@ export class AdministrationService {
       markers: item.timelineMarkers,
       updatedAt: item.playbackAsset?.updatedAt ?? item.updatedAt,
     }));
-    const filtered = query.status === 'all' ? normalized : normalized.filter((item) => item.status === query.status);
-    const page = query.page ?? 1;
-    const take = query.take ?? 40;
-    const offset = (page - 1) * take;
-    return { items: filtered.slice(offset, offset + take), total: filtered.length, page, take };
+    const groupedCounts = Object.fromEntries(statusGroups.map((entry) => [entry.status, entry._count._all]));
+    const assetsTotal = statusGroups.reduce((sum, entry) => sum + entry._count._all, 0);
+    return {
+      items: normalized,
+      total,
+      page,
+      take,
+      counts: {
+        all: allTotal,
+        missing: Math.max(0, allTotal - assetsTotal),
+        queued: groupedCounts.queued ?? 0,
+        generating: groupedCounts.generating ?? 0,
+        ready: groupedCounts.ready ?? 0,
+        failed: groupedCounts.failed ?? 0,
+      },
+    };
   }
 
   async playbackAnalysisDetail(actor: AuthenticatedUser, mediaId: string) {

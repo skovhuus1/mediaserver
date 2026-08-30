@@ -4,6 +4,12 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.8 - 2026-08-30
+
+- Flytter playback-analysens sogning, statusfilter og pagination til PostgreSQL, sa store kataloger ikke laengere kan overbelaste API'et eller udlose 502 fra adminvisningen.
+- Viser globale analysetaellinger, rigtig side-navigation og stabil worker-polling i adminpanelet.
+- Vaelger fuld asset-generering for manglende medier og genbruger kun `marker_only`, nar eksisterende seek-preview kan bruges sikkert.
+
 ## 0.3.7 - 2026-08-30
 
 - Retter HLS-resume, saa den genererede nulbaserede stream ikke soeges en ekstra gang til den globale episodeposition.
