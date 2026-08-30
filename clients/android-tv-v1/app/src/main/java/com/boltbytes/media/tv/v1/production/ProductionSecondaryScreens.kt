@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -58,11 +61,18 @@ import com.boltbytes.media.tv.v1.ui.V1Colors
 import com.boltbytes.media.tv.v1.ui.V1FocusSurface
 import com.boltbytes.media.tv.v1.ui.V1GlassPanel
 import com.boltbytes.media.tv.v1.ui.V1Pill
+import kotlinx.coroutines.delay
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
 internal fun ProductionSearchScreen(state: ProductionUiState, viewModel: ProductionViewModel) {
+    val searchFocus = remember { FocusRequester() }
+    ProductionInitialFocus(
+        key = state.contextCard?.id,
+        ready = state.contextCard == null,
+        requester = searchFocus,
+    )
     V1AmbientBackground(accent = V1Colors.Blue) {
         Column(
             Modifier.fillMaxSize().padding(horizontal = 58.dp, vertical = 32.dp),
@@ -75,7 +85,7 @@ internal fun ProductionSearchScreen(state: ProductionUiState, viewModel: Product
                 leadingIcon = { Icon(Icons.Rounded.Search, null) },
                 placeholder = { Text("Titel, serie, skuespiller eller genre") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.focusRequester(searchFocus).fillMaxWidth(),
             )
             if (state.searchQuery.length < 2) {
                 ProductionEmptyState("Klar til at søge", "Skriv mindst to tegn. Resultaterne opdateres automatisk.")
@@ -105,6 +115,13 @@ internal fun ProductionGenreScreen(state: ProductionUiState, viewModel: Producti
         state.home.rows.flatMap { row -> row.cards.flatMap { it.genres } }
             .map(String::trim).filter(String::isNotBlank).distinct().sorted()
     }
+    val contentFocus = remember { FocusRequester() }
+    val genreFocusKey = "${state.selectedGenre.orEmpty()}:${state.contextCard?.id.orEmpty()}"
+    ProductionInitialFocus(
+        key = genreFocusKey,
+        ready = state.contextCard == null && if (state.selectedGenre == null) genres.isNotEmpty() else state.genreResults.isNotEmpty(),
+        requester = contentFocus,
+    )
     V1AmbientBackground(accent = V1Colors.GoldDeep) {
         Column(
             Modifier.fillMaxSize().padding(horizontal = 58.dp, vertical = 32.dp),
@@ -123,7 +140,9 @@ internal fun ProductionGenreScreen(state: ProductionUiState, viewModel: Producti
                         items(genres, key = { it }) { genre ->
                             V1FocusSurface(
                                 onClick = { viewModel.selectGenre(genre) },
-                                modifier = Modifier.height(120.dp),
+                                modifier = Modifier
+                                    .then(if (genre == genres.firstOrNull()) Modifier.focusRequester(contentFocus) else Modifier)
+                                    .height(120.dp),
                                 radius = 20.dp,
                                 focusedScale = 1.035f,
                                 background = Brush.linearGradient(listOf(V1Colors.SurfaceSolid, V1Colors.Elevated)),
@@ -152,7 +171,13 @@ internal fun ProductionGenreScreen(state: ProductionUiState, viewModel: Producti
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        items(state.genreResults, key = { it.id }) { card -> ProductionResultCard(card, viewModel) }
+                        items(state.genreResults, key = { it.id }) { card ->
+                            ProductionResultCard(
+                                card,
+                                viewModel,
+                                modifier = if (card.id == state.genreResults.firstOrNull()?.id) Modifier.focusRequester(contentFocus) else Modifier,
+                            )
+                        }
                     }
                 }
             }
@@ -165,6 +190,12 @@ internal fun ProductionLiveTvScreen(state: ProductionUiState, viewModel: Product
     var selectedChannelId by remember { mutableStateOf<String?>(null) }
     val selectedChannel = state.channels.firstOrNull { it.id == selectedChannelId } ?: state.channels.firstOrNull()
     val selectedProgram = selectedChannel?.programs?.firstOrNull { it.isLive } ?: selectedChannel?.programs?.firstOrNull()
+    val guideFocus = remember { FocusRequester() }
+    ProductionInitialFocus(
+        key = state.contextCard?.id,
+        ready = state.contextCard == null && state.channels.isNotEmpty(),
+        requester = guideFocus,
+    )
     V1AmbientBackground(accent = V1Colors.Blue) {
         Column(Modifier.fillMaxSize().padding(horizontal = 34.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             ProductionPageHeader("Live TV", "12-timers programguide · opdateres hvert minut", viewModel::back)
@@ -211,7 +242,10 @@ internal fun ProductionLiveTvScreen(state: ProductionUiState, viewModel: Product
                                 onClick = { selectedChannelId = channel.id },
                                 onLongClick = { viewModel.toggleFavorite(channel) },
                                 onFocused = { selectedChannelId = channel.id },
-                                modifier = Modifier.width(190.dp).fillMaxHeight(),
+                                modifier = Modifier
+                                    .then(if (channel.id == state.channels.firstOrNull()?.id) Modifier.focusRequester(guideFocus) else Modifier)
+                                    .width(190.dp)
+                                    .fillMaxHeight(),
                                 radius = 4.dp,
                                 focusedScale = 1.01f,
                             ) { focused ->
@@ -250,6 +284,12 @@ internal fun ProductionLiveTvScreen(state: ProductionUiState, viewModel: Product
 internal fun ProductionNotificationsScreen(state: ProductionUiState, viewModel: ProductionViewModel) {
     var selectedId by remember { mutableStateOf<String?>(null) }
     val selected = state.notifications.firstOrNull { it.id == selectedId } ?: state.notifications.firstOrNull()
+    val notificationFocus = remember { FocusRequester() }
+    ProductionInitialFocus(
+        key = state.contextCard?.id,
+        ready = state.contextCard == null && state.notifications.isNotEmpty(),
+        requester = notificationFocus,
+    )
     V1AmbientBackground(accent = V1Colors.Blue) {
         Column(Modifier.fillMaxSize().padding(horizontal = 58.dp, vertical = 32.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
             ProductionPageHeader("Notifikationer", "${state.unreadCount} ulæste", viewModel::back) {
@@ -265,7 +305,10 @@ internal fun ProductionNotificationsScreen(state: ProductionUiState, viewModel: 
                         V1FocusSurface(
                             onClick = { selectedId = notification.id; viewModel.markRead(notification) },
                             onFocused = { selectedId = notification.id },
-                            modifier = Modifier.fillMaxWidth().height(82.dp),
+                            modifier = Modifier
+                                .then(if (notification.id == state.notifications.firstOrNull()?.id) Modifier.focusRequester(notificationFocus) else Modifier)
+                                .fillMaxWidth()
+                                .height(82.dp),
                             radius = 15.dp,
                         ) { focused ->
                             Row(Modifier.fillMaxSize().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -294,6 +337,12 @@ internal fun ProductionNotificationsScreen(state: ProductionUiState, viewModel: 
 
 @Composable
 internal fun ProductionDownloadsScreen(state: ProductionUiState, viewModel: ProductionViewModel) {
+    val downloadFocus = remember { FocusRequester() }
+    ProductionInitialFocus(
+        key = state.contextCard?.id,
+        ready = state.contextCard == null && state.downloads.isNotEmpty(),
+        requester = downloadFocus,
+    )
     V1AmbientBackground(accent = V1Colors.Green) {
         Column(Modifier.fillMaxSize().padding(horizontal = 58.dp, vertical = 32.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
             ProductionPageHeader("Downloads", "Offlineindhold og licenser", viewModel::back) {
@@ -323,7 +372,12 @@ internal fun ProductionDownloadsScreen(state: ProductionUiState, viewModel: Prod
                                     }
                                     download.error?.let { Text(it, color = V1Colors.Danger, fontSize = 8.sp, maxLines = 1) }
                                 }
-                                V1Button("Forny", { viewModel.renewDownload(download) }, icon = Icons.Rounded.Refresh)
+                                V1Button(
+                                    "Forny",
+                                    { viewModel.renewDownload(download) },
+                                    modifier = if (download.id == state.downloads.firstOrNull()?.id) Modifier.focusRequester(downloadFocus) else Modifier,
+                                    icon = Icons.Rounded.Refresh,
+                                )
                                 V1Button("Slet", { viewModel.removeDownload(download) }, icon = Icons.Rounded.Delete)
                             }
                         }
@@ -338,6 +392,12 @@ internal fun ProductionDownloadsScreen(state: ProductionUiState, viewModel: Prod
 internal fun ProductionSettingsScreen(state: ProductionUiState, viewModel: ProductionViewModel) {
     val value = state.preferences
     var category by remember { mutableStateOf("Afspilning") }
+    val categoryFocus = remember { FocusRequester() }
+    ProductionInitialFocus(
+        key = state.contextCard?.id,
+        ready = state.contextCard == null,
+        requester = categoryFocus,
+    )
     V1AmbientBackground(accent = V1Colors.GoldDeep) {
         Column(Modifier.fillMaxSize().padding(horizontal = 58.dp, vertical = 32.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
             ProductionPageHeader("Indstillinger", "Profil- og enhedsvalg gemmes samlet", viewModel::back) {
@@ -346,8 +406,16 @@ internal fun ProductionSettingsScreen(state: ProductionUiState, viewModel: Produ
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 V1GlassPanel(Modifier.width(250.dp).fillMaxHeight()) {
                     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        listOf("Afspilning", "Billede", "Sprog", "Oplevelse", "System").forEach { label ->
-                            V1Button(label, { category = label }, primary = category == label, icon = Icons.Rounded.Settings, modifier = Modifier.fillMaxWidth())
+                        listOf("Afspilning", "Billede", "Sprog", "Oplevelse", "System").forEachIndexed { index, label ->
+                            V1Button(
+                                label,
+                                { category = label },
+                                primary = category == label,
+                                icon = Icons.Rounded.Settings,
+                                modifier = Modifier
+                                    .then(if (index == 0) Modifier.focusRequester(categoryFocus) else Modifier)
+                                    .fillMaxWidth(),
+                            )
                         }
                     }
                 }
@@ -369,9 +437,11 @@ internal fun ProductionSettingsScreen(state: ProductionUiState, viewModel: Produ
                                 item { ProductionToggle("Autoplay næste afsnit", "Starter kun efter faktisk afslutning", value.autoplay) { viewModel.updatePreferences(value.copy(autoplay = it)) } }
                             }
                             "Billede" -> {
-                                item { ProductionToggle("Tillad opskalering", "Tillader enheden eller serveren at forbedre lavere opløsninger", value.allowUpscale) { viewModel.updatePreferences(value.copy(allowUpscale = it)) } }
-                                item { ProductionChoice("Opskalering", value.upscaleMode.replaceFirstChar(Char::uppercase), listOf("Fra", "Enhed", "Server")) { label ->
-                                    viewModel.updatePreferences(value.copy(allowUpscale = label != "Fra", upscaleMode = when (label) { "Server" -> "server"; "Enhed" -> "device"; else -> "off" }))
+                                item { ProductionToggle("Tillad opskalering", "Lader serveren skabe højere adaptive videoniveauer, når kilden er mindre end skærmen", value.allowUpscale && value.upscaleMode != "off") { enabled ->
+                                    viewModel.updatePreferences(value.copy(allowUpscale = enabled, upscaleMode = if (enabled) "server" else "off"))
+                                } }
+                                item { ProductionChoice("Opskalering", if (value.allowUpscale && value.upscaleMode != "off") "Server" else "Fra", listOf("Fra", "Server")) { label ->
+                                    viewModel.updatePreferences(value.copy(allowUpscale = label == "Server", upscaleMode = if (label == "Server") "server" else "off"))
                                 } }
                                 item { ProductionToggle("HDR", "Brug HDR, når skærm og stream understøtter det", value.hdr) { viewModel.updatePreferences(value.copy(hdr = it)) } }
                             }
@@ -467,11 +537,15 @@ private fun ProductionToggle(title: String, description: String, checked: Boolea
 }
 
 @Composable
-private fun ProductionResultCard(card: ProductionCard, viewModel: ProductionViewModel) {
+private fun ProductionResultCard(
+    card: ProductionCard,
+    viewModel: ProductionViewModel,
+    modifier: Modifier = Modifier,
+) {
     V1FocusSurface(
         onClick = { viewModel.openCard(card) },
         onLongClick = { viewModel.showContext(card) },
-        modifier = Modifier.width(156.dp).height(232.dp),
+        modifier = modifier.width(156.dp).height(232.dp),
         radius = 16.dp,
         focusedScale = 1.045f,
     ) { focused ->
@@ -481,6 +555,22 @@ private fun ProductionResultCard(card: ProductionCard, viewModel: ProductionView
                 Text(card.title, color = if (focused) V1Colors.Gold else V1Colors.Text, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(card.subtitle, color = V1Colors.Muted, fontSize = 8.sp, maxLines = 1)
             }
+        }
+    }
+}
+
+@Composable
+private fun ProductionInitialFocus(
+    key: Any?,
+    ready: Boolean,
+    requester: FocusRequester,
+) {
+    var applied by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key, ready) {
+        if (ready && !applied) {
+            delay(100L)
+            runCatching { requester.requestFocus() }
+            applied = true
         }
     }
 }

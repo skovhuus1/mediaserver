@@ -43,7 +43,7 @@ class ProductionContractsTest {
         assertTrue(capabilities.has("supportedAudioCodecs"))
         assertTrue(capabilities.has("supportedContainers"))
         assertTrue(capabilities.getBoolean("supportsHdr"))
-        assertEquals("device", capabilities.getString("upscaleMode"))
+        assertEquals("server", capabilities.getString("upscaleMode"))
         assertFalse(capabilities.has("hdr"))
         assertFalse(capabilities.has("qualityMode"))
         assertFalse(capabilities.has("maxHeight"))

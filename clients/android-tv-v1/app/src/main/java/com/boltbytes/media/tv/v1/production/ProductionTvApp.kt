@@ -2,6 +2,7 @@ package com.boltbytes.media.tv.v1.production
 
 import android.app.Activity
 import android.graphics.Bitmap
+import android.view.KeyEvent as AndroidKeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Image
@@ -55,10 +56,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,6 +82,7 @@ import com.boltbytes.media.tv.v1.ui.V1GlassPanel
 import com.boltbytes.media.tv.v1.ui.V1Pill
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import kotlinx.coroutines.delay
 
 @Composable
 fun ProductionTvApp(viewModel: ProductionViewModel = viewModel()) {
@@ -124,6 +131,10 @@ fun ProductionTvApp(viewModel: ProductionViewModel = viewModel()) {
             Box(Modifier.fillMaxSize().padding(top = 24.dp), contentAlignment = Alignment.TopCenter) {
                 ProductionMessage(message = message, onDismiss = viewModel::clearMessage)
             }
+        }
+
+        state.contextCard?.let { card ->
+            ProductionCardMenu(card, viewModel, viewModel::closeContext)
         }
 
         if (state.confirmExit) {
@@ -275,6 +286,11 @@ private fun ProductionProfilesScreen(state: ProductionUiState, viewModel: Produc
 
 @Composable
 private fun ProductionHubScreen(state: ProductionUiState, viewModel: ProductionViewModel) {
+    val heroFocus = remember { FocusRequester() }
+    val cardFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    var initialFocusApplied by remember { mutableStateOf(false) }
+    var contextOriginKey by remember { mutableStateOf<String?>(null) }
+    var previousContextCardId by remember { mutableStateOf<String?>(null) }
     val visibleRows = remember(state.home, state.hubFilter) {
         state.home.rows.mapNotNull { row ->
             val cards = row.cards.filter { card ->
@@ -289,6 +305,28 @@ private fun ProductionHubScreen(state: ProductionUiState, viewModel: ProductionV
         }
     }
     val hero = state.selectedHero ?: visibleRows.firstOrNull()?.cards?.firstOrNull()
+
+    LaunchedEffect(hero?.id) {
+        if (!initialFocusApplied && hero != null && state.contextCard == null) {
+            delay(100L)
+            runCatching { heroFocus.requestFocus() }
+            initialFocusApplied = true
+        }
+    }
+
+    LaunchedEffect(state.contextCard?.id) {
+        val currentContextId = state.contextCard?.id
+        if (currentContextId != null) {
+            previousContextCardId = currentContextId
+        } else if (previousContextCardId != null) {
+            delay(80L)
+            contextOriginKey?.let(cardFocusRequesters::get)?.let { requester ->
+                runCatching { requester.requestFocus() }
+            }
+            previousContextCardId = null
+        }
+    }
+
     V1AmbientBackground(accent = V1Colors.Blue) {
         (hero?.backdropUrl ?: hero?.posterUrl)?.let { url ->
             AsyncImage(
@@ -310,20 +348,30 @@ private fun ProductionHubScreen(state: ProductionUiState, viewModel: ProductionV
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 item {
-                    ProductionHero(hero = hero, onOpen = { hero?.let(viewModel::openCard) }, onPlay = { hero?.let { viewModel.playCard(it) } })
+                    ProductionHero(
+                        hero = hero,
+                        onOpen = { hero?.let(viewModel::openCard) },
+                        onPlay = { hero?.let { viewModel.playCard(it) } },
+                        playFocusRequester = heroFocus,
+                    )
                 }
                 if (visibleRows.isEmpty()) {
                     item { ProductionEmptyState("Ingen titler her endnu", "Prøv Hjem eller Søg for at finde noget at se.") }
                 }
                 visibleRows.forEach { row ->
                     item(key = row.id) {
-                        ProductionMediaRow(row, viewModel)
+                        ProductionMediaRow(
+                            row = row,
+                            viewModel = viewModel,
+                            focusRequesters = cardFocusRequesters,
+                            onOpenContext = { originKey, card ->
+                                contextOriginKey = originKey
+                                viewModel.showContext(card)
+                            },
+                        )
                     }
                 }
             }
-        }
-        state.contextCard?.let { card ->
-            ProductionCardMenu(card, viewModel)
         }
     }
 }
@@ -389,7 +437,12 @@ private fun ProductionRail(state: ProductionUiState, viewModel: ProductionViewMo
 }
 
 @Composable
-private fun ProductionHero(hero: ProductionCard?, onOpen: () -> Unit, onPlay: () -> Unit) {
+private fun ProductionHero(
+    hero: ProductionCard?,
+    onOpen: () -> Unit,
+    onPlay: () -> Unit,
+    playFocusRequester: FocusRequester,
+) {
     Column(Modifier.fillMaxWidth().height(250.dp), verticalArrangement = Arrangement.Bottom) {
         Text("BOLTBYTES ORIGINAL", color = V1Colors.Gold, fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 1.7.sp)
         Spacer(Modifier.height(7.dp))
@@ -397,14 +450,25 @@ private fun ProductionHero(hero: ProductionCard?, onOpen: () -> Unit, onPlay: ()
         Text(hero?.subtitle.orEmpty(), color = V1Colors.Muted, fontSize = 12.sp)
         Spacer(Modifier.height(13.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            V1Button(if ((hero?.startPositionMs ?: 0L) > 0L) "Fortsæt" else "Afspil", onPlay, primary = true, icon = Icons.Rounded.PlayArrow)
+            V1Button(
+                if ((hero?.startPositionMs ?: 0L) > 0L) "Fortsæt" else "Afspil",
+                onPlay,
+                modifier = Modifier.focusRequester(playFocusRequester),
+                primary = true,
+                icon = Icons.Rounded.PlayArrow,
+            )
             V1Button("Detaljer", onOpen, icon = Icons.Rounded.VideoLibrary)
         }
     }
 }
 
 @Composable
-private fun ProductionMediaRow(row: ProductionRow, viewModel: ProductionViewModel) {
+private fun ProductionMediaRow(
+    row: ProductionRow,
+    viewModel: ProductionViewModel,
+    focusRequesters: MutableMap<String, FocusRequester>,
+    onOpenContext: (String, ProductionCard) -> Unit,
+) {
     val directPlayback = row.startsPlaybackDirectly()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -414,14 +478,30 @@ private fun ProductionMediaRow(row: ProductionRow, viewModel: ProductionViewMode
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(horizontal = 5.dp, vertical = 6.dp)) {
             items(row.cards, key = { "${row.id}-${it.id}" }) { card ->
-                ProductionMediaCard(card, viewModel, directPlayback)
+                val originKey = "${row.id}:${card.id}"
+                val focusRequester = remember(originKey) {
+                    focusRequesters.getOrPut(originKey) { FocusRequester() }
+                }
+                ProductionMediaCard(
+                    card = card,
+                    viewModel = viewModel,
+                    directPlayback = directPlayback,
+                    focusRequester = focusRequester,
+                    onLongClick = { onOpenContext(originKey, card) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ProductionMediaCard(card: ProductionCard, viewModel: ProductionViewModel, directPlayback: Boolean) {
+private fun ProductionMediaCard(
+    card: ProductionCard,
+    viewModel: ProductionViewModel,
+    directPlayback: Boolean,
+    focusRequester: FocusRequester,
+    onLongClick: () -> Unit,
+) {
     V1FocusSurface(
         onClick = {
             if (directPlayback) {
@@ -430,9 +510,9 @@ private fun ProductionMediaCard(card: ProductionCard, viewModel: ProductionViewM
                 viewModel.openCard(card)
             }
         },
-        onLongClick = { viewModel.showContext(card) },
+        onLongClick = onLongClick,
         onFocused = { viewModel.selectHero(card) },
-        modifier = Modifier.width(154.dp).height(232.dp),
+        modifier = Modifier.focusRequester(focusRequester).width(154.dp).height(232.dp),
         radius = 16.dp,
         focusedScale = 1.055f,
     ) { focused ->
@@ -462,21 +542,36 @@ private fun ProductionMediaCard(card: ProductionCard, viewModel: ProductionViewM
 }
 
 @Composable
-private fun ProductionCardMenu(card: ProductionCard, viewModel: ProductionViewModel) {
+private fun ProductionCardMenu(
+    card: ProductionCard,
+    viewModel: ProductionViewModel,
+    onDismiss: () -> Unit,
+) {
+    val firstActionFocus = remember(card.id) { FocusRequester() }
+    LaunchedEffect(card.id) {
+        delay(80L)
+        runCatching { firstActionFocus.requestFocus() }
+    }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f))) {
         V1GlassPanel(Modifier.width(390.dp).fillMaxHeight().align(Alignment.CenterEnd), radius = 0.dp) {
             Column(Modifier.fillMaxSize().padding(34.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
                 Text(card.title, color = V1Colors.Text, fontSize = 25.sp, fontWeight = FontWeight.Black, maxLines = 2)
                 Text("Hurtigmenu", color = V1Colors.Gold, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
                 Spacer(Modifier.height(6.dp))
-                V1Button(if (card.startPositionMs > 0) "Fortsæt" else "Afspil", { viewModel.playCard(card) }, primary = true, icon = Icons.Rounded.PlayArrow)
-                V1Button("Start forfra", { viewModel.playCard(card, true) }, icon = Icons.Rounded.Refresh)
-                V1Button("Gå til serie/titel", { viewModel.closeContext(); viewModel.openCard(card) }, icon = Icons.Rounded.VideoLibrary)
-                V1Button("Føj til Min liste", { viewModel.contextWatchlist(card) }, icon = Icons.Rounded.Add)
-                V1Button("Markér som set", { viewModel.contextSetWatched(card) }, icon = Icons.Rounded.Check)
-                V1Button("Fjern fra Fortsæt", { viewModel.contextRemoveContinue(card) }, icon = Icons.Rounded.Delete)
+                V1Button(
+                    if (card.startPositionMs > 0) "Fortsæt" else "Afspil",
+                    { viewModel.playCard(card) },
+                    modifier = Modifier.focusRequester(firstActionFocus).blockDirectionalFocusExit(left = true, right = true, up = true),
+                    primary = true,
+                    icon = Icons.Rounded.PlayArrow,
+                )
+                V1Button("Start forfra", { viewModel.playCard(card, true) }, modifier = Modifier.blockDirectionalFocusExit(left = true, right = true), icon = Icons.Rounded.Refresh)
+                V1Button("Gå til serie/titel", { viewModel.closeContext(); viewModel.openCard(card) }, modifier = Modifier.blockDirectionalFocusExit(left = true, right = true), icon = Icons.Rounded.VideoLibrary)
+                V1Button("Føj til Min liste", { viewModel.contextWatchlist(card) }, modifier = Modifier.blockDirectionalFocusExit(left = true, right = true), icon = Icons.Rounded.Add)
+                V1Button("Markér som set", { viewModel.contextSetWatched(card) }, modifier = Modifier.blockDirectionalFocusExit(left = true, right = true), icon = Icons.Rounded.Check)
+                V1Button("Fjern fra Fortsæt", { viewModel.contextRemoveContinue(card) }, modifier = Modifier.blockDirectionalFocusExit(left = true, right = true), icon = Icons.Rounded.Delete)
                 Spacer(Modifier.weight(1f))
-                V1Button("Luk", viewModel::closeContext, icon = Icons.Rounded.Close)
+                V1Button("Luk", onDismiss, modifier = Modifier.blockDirectionalFocusExit(left = true, right = true, down = true), icon = Icons.Rounded.Close)
             }
         }
     }
@@ -486,6 +581,16 @@ private fun ProductionCardMenu(card: ProductionCard, viewModel: ProductionViewMo
 private fun ProductionTitleScreen(state: ProductionUiState, viewModel: ProductionViewModel) {
     val title = state.title
     var selectedSeason by remember(title?.id) { mutableStateOf(title?.seasons?.firstOrNull()?.number ?: 1) }
+    val playFocus = remember(title?.id) { FocusRequester() }
+    val relatedFocusRequesters = remember(title?.id) { mutableMapOf<String, FocusRequester>() }
+    var titleFocusApplied by remember(title?.id, state.contextCard?.id) { mutableStateOf(false) }
+    LaunchedEffect(title?.id, state.contextCard?.id) {
+        if (!titleFocusApplied && title != null && state.contextCard == null) {
+            delay(100L)
+            runCatching { playFocus.requestFocus() }
+            titleFocusApplied = true
+        }
+    }
     V1AmbientBackground(accent = V1Colors.GoldDeep) {
         (title?.backdropUrl ?: title?.posterUrl)?.let { url ->
             AsyncImage(model = viewModel.api.resolvePublicUrl(url), contentDescription = null, modifier = Modifier.fillMaxWidth().fillMaxHeight(0.64f).align(Alignment.TopCenter), alpha = 0.42f, contentScale = ContentScale.Crop)
@@ -513,7 +618,13 @@ private fun ProductionTitleScreen(state: ProductionUiState, viewModel: Productio
                         Text(title.summary, color = V1Colors.Muted, fontSize = 12.sp, lineHeight = 18.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(760.dp))
                         Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            V1Button(if ((title.resumeEpisode?.startPositionMs ?: title.startPositionMs) > 0) "Fortsæt" else "Afspil", { viewModel.playTitle() }, primary = true, icon = Icons.Rounded.PlayArrow)
+                            V1Button(
+                                if ((title.resumeEpisode?.startPositionMs ?: title.startPositionMs) > 0) "Fortsæt" else "Afspil",
+                                { viewModel.playTitle() },
+                                modifier = Modifier.focusRequester(playFocus),
+                                primary = true,
+                                icon = Icons.Rounded.PlayArrow,
+                            )
                             V1Button("Fra begyndelsen", { viewModel.playTitle(true) }, icon = Icons.Rounded.Refresh)
                             V1Button(if (title.inWatchlist) "Fjern fra Min liste" else "Føj til Min liste", viewModel::toggleWatchlist, icon = if (title.inWatchlist) Icons.Rounded.Check else Icons.Rounded.Add)
                         }
@@ -558,7 +669,14 @@ private fun ProductionTitleScreen(state: ProductionUiState, viewModel: Productio
                     }
                 }
                 if (title.related.isNotEmpty()) {
-                    item { ProductionMediaRow(ProductionRow("related", "Lignende titler", title.related, null), viewModel) }
+                    item {
+                        ProductionMediaRow(
+                            row = ProductionRow("related", "Lignende titler", title.related, null),
+                            viewModel = viewModel,
+                            focusRequesters = relatedFocusRequesters,
+                            onOpenContext = { _, card -> viewModel.showContext(card) },
+                        )
+                    }
                 }
             }
         }
@@ -598,15 +716,20 @@ private fun ProductionPinOverlay(
     onDismiss: () -> Unit,
 ) {
     var pin by remember(profile.id) { mutableStateOf("") }
+    val firstDigitFocus = remember(profile.id) { FocusRequester() }
+    LaunchedEffect(profile.id) {
+        delay(80L)
+        runCatching { firstDigitFocus.requestFocus() }
+    }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)), contentAlignment = Alignment.Center) {
         V1GlassPanel(Modifier.width(470.dp).height(520.dp)) {
             Column(Modifier.fillMaxSize().padding(30.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(15.dp)) {
                 Text(profile.name, color = V1Colors.Text, fontSize = 27.sp, fontWeight = FontWeight.Black)
                 Text("Indtast profil-PIN", color = V1Colors.Muted, fontSize = 12.sp)
                 Text("●".repeat(pin.length) + "○".repeat((4 - pin.length).coerceAtLeast(0)), color = V1Colors.Gold, fontSize = 25.sp, letterSpacing = 7.sp)
-                listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("Luk", "0", "Slet")).forEach { row ->
+                listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("Luk", "0", "Slet")).forEachIndexed { rowIndex, row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        row.forEach { key ->
+                        row.forEachIndexed { columnIndex, key ->
                             V1Button(
                                 label = key,
                                 onClick = {
@@ -619,7 +742,15 @@ private fun ProductionPinOverlay(
                                         }
                                     }
                                 },
-                                modifier = Modifier.width(105.dp),
+                                modifier = Modifier
+                                    .then(if (key == "1") Modifier.focusRequester(firstDigitFocus) else Modifier)
+                                    .blockDirectionalFocusExit(
+                                        left = columnIndex == 0,
+                                        right = columnIndex == row.lastIndex,
+                                        up = rowIndex == 0,
+                                        down = rowIndex == 3,
+                                    )
+                                    .width(105.dp),
                                 primary = key == "0",
                             )
                         }
@@ -649,6 +780,11 @@ internal fun ProductionConfirmOverlay(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val cancelFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(80L)
+        runCatching { cancelFocus.requestFocus() }
+    }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)), contentAlignment = Alignment.Center) {
         V1GlassPanel(Modifier.width(520.dp).height(240.dp)) {
             Column(Modifier.fillMaxSize().padding(30.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -656,10 +792,40 @@ internal fun ProductionConfirmOverlay(
                 Text(message, color = V1Colors.Muted, fontSize = 12.sp, lineHeight = 18.sp)
                 Spacer(Modifier.weight(1f))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    V1Button(confirmLabel, onConfirm, primary = true, icon = Icons.Rounded.Check)
-                    V1Button("Annuller", onDismiss, icon = Icons.Rounded.Close)
+                    V1Button(
+                        confirmLabel,
+                        onConfirm,
+                        modifier = Modifier.blockDirectionalFocusExit(left = true, up = true, down = true),
+                        primary = true,
+                        icon = Icons.Rounded.Check,
+                    )
+                    V1Button(
+                        "Annuller",
+                        onDismiss,
+                        modifier = Modifier.focusRequester(cancelFocus).blockDirectionalFocusExit(right = true, up = true, down = true),
+                        icon = Icons.Rounded.Close,
+                    )
                 }
             }
+        }
+    }
+}
+
+private fun Modifier.blockDirectionalFocusExit(
+    left: Boolean = false,
+    right: Boolean = false,
+    up: Boolean = false,
+    down: Boolean = false,
+): Modifier = onPreviewKeyEvent { event ->
+    if (event.type != KeyEventType.KeyDown) {
+        false
+    } else {
+        when (event.nativeKeyEvent.keyCode) {
+            AndroidKeyEvent.KEYCODE_DPAD_LEFT -> left
+            AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> right
+            AndroidKeyEvent.KEYCODE_DPAD_UP -> up
+            AndroidKeyEvent.KEYCODE_DPAD_DOWN -> down
+            else -> false
         }
     }
 }

@@ -388,8 +388,8 @@ class ProductionApi(context: Context) {
         return profile.copy(
             qualityMode = device.qualityMode,
             maxHeight = device.maxHeight,
-            allowUpscale = device.allowUpscale,
-            upscaleMode = device.upscaleMode,
+            allowUpscale = device.allowUpscale && device.upscaleMode != "off",
+            upscaleMode = if (device.allowUpscale && device.upscaleMode != "off") "server" else "off",
             dataSaver = device.dataSaver,
             hdr = device.hdr,
         )
@@ -413,8 +413,8 @@ class ProductionApi(context: Context) {
             JSONObject()
                 .put("qualityMode", value.qualityMode)
                 .put("maxHeight", value.maxHeight ?: JSONObject.NULL)
-                .put("allowUpscale", value.allowUpscale)
-                .put("upscaleMode", value.upscaleMode)
+                .put("allowUpscale", value.allowUpscale && value.upscaleMode != "off")
+                .put("upscaleMode", if (value.allowUpscale && value.upscaleMode != "off") "server" else "off")
                 .put("dataSaver", value.dataSaver)
                 .put("hdr", value.hdr),
         )
@@ -549,11 +549,7 @@ internal fun productionPlaybackCapabilities(
     .put("supportsHdr", hdrEnabled && supportsHdr)
     .put(
         "upscaleMode",
-        when {
-            !allowUpscale -> "off"
-            upscaleMode in setOf("off", "server", "device") -> upscaleMode
-            else -> "device"
-        },
+        if (allowUpscale && upscaleMode != "off") "server" else "off",
     )
     .put("bufferProfile", "stable")
     .put("startupPolicy", "baseline_first")
