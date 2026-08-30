@@ -186,6 +186,7 @@ private data class PlayerEngineState(
     val preparing: Boolean = true,
     val buffering: Boolean = false,
     val playing: Boolean = false,
+    val playWhenReady: Boolean = false,
     val error: String? = null,
     val authorization: ProductionAuthorization? = null,
     val ended: Boolean = false,
@@ -376,7 +377,7 @@ private class ProductionPlaybackEngine(
     }
 
     fun togglePlay() {
-        if (player.isPlaying) player.pause() else player.play()
+        if (player.playWhenReady) player.pause() else player.play()
     }
 
     fun seekBy(deltaMs: Long) {
@@ -664,12 +665,23 @@ private class ProductionPlaybackEngine(
             preparing = playbackState == Player.STATE_IDLE,
             buffering = playbackState == Player.STATE_BUFFERING,
             playing = player.isPlaying,
+            playWhenReady = player.playWhenReady,
             ended = ended,
         )
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
-        mutableState.value = mutableState.value.copy(playing = isPlaying)
+        mutableState.value = mutableState.value.copy(
+            playing = isPlaying,
+            playWhenReady = player.playWhenReady,
+        )
+    }
+
+    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        mutableState.value = mutableState.value.copy(
+            playing = player.isPlaying,
+            playWhenReady = playWhenReady,
+        )
     }
 
     override fun onTracksChanged(tracks: Tracks) {
@@ -785,10 +797,19 @@ internal fun ProductionPlayerScreen(
 
     LaunchedEffect(engine) {
         while (true) {
-            positionMs = engine.absolutePositionMs()
             durationMs = engine.absoluteDurationMs()
-            bufferedMs = engine.absoluteBufferedPositionMs().coerceAtLeast(positionMs)
+            if (engineState.playWhenReady) {
+                positionMs = engine.absolutePositionMs()
+                bufferedMs = engine.absoluteBufferedPositionMs().coerceAtLeast(positionMs)
+            }
             delay(400L)
+        }
+    }
+
+    LaunchedEffect(engineState.playWhenReady) {
+        if (!engineState.playWhenReady) {
+            positionMs = engine.absolutePositionMs()
+            bufferedMs = engine.absoluteBufferedPositionMs().coerceAtLeast(positionMs)
         }
     }
 
@@ -1046,11 +1067,11 @@ internal fun ProductionPlayerScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         V1Button("10 sek", { engine.seekBy(-10_000L); lastInteraction = android.os.SystemClock.elapsedRealtime() }, icon = Icons.Rounded.Replay10)
                         V1Button(
-                            if (engineState.playing) "Pause" else "Fortsæt",
+                            if (engineState.playWhenReady) "Pause" else "Fortsæt",
                             { engine.togglePlay(); lastInteraction = android.os.SystemClock.elapsedRealtime() },
                             modifier = Modifier.focusRequester(playFocus),
                             primary = true,
-                            icon = if (engineState.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            icon = if (engineState.playWhenReady) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         )
                         V1Button("30 sek", { engine.seekBy(30_000L); lastInteraction = android.os.SystemClock.elapsedRealtime() }, icon = Icons.Rounded.Forward30)
                         Spacer(Modifier.width(14.dp))
