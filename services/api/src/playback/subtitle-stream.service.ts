@@ -8,6 +8,7 @@ import { isPathWithin, streamTokenMatches } from './direct-stream-policy';
 import { applyMediaCors } from './media-cors';
 import {
   embeddedSubtitleDescriptors,
+  decodeSubtitleBuffer,
   sidecarSubtitleDescriptor,
   subtitleLanguageLabel,
   subtitleToWebVtt,
@@ -25,6 +26,8 @@ export type PlaybackSubtitleTrack = {
   label: string;
   language: string;
   forced: boolean;
+  hearingImpaired: boolean;
+  default: boolean;
   src: string | null;
   contentType: 'text/vtt' | null;
   delivery: 'webvtt' | 'burn_in';
@@ -51,6 +54,8 @@ export class SubtitleStreamService {
       label: track.label,
       language: track.language,
       forced: track.forced,
+      hearingImpaired: track.hearingImpaired,
+      default: track.default,
       src: `/api/v1/playback/sessions/${sessionId}/subtitles/sidecar-${index}.vtt?token=${encodedToken}`,
       contentType: 'text/vtt',
       delivery: 'webvtt',
@@ -62,6 +67,8 @@ export class SubtitleStreamService {
           label: track.label,
           language: track.language,
           forced: track.forced,
+          hearingImpaired: track.hearingImpaired,
+          default: track.default,
           src: `/api/v1/playback/sessions/${sessionId}/subtitles/embedded-${track.streamIndex}.vtt?token=${encodedToken}`,
           contentType: 'text/vtt',
           delivery: 'webvtt',
@@ -74,6 +81,8 @@ export class SubtitleStreamService {
         label: `${track.label} · Burn-in`,
         language: track.language,
         forced: track.forced,
+        hearingImpaired: track.hearingImpaired,
+        default: track.default,
         src: null,
         contentType: null,
         delivery: 'burn_in',
@@ -145,7 +154,7 @@ export class SubtitleStreamService {
       if (!fileStat.isFile() || fileStat.size > 10 * 1024 * 1024) {
         throw new NotFoundException({ code: 'subtitle_invalid', message: 'Subtitle track is not a supported text file' });
       }
-      body = subtitleToWebVtt(await readFile(track.path, 'utf8'), track.format);
+      body = subtitleToWebVtt(decodeSubtitleBuffer(await readFile(track.path)), track.format);
     } else if (embeddedMatch) {
       const embeddedPath = resolve(this.transcodeRoot, session.id, asset);
       if (!isPathWithin(resolve(this.transcodeRoot, session.id), embeddedPath)) {
@@ -155,7 +164,7 @@ export class SubtitleStreamService {
       if (!resolvedPath || !isPathWithin(resolve(this.transcodeRoot, session.id), resolvedPath)) {
         throw new NotFoundException({ code: 'subtitle_not_ready', message: 'Embedded subtitle track is not ready' });
       }
-      body = subtitleToWebVtt(await readFile(resolvedPath, 'utf8'), 'vtt');
+      body = subtitleToWebVtt(decodeSubtitleBuffer(await readFile(resolvedPath)), 'vtt');
     } else {
       throw new NotFoundException({ code: 'subtitle_missing', message: 'Subtitle track was not found' });
     }
@@ -203,6 +212,8 @@ export class SubtitleStreamService {
       if (!descriptor) continue;
       const candidate = await realpath(resolve(directory, entry.name)).catch(() => null);
       if (!candidate || !isPathWithin(rootPath, candidate)) continue;
+      const candidateStat = await stat(candidate).catch(() => null);
+      if (!candidateStat?.isFile() || candidateStat.size > 10 * 1024 * 1024) continue;
       tracks.push({ ...descriptor, path: candidate, sortKey: `${sortPrefix}${entry.name}` });
     }
   }
@@ -303,11 +314,16 @@ export function imageSubtitleDescriptors(probe: unknown) {
       && !Array.isArray(stream.disposition)
         ? stream.disposition as Record<string, unknown>
         : {};
+    const forced = disposition.forced === 1 || /(?:^|\W)(?:forced|tvungen)(?:$|\W)/i.test(title);
+    const hearingImpaired = disposition.hearing_impaired === 1 || /(?:^|\W)(?:sdh|hi|cc|hearing impaired|hørehæmmede)(?:$|\W)/i.test(title);
+    const defaultTrack = disposition.default === 1 || disposition.default === true;
     return [{
       streamIndex: Math.trunc(stream.index),
       language,
       label: `${title} (${stream.codec_name})`,
-      forced: disposition.forced === 1,
+      forced,
+      hearingImpaired,
+      default: defaultTrack,
     }];
   });
 }

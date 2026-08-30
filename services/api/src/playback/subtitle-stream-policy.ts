@@ -5,6 +5,8 @@ export type SubtitleDescriptor = {
   label: string;
   format: 'srt' | 'vtt';
   forced: boolean;
+  hearingImpaired: boolean;
+  default: boolean;
 };
 
 export type SubtitleDescriptorOptions = {
@@ -73,7 +75,7 @@ export function sidecarSubtitleDescriptor(
   options: SubtitleDescriptorOptions = {},
 ): SubtitleDescriptor | null {
   const extension = extname(subtitleFilename).toLowerCase();
-  if (extension !== '.srt' && extension !== '.vtt') return null;
+  if (extension !== '.srt' && extension !== '.vtt' && extension !== '.webvtt') return null;
   const videoStem = basename(videoFilename, extname(videoFilename));
   const subtitleStem = basename(subtitleFilename, extension);
   const matchesVideo = subtitleStemMatchesVideo(videoStem, subtitleStem);
@@ -89,6 +91,7 @@ export function sidecarSubtitleDescriptor(
   const hearingImpaired =
     tokens.some((token) => hearingImpairedTokens.has(token))
     || allTokens.some((token) => hearingImpairedTokens.has(token));
+  const defaultTrack = tokens.includes('default') || allTokens.includes('default');
   const qualifiers = [
     ...(forced ? ['tvungen'] : []),
     ...(hearingImpaired ? ['hørehæmmede'] : []),
@@ -99,6 +102,8 @@ export function sidecarSubtitleDescriptor(
     label: qualifiers.length ? `${baseLabel} (${qualifiers.join(', ')})` : baseLabel,
     format: extension === '.srt' ? 'srt' : 'vtt',
     forced,
+    hearingImpaired,
+    default: defaultTrack,
   };
 }
 
@@ -107,6 +112,8 @@ export function embeddedSubtitleDescriptors(probe: unknown): Array<{
   language: string;
   label: string;
   forced: boolean;
+  hearingImpaired: boolean;
+  default: boolean;
 }> {
   const root = asObject(probe);
   const streams = Array.isArray(root.streams) ? root.streams.map(asObject) : [];
@@ -125,6 +132,7 @@ export function embeddedSubtitleDescriptors(probe: unknown): Array<{
     const disposition = asObject(stream.disposition);
     const forced = disposition.forced === 1 || titleTokens.some((token) => forcedTokens.has(token));
     const hearingImpaired = disposition.hearing_impaired === 1 || titleTokens.some((token) => hearingImpairedTokens.has(token));
+    const defaultTrack = disposition.default === 1 || disposition.default === true || titleTokens.includes('default');
     const qualifiers = [
       ...(forced ? ['tvungen'] : []),
       ...(hearingImpaired ? ['hørehæmmede'] : []),
@@ -136,8 +144,28 @@ export function embeddedSubtitleDescriptors(probe: unknown): Array<{
       language: alias?.code ?? 'und',
       label: qualifiers.length ? `${baseLabel} (${qualifiers.join(', ')})` : baseLabel,
       forced,
+      hearingImpaired,
+      default: defaultTrack,
     }];
   });
+}
+
+export function decodeSubtitleBuffer(input: Uint8Array): string {
+  if (input.length >= 2 && input[0] === 0xff && input[1] === 0xfe) {
+    return new TextDecoder('utf-16le').decode(input.subarray(2));
+  }
+  if (input.length >= 2 && input[0] === 0xfe && input[1] === 0xff) {
+    const swapped = Uint8Array.from(input.subarray(2));
+    for (let index = 0; index + 1 < swapped.length; index += 2) {
+      [swapped[index], swapped[index + 1]] = [swapped[index + 1]!, swapped[index]!];
+    }
+    return new TextDecoder('utf-16le').decode(swapped);
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(input);
+  } catch {
+    return new TextDecoder('windows-1252').decode(input);
+  }
 }
 
 export function subtitleLanguageLabel(value: string | null | undefined) {

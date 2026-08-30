@@ -3,6 +3,9 @@ export type PlaybackSubtitleCandidate = {
   language: string;
   label: string;
   delivery: 'webvtt' | 'burn_in';
+  forced?: boolean;
+  hearingImpaired?: boolean;
+  default?: boolean;
 };
 
 export type ParsedWebVttCue = {
@@ -125,32 +128,53 @@ export function chooseDefaultWebVttSubtitle(
   tracks: PlaybackSubtitleCandidate[],
   preferredLanguages: string[],
   mode: 'auto' | 'always' | 'forced' | 'off',
+  selectedAudioLanguage?: string | null,
 ): string | null {
   if (mode === 'off') return null;
-  const candidates = tracks.filter((track) =>
-    track.delivery === 'webvtt'
-    && (mode !== 'forced' || /forced|tvungen/i.test(track.label)),
-  );
+  const candidates = tracks.filter((track) => track.delivery === 'webvtt');
+  const forced = candidates.filter(isForcedSubtitle);
+  if (mode === 'forced') return preferredSubtitle(forced, preferredLanguages, mode)?.id ?? null;
+  if (mode === 'auto') {
+    const preferredForced = preferredSubtitle(forced, preferredLanguages, mode);
+    if (preferredForced) return preferredForced.id;
+    const audioLanguage = normalizedLanguage(selectedAudioLanguage ?? '');
+    const understoodAudio = preferredLanguages.map(normalizedLanguage).filter(Boolean).includes(audioLanguage);
+    if (!audioLanguage || understoodAudio) return null;
+  }
+  return preferredSubtitle(candidates, preferredLanguages, mode)?.id ?? null;
+}
+
+function preferredSubtitle(
+  candidates: PlaybackSubtitleCandidate[],
+  preferredLanguages: string[],
+  mode: 'auto' | 'always' | 'forced' | 'off',
+): PlaybackSubtitleCandidate | null {
   for (const language of preferredLanguages) {
     const preferred = normalizedLanguage(language);
     const match = candidates
       .filter((track) => normalizedLanguage(track.language) === preferred)
       .sort((left, right) => subtitlePreferenceRank(left, mode) - subtitlePreferenceRank(right, mode))[0];
-    if (match) return match.id;
+    if (match) return match;
   }
-  return mode === 'always' || mode === 'forced'
-    ? [...candidates].sort((left, right) => subtitlePreferenceRank(left, mode) - subtitlePreferenceRank(right, mode))[0]?.id ?? null
-    : null;
+  return [...candidates].sort((left, right) => subtitlePreferenceRank(left, mode) - subtitlePreferenceRank(right, mode))[0] ?? null;
 }
 
 function subtitlePreferenceRank(
   track: PlaybackSubtitleCandidate,
   mode: 'auto' | 'always' | 'forced' | 'off',
 ): number {
-  if (mode === 'forced') return 0;
-  if (/forced|tvungen/i.test(track.label)) return 2;
-  if (/sdh|hearing|h.reh.mmede/i.test(track.label)) return 1;
-  return 0;
+  if (mode === 'forced') return isForcedSubtitle(track) ? 0 : 10;
+  if (isForcedSubtitle(track)) return 4;
+  if (isHearingImpairedSubtitle(track)) return 2;
+  return track.default === true ? 0 : 1;
+}
+
+function isForcedSubtitle(track: PlaybackSubtitleCandidate): boolean {
+  return track.forced === true || /forced|tvungen/i.test(track.label);
+}
+
+function isHearingImpairedSubtitle(track: PlaybackSubtitleCandidate): boolean {
+  return track.hearingImpaired === true || /sdh|hearing|h.reh.mmede/i.test(track.label);
 }
 
 export function deferredUpscaleLevelCap(

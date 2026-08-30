@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.3.10**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.3.11**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -100,6 +100,9 @@ PATCH  /api/v1/playback/playlists/:id/items/order
 - Adminlisten filtrerer, taeller og paginerer playback-analyser direkte i PostgreSQL. Den materialiserer derfor aldrig hele mediekataloget, og globale statusantal forbliver korrekte pa alle sider.
 - Lokal introanalyse version 6 sammenligner kun faerdige, kildeaktuelle fingerprints fra samme saeson. Mindst to referenceafsnit skal understotte en tidsmaessigt sammenhaengende sekvens; enkelte tabte frames og mindre samplingforskelle tolereres, mens spredte matches afvises.
 - Naar en saeson far sit tredje gyldige fingerprint, genkoes tidligere `insufficient_references`-afsnit automatisk som deduplikerede marker-only jobs. Seek-preview genbruges, og manuelle, kapitelbaserede og eksterne markorer bevares.
+- Recap-analyse version 7 sammenligner kun aabningen mod taette fingerprints fra de sidste 12 minutter af tidligere afsnit i samme saeson. Kun en sammenhaengende sekvens foer en bevist introgrænse accepteres; spredte flashback-lignende frames afvises.
+- Subtitle-policyen klassificerer `forced`, hoerehaemmede og default-spor eksplicit. `auto` vaelger forced ved forstaaeligt lydsprog, fulde foretrukne undertekster ved fremmed lyd og ellers ingen; `off`, `forced` og `always` forbliver autoritative.
+- Sidecar SRT, VTT og WebVTT opdages deterministisk i mediemappen og kendte subtitle-mapper, filer over 10 MB udelades, og UTF-8, UTF-16 samt Windows-1252 afkodes uden at miste danske tegn. Tekstundertekster er ikke planbegraensede.
 - `Analyser manglende` opretter fulde assets for medier uden seek-preview og bruger kun `marker_only`, nar et eksisterende preview sikkert kan genbruges. Adminvisningen folger den faktiske workerko, selv nar et aktivt job ikke laengere matcher det valgte filter.
 - Assets, der har staet `queued` eller `generating` i mindst 15 minutter uden et aktivt workerjob, vises som fastlaste. `POST /api/v1/playback-analysis/queue/recover` genkoer atomisk kun disse assets, er account-scoped og genbruger eksisterende seek-preview, nar det er sikkert.
 

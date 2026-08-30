@@ -4,6 +4,12 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.11 - 2026-08-30
+
+- Opgraderer recap-analysen til version 7 med taette tail-fingerprints fra tidligere afsnit og sammenhaengende sekvenskrav foer en bevist introgrænse.
+- Goer subtitle-standardvalget lydsprogsbevidst og typed for forced, hoerehaemmede og default, sa Auto ikke laengere taender normale undertekster ved et forstaaeligt lydspor.
+- Udvider sidecar-understoettelsen med WebVTT, filstorrelsegate og sikker UTF-8, UTF-16 samt Windows-1252-afkodning og returnerer serverens anbefalede standardspor additivt.
+
 ## 0.3.10 - 2026-08-30
 
 - Opgraderer playback-markoeranalysen til version 6 med tolerant, monoton frame-justering, som accepterer sma timingforskelle og enkelte tabte frames uden at acceptere spredte tilfaeldige matches.

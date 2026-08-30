@@ -38,12 +38,13 @@ describe('playback fingerprint quality', () => {
       analysis: { markerAnalysisVersion: version, intro: { state, reason } },
     });
     expect(pendingSeasonReanalysisMediaIds([
-      { mediaId: 'pending', manifest: manifest(6, 'pending', 'insufficient_references'), sourceCurrent: true },
-      { mediaId: 'active', manifest: manifest(6, 'pending', 'insufficient_references'), sourceCurrent: true },
-      { mediaId: 'settled', manifest: manifest(6, 'not-detected', 'no_repeated_sequence'), sourceCurrent: true },
+      { mediaId: 'pending', manifest: manifest(7, 'pending', 'insufficient_references'), sourceCurrent: true },
+      { mediaId: 'active', manifest: manifest(7, 'pending', 'insufficient_references'), sourceCurrent: true },
+      { mediaId: 'settled', manifest: manifest(7, 'not-detected', 'no_repeated_sequence'), sourceCurrent: true },
       { mediaId: 'stale-version', manifest: manifest(5, 'pending', 'insufficient_references'), sourceCurrent: true },
-      { mediaId: 'stale-source', manifest: manifest(6, 'pending', 'insufficient_references'), sourceCurrent: false },
-    ] as never, new Set(['active']))).toEqual(['pending']);
+      { mediaId: 'stale-source', manifest: manifest(7, 'pending', 'insufficient_references'), sourceCurrent: false },
+      { mediaId: 'recap-pending', manifest: { analysis: { markerAnalysisVersion: 7, intro: {}, recap: { state: 'pending', reason: 'insufficient_previous_episodes' } } }, sourceCurrent: true, recapCanConverge: true },
+    ] as never, new Set(['active']))).toEqual(['pending', 'recap-pending']);
   });
 
   it('commits diagnostics and generated markers atomically while preserving manual kinds', async () => {

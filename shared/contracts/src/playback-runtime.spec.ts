@@ -11,7 +11,7 @@ describe('playback runtime policy', () => {
     expect(chooseDefaultWebVttSubtitle([
       { id: 'burnin-da', language: 'dan', label: 'Dansk PGS', delivery: 'burn_in' },
       { id: 'webvtt-en', language: 'eng', label: 'English', delivery: 'webvtt' },
-    ], ['da', 'en'], 'auto')).toBe('webvtt-en');
+    ], ['da', 'en'], 'auto', 'ja')).toBe('webvtt-en');
   });
 
   it('selects forced WebVTT only in forced mode', () => {
@@ -21,12 +21,24 @@ describe('playback runtime policy', () => {
     ], ['da'], 'forced')).toBe('forced-da');
   });
 
-  it('prefers a complete subtitle over forced and SDH tracks in the same language', () => {
+  it('prefers a complete subtitle over forced and SDH tracks in always mode', () => {
     expect(chooseDefaultWebVttSubtitle([
       { id: 'forced-da', language: 'dan', label: 'Dansk (tvungen)', delivery: 'webvtt' },
       { id: 'sdh-da', language: 'da', label: 'Dansk (hørehæmmede)', delivery: 'webvtt' },
       { id: 'full-da', language: 'da', label: 'Dansk', delivery: 'webvtt' },
-    ], ['da'], 'auto')).toBe('full-da');
+    ], ['da'], 'always')).toBe('full-da');
+  });
+
+  it('keeps normal subtitles off in auto when the selected audio language is understood', () => {
+    expect(chooseDefaultWebVttSubtitle([
+      { id: 'full-da', language: 'da', label: 'Dansk', delivery: 'webvtt' },
+    ], ['da', 'en'], 'auto', 'da')).toBeNull();
+  });
+
+  it('enables a preferred complete subtitle in auto for foreign audio', () => {
+    expect(chooseDefaultWebVttSubtitle([
+      { id: 'full-da', language: 'da', label: 'Dansk', delivery: 'webvtt', default: true },
+    ], ['da', 'en'], 'auto', 'ja')).toBe('full-da');
   });
 
   it('caps Auto at the highest native rendition until the upscale buffer gate opens', () => {

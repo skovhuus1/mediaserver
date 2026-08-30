@@ -71,6 +71,7 @@ type Authorization = {
   transcodeStatusUrl?: string;
   subtitlePreparationStatusUrl?: string;
   subtitleTracks: SubtitleTrack[];
+  recommendedSubtitleTrackId?: string | null;
   videoProfile: {
     source: {
       width: number | null;
@@ -769,11 +770,16 @@ export function WebPlayer() {
               setAuthorization(preparedAuthorization);
             }
           }
-          const defaultSubtitle = chooseDefaultWebVttSubtitle(
-            preparedAuthorization.subtitleTracks,
-            preparedAuthorization.playbackPreferences.preferredSubtitleLanguages,
-            preparedAuthorization.playbackPreferences.subtitleMode,
-          );
+          const recommendedSubtitle = preparedAuthorization.recommendedSubtitleTrackId;
+          const defaultSubtitle = recommendedSubtitle && preparedAuthorization.subtitleTracks.some(
+            (track) => track.id === recommendedSubtitle && track.delivery === 'webvtt' && Boolean(track.src),
+          )
+            ? recommendedSubtitle
+            : chooseDefaultWebVttSubtitle(
+                preparedAuthorization.subtitleTracks,
+                preparedAuthorization.playbackPreferences.preferredSubtitleLanguages,
+                preparedAuthorization.playbackPreferences.subtitleMode,
+              );
           const subtitlesEnabled = preparedAuthorization.playbackPreferences.subtitleMode !== 'off';
           const defaultTrack = subtitlesEnabled
             ? (defaultSubtitle
