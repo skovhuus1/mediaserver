@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.3.7**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.3.8**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -97,6 +97,8 @@ PATCH  /api/v1/playback/playlists/:id/items/order
 - Episodeopslag bruger seriens kanoniske TMDB- eller TVDB-id sammen med saeson- og episodenummer. Film bruger deres TMDB-, TVDB- eller IMDb-id. Medier uden disse metadata-id'er springer det eksterne opslag over uden at fejle jobbet.
 - TheIntroDB styres med `BB_MEDIA_THEINTRODB_ENABLED`, `BB_MEDIA_THEINTRODB_BASE_URL`, den valgfrie `BB_MEDIA_THEINTRODB_API_KEY` og `BB_MEDIA_THEINTRODB_TIMEOUT_MS`. Standard-timeout er 3500 ms, sa den eksterne tjeneste ikke kan blokere playback-analysen.
 - En ekstern markor gemmes med kilden `external` og erstatter ikke en manuel markor. Eksisterende faerdiganalyserede titler skal genanalyseres efter aktivering for at fa de nye opslag.
+- Adminlisten filtrerer, taeller og paginerer playback-analyser direkte i PostgreSQL. Den materialiserer derfor aldrig hele mediekataloget, og globale statusantal forbliver korrekte pa alle sider.
+- `Analyser manglende` opretter fulde assets for medier uden seek-preview og bruger kun `marker_only`, nar et eksisterende preview sikkert kan genbruges. Adminvisningen folger den faktiske workerko, selv nar et aktivt job ikke laengere matcher det valgte filter.
 
 ## Live TV fra M3U
 
