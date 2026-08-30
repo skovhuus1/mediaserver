@@ -14,10 +14,13 @@ const fingerprint = (hashes: string[]): FrameFingerprint => ({
   quality: hashes.map(() => 0.9),
 });
 
-const sequence = (seed: bigint, length: number) => Array.from(
-  { length },
-  (_, index) => (seed + BigInt(index * 104_729)).toString(16).padStart(16, '0'),
-);
+const sequence = (seed: bigint, length: number) => Array.from({ length }, (_, index) => {
+  const mask = (1n << 64n) - 1n;
+  let value = (seed + BigInt(index) * 0x9e3779b97f4a7c15n) & mask;
+  value = ((value ^ (value >> 30n)) * 0xbf58476d1ce4e5b9n) & mask;
+  value = ((value ^ (value >> 27n)) * 0x94d049bb133111ebn) & mask;
+  return (value ^ (value >> 31n)).toString(16).padStart(16, '0');
+});
 
 describe('playback marker analysis v6', () => {
   it('publishes the new analysis version so stale assets are reprocessed', () => {
