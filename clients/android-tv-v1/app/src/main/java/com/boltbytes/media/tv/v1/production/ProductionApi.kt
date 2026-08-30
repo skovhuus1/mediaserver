@@ -309,6 +309,53 @@ class ProductionApi(context: Context) {
         request("DELETE", "playback/sessions/${encodePath(sessionId)}")
     }
 
+    suspend fun reconfigureVod(
+        current: ProductionAuthorization,
+        startPositionMs: Long,
+        qualityMode: String,
+        fixedQualityHeight: Int?,
+        audioTrackId: String?,
+        subtitleTrack: ProductionTrack?,
+        preferences: ProductionPreferences,
+    ): ProductionAuthorization {
+        val streamToken = current.streamToken?.takeIf(String::isNotBlank)
+            ?: error("Afspilningssessionen mangler stream-token")
+        val metrics = applicationContext.resources.displayMetrics
+        val capabilities = productionPlaybackCapabilities(
+            screenHeight = metrics.heightPixels,
+            devicePixelRatio = metrics.density.toDouble(),
+            supportedCodecs = supportedVideoCodecs(),
+            hdrEnabled = preferences.hdr,
+            supportsHdr = deviceSupportsHdr(),
+            allowUpscale = preferences.allowUpscale,
+            upscaleMode = preferences.upscaleMode,
+            estimatedDownlinkMbps = estimatedDownlinkMbps(),
+        )
+        val response = request(
+            "PATCH",
+            "playback/sessions/${encodePath(current.sessionId)}/configuration",
+            productionPlaybackConfigurationPayload(
+                streamToken = streamToken,
+                startPositionMs = startPositionMs,
+                qualityMode = qualityMode,
+                fixedQualityHeight = fixedQualityHeight,
+                audioTrackId = audioTrackId,
+                subtitleTrackId = subtitleTrack?.id,
+                burnIn = subtitleTrack?.delivery == "burn_in",
+                allowUpscale = preferences.allowUpscale && preferences.upscaleMode != "off",
+                upscaleMode = if (preferences.allowUpscale && preferences.upscaleMode != "off") "server" else "off",
+                capabilities = capabilities,
+            ),
+        )
+        val configured = parseAuthorization(response, ::resolvePublicUrl)
+        return configured.copy(
+            streamToken = configured.streamToken ?: current.streamToken,
+            audioTracks = configured.audioTracks.ifEmpty { current.audioTracks },
+            subtitleTracks = configured.subtitleTracks.ifEmpty { current.subtitleTracks },
+            markers = configured.markers.ifEmpty { current.markers },
+        )
+    }
+
     suspend fun guide(): List<ProductionChannel> = parseGuide(request("GET", "live-tv/guide"))
 
     suspend fun setFavorite(channelId: String, favorite: Boolean) {

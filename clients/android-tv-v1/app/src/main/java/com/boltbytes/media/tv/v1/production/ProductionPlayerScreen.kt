@@ -6,6 +6,7 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Looper
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.WindowManager
@@ -113,6 +114,32 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 private enum class PlayerOption { Quality, Audio, Subtitles, Upscaling }
+
+internal const val PRODUCTION_NEXT_EPISODE_COUNTDOWN_SECONDS = 10
+
+internal fun shouldStartNextEpisodeCountdown(
+    positionMs: Long,
+    durationMs: Long,
+    creditsStartMs: Long?,
+    alreadyHandled: Boolean,
+    autoplay: Boolean,
+    nextEpisodeId: String?,
+): Boolean {
+    if (alreadyHandled || !autoplay || nextEpisodeId.isNullOrBlank() || durationMs <= 0L) {
+        return false
+    }
+    val fallbackStartMs = (durationMs - PRODUCTION_NEXT_EPISODE_COUNTDOWN_SECONDS * 1_000L)
+        .coerceAtLeast(0L)
+    val triggerAtMs = creditsStartMs
+        ?.takeIf { it in 0L until durationMs }
+        ?: fallbackStartMs
+    return positionMs >= triggerAtMs
+}
+
+internal fun isCreditsMarkerType(type: String): Boolean = when (type.trim().lowercase()) {
+    "credits", "credit", "end_credits", "end-credits", "rulletekst" -> true
+    else -> false
+}
 
 private enum class SubtitleTextSize(val label: String, val fraction: Float) {
     Small("Lille", 0.040f),
@@ -277,12 +304,17 @@ private class ProductionPlaybackEngine(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val finished = AtomicBoolean(false)
     private val restarting = AtomicBoolean(false)
+    private val reconfiguring = AtomicBoolean(false)
     private var heartbeatJob: Job? = null
     private var progressJob: Job? = null
     private var variantMonitorJob: Job? = null
     private var subtitleRefreshJob: Job? = null
     private var channelIndex = request.channelIndex
     private var automaticRecoveryAttempts = 0
+    private var selectedQualityMode = preferences.qualityMode.lowercase()
+    private var selectedFixedQualityHeight = preferences.maxHeight
+    private var selectedAudioTrackId: String? = null
+    private var selectedSubtitleTrack: ProductionTrack? = null
 
     val player: ExoPlayer = ExoPlayer.Builder(
         context,
@@ -377,9 +409,23 @@ private class ProductionPlaybackEngine(
     private fun loadAuthorization(authorization: ProductionAuthorization, positionMs: Long) {
         val item = MediaItem.Builder().setUri(authorization.streamUrl).apply {
             authorization.contentType?.takeIf(String::isNotBlank)?.let { setMimeType(it) }
+            authorization.subtitleTracks
+                .filter { it.delivery == "webvtt" && !it.sourceUrl.isNullOrBlank() }
+                .map { track ->
+                    MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.sourceUrl!!))
+                        .setId(track.id)
+                        .setLabel(track.label)
+                        .setLanguage(track.language)
+                        .setMimeType(track.contentType ?: "text/vtt")
+                        .setSelectionFlags(if (track.forced) C.SELECTION_FLAG_FORCED else 0)
+                        .build()
+                }
+                .takeIf { it.isNotEmpty() }
+                ?.let(::setSubtitleConfigurations)
         }.build()
         val localPositionMs = (positionMs - authorization.streamTimelineOffsetMs).coerceAtLeast(0L)
         player.setMediaItem(item, localPositionMs)
+        applyClientSubtitleSelection(selectedSubtitleTrack?.takeIf { it.delivery == "webvtt" })
         player.prepare()
         player.playWhenReady = true
     }
@@ -467,25 +513,53 @@ private class ProductionPlaybackEngine(
     }
 
     fun setQuality(label: String) {
-        forceLowestBitrate(false)
-        val builder = player.trackSelectionParameters.buildUpon()
         when (label) {
-            "Auto", "Original" -> builder.setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+            "Auto" -> {
+                selectedQualityMode = "auto"
+                selectedFixedQualityHeight = null
+            }
+            "Original" -> {
+                selectedQualityMode = "original"
+                selectedFixedQualityHeight = null
+            }
             else -> {
-                val height = label.removeSuffix("p").toIntOrNull() ?: Int.MAX_VALUE
-                builder.setMaxVideoSize(Int.MAX_VALUE, height)
+                selectedQualityMode = "fixed"
+                selectedFixedQualityHeight = label.removeSuffix("p").toIntOrNull()
             }
         }
-        player.trackSelectionParameters = builder.build()
+        if (request.live) {
+            forceLowestBitrate(false)
+            val height = selectedFixedQualityHeight ?: Int.MAX_VALUE
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setMaxVideoSize(Int.MAX_VALUE, height)
+                .build()
+        } else {
+            requestVodReconfiguration()
+        }
     }
 
     fun setAudio(track: ProductionTrack) {
-        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setPreferredAudioLanguage(track.language)
-            .build()
+        selectedAudioTrackId = track.id
+        if (request.live) {
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setPreferredAudioLanguage(track.language)
+                .build()
+        } else {
+            requestVodReconfiguration()
+        }
     }
 
     fun setSubtitles(track: ProductionTrack?) {
+        val wasBurnIn = selectedSubtitleTrack?.delivery == "burn_in"
+        selectedSubtitleTrack = track
+        if (!request.live && (wasBurnIn || track?.delivery == "burn_in")) {
+            requestVodReconfiguration()
+            return
+        }
+        applyClientSubtitleSelection(track)
+    }
+
+    private fun applyClientSubtitleSelection(track: ProductionTrack?) {
         val builder = player.trackSelectionParameters.buildUpon()
         if (track == null) {
             builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
@@ -494,6 +568,46 @@ private class ProductionPlaybackEngine(
             builder.setPreferredTextLanguage(track.language)
         }
         player.trackSelectionParameters = builder.build()
+    }
+
+    private fun requestVodReconfiguration() {
+        if (request.live || finished.get() || !reconfiguring.compareAndSet(false, true)) return
+        scope.launch {
+            val current = mutableState.value.authorization
+            if (current == null) {
+                reconfiguring.set(false)
+                return@launch
+            }
+            val positionMs = absolutePositionMs()
+            player.pause()
+            mutableState.value = mutableState.value.copy(preparing = true, buffering = false, error = null)
+            try {
+                val configured = api.reconfigureVod(
+                    current = current,
+                    startPositionMs = positionMs,
+                    qualityMode = selectedQualityMode,
+                    fixedQualityHeight = selectedFixedQualityHeight,
+                    audioTrackId = selectedAudioTrackId,
+                    subtitleTrack = selectedSubtitleTrack,
+                    preferences = preferences,
+                )
+                mutableState.value = mutableState.value.copy(authorization = configured, preparing = true, error = null)
+                val preparation = awaitPreparation(configured)
+                val stageLowestRendition = selectedQualityMode == "auto" && preparation?.allVariantsReady == false
+                forceLowestBitrate(stageLowestRendition)
+                loadAuthorization(configured, positionMs)
+                monitorVariantReadiness(configured, preparation)
+                automaticRecoveryAttempts = 0
+            } catch (error: Exception) {
+                mutableState.value = mutableState.value.copy(
+                    preparing = false,
+                    buffering = false,
+                    error = error.message ?: "Afspilningsvalget kunne ikke anvendes",
+                )
+            } finally {
+                reconfiguring.set(false)
+            }
+        }
     }
 
     fun setSubtitleTimingOffset(offsetMs: Int) {
@@ -646,6 +760,14 @@ internal fun ProductionPlayerScreen(
     var selectedAudioId by remember(request.mediaId) { mutableStateOf<String?>(null) }
     var selectedSubtitleId by remember(request.mediaId) { mutableStateOf<String?>(null) }
     var endedHandled by remember(request.mediaId) { mutableStateOf(false) }
+    var nextEpisodeCountdown by remember(request.mediaId) { mutableIntStateOf(-1) }
+    var nextEpisodeCountdownCancelled by remember(request.mediaId) { mutableStateOf(false) }
+    var playbackLifecycleActive by remember {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    val creditsStartMs = engineState.authorization?.markers
+        ?.filter { isCreditsMarkerType(it.type) }
+        ?.minOfOrNull { it.startMs }
     val rootFocus = remember { FocusRequester() }
     val playFocus = remember { FocusRequester() }
 
@@ -656,7 +778,12 @@ internal fun ProductionPlayerScreen(
         fun keepAwake() { activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
         keepAwake()
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_START) keepAwake()
+            if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_START) {
+                playbackLifecycleActive = true
+                keepAwake()
+            } else if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                playbackLifecycleActive = false
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
@@ -697,11 +824,53 @@ internal fun ProductionPlayerScreen(
         }
     }
 
+    LaunchedEffect(positionMs, durationMs, creditsStartMs, preferences.autoplay, request.nextEpisodeId) {
+        if (
+            nextEpisodeCountdown < 0 &&
+            !nextEpisodeCountdownCancelled &&
+            shouldStartNextEpisodeCountdown(
+                positionMs = positionMs,
+                durationMs = durationMs,
+                creditsStartMs = creditsStartMs,
+                alreadyHandled = endedHandled,
+                autoplay = preferences.autoplay,
+                nextEpisodeId = request.nextEpisodeId,
+            )
+        ) {
+            option = null
+            controlsVisible = false
+            nextEpisodeCountdown = PRODUCTION_NEXT_EPISODE_COUNTDOWN_SECONDS
+        }
+    }
+
     LaunchedEffect(engineState.ended) {
         if (engineState.ended && !endedHandled) {
             endedHandled = true
             engine.finishAsync(true)
-            onEnded()
+            when {
+                nextEpisodeCountdown >= 0 -> Unit
+                nextEpisodeCountdownCancelled -> onExit()
+                preferences.autoplay && !request.nextEpisodeId.isNullOrBlank() -> {
+                    option = null
+                    controlsVisible = false
+                    nextEpisodeCountdown = PRODUCTION_NEXT_EPISODE_COUNTDOWN_SECONDS
+                }
+                else -> onEnded()
+            }
+        }
+    }
+
+    LaunchedEffect(nextEpisodeCountdown, playbackLifecycleActive) {
+        when {
+            nextEpisodeCountdown > 0 && playbackLifecycleActive -> {
+                delay(1_000L)
+                nextEpisodeCountdown -= 1
+            }
+            nextEpisodeCountdown == 0 -> {
+                nextEpisodeCountdown = -1
+                engine.finishAsync(true)
+                onEnded()
+            }
         }
     }
 
@@ -878,6 +1047,32 @@ internal fun ProductionPlayerScreen(
             }
         }
 
+        if (nextEpisodeCountdown >= 0) {
+            BackHandler {
+                nextEpisodeCountdown = -1
+                nextEpisodeCountdownCancelled = true
+                controlsVisible = true
+                lastInteraction = android.os.SystemClock.elapsedRealtime()
+                playFocus.requestFocus()
+            }
+            ProductionNextEpisodeCountdown(
+                title = request.nextEpisodeTitle ?: "Næste afsnit",
+                remainingSeconds = nextEpisodeCountdown,
+                onPlayNow = {
+                    nextEpisodeCountdown = -1
+                    engine.finishAsync(true)
+                    onEnded()
+                },
+                onCancel = {
+                    nextEpisodeCountdown = -1
+                    nextEpisodeCountdownCancelled = true
+                    controlsVisible = true
+                    lastInteraction = android.os.SystemClock.elapsedRealtime()
+                    playFocus.requestFocus()
+                },
+            )
+        }
+
         option?.let { selected ->
             ProductionPlayerOptionOverlay(
                 option = selected,
@@ -922,6 +1117,88 @@ private fun ProductionTimeline(positionMs: Long, bufferedMs: Long, durationMs: L
     Box(Modifier.fillMaxWidth().height(7.dp).background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(5.dp))) {
         Box(Modifier.fillMaxWidth(buffered).fillMaxHeight().background(V1Colors.Cyan.copy(alpha = 0.82f), RoundedCornerShape(5.dp)))
         Box(Modifier.fillMaxWidth(played).fillMaxHeight().background(V1Colors.Gold, RoundedCornerShape(5.dp)))
+    }
+}
+
+@Composable
+private fun ProductionNextEpisodeCountdown(
+    title: String,
+    remainingSeconds: Int,
+    onPlayNow: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val playNowFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { playNowFocus.requestFocus() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(Color(0xF21A2530), Color(0xFA080D12)),
+                    radius = 1_300f,
+                ),
+            )
+            .padding(horizontal = 86.dp, vertical = 62.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.74f)
+                .background(Color(0xF21B242D), RoundedCornerShape(30.dp))
+                .padding(horizontal = 42.dp, vertical = 34.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(38.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(modifier = Modifier.size(126.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        progress = { remainingSeconds.coerceIn(0, PRODUCTION_NEXT_EPISODE_COUNTDOWN_SECONDS).toFloat() / PRODUCTION_NEXT_EPISODE_COUNTDOWN_SECONDS },
+                        modifier = Modifier.fillMaxSize(),
+                        color = V1Colors.Gold,
+                        trackColor = Color.White.copy(alpha = 0.12f),
+                        strokeWidth = 8.dp,
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            remainingSeconds.coerceAtLeast(0).toString(),
+                            color = V1Colors.Text,
+                            fontSize = 43.sp,
+                            fontWeight = FontWeight.Black,
+                        )
+                        Text("SEK", color = V1Colors.Muted, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("NÆSTE AFSNIT", color = V1Colors.Gold, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text(
+                        title,
+                        color = V1Colors.Text,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "Starter automatisk. Du kan også fortsætte med det samme.",
+                        color = V1Colors.Muted,
+                        fontSize = 12.sp,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        V1Button(
+                            "Afspil nu",
+                            onPlayNow,
+                            modifier = Modifier.focusRequester(playNowFocus),
+                            primary = true,
+                            icon = Icons.Rounded.PlayArrow,
+                        )
+                        V1Button("Annuller", onCancel, icon = Icons.Rounded.Close)
+                    }
+                }
+            }
+        }
     }
 }
 

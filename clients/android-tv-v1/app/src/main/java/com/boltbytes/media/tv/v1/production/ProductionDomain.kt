@@ -83,7 +83,15 @@ data class ProductionTitle(
     val startPositionMs: Long,
 )
 
-data class ProductionTrack(val id: String, val label: String, val language: String?)
+data class ProductionTrack(
+    val id: String,
+    val label: String,
+    val language: String?,
+    val sourceUrl: String? = null,
+    val contentType: String? = null,
+    val delivery: String = "native",
+    val forced: Boolean = false,
+)
 data class ProductionMarker(val type: String, val startMs: Long, val endMs: Long)
 
 data class ProductionAuthorization(
@@ -478,8 +486,8 @@ internal fun parseAuthorization(json: JSONObject, resolver: (String) -> String):
             ?: lease?.firstString("streamToken", "token")
             ?: stream.firstString("streamToken", "token"),
         contentType = stream.firstString("contentType", "mimeType") ?: item.firstString("contentType", "mimeType"),
-        audioTracks = parseTracks(item.firstArray("audioTracks") ?: stream.firstArray("audioTracks")),
-        subtitleTracks = parseTracks(item.firstArray("subtitleTracks", "subtitles") ?: stream.firstArray("subtitleTracks", "subtitles")),
+        audioTracks = parseTracks(item.firstArray("audioTracks") ?: stream.firstArray("audioTracks"), resolver),
+        subtitleTracks = parseTracks(item.firstArray("subtitleTracks", "subtitles") ?: stream.firstArray("subtitleTracks", "subtitles"), resolver),
         markers = (item.firstArray("markers", "skipMarkers") ?: stream.firstArray("markers", "skipMarkers"))
             ?.objects().orEmpty().mapNotNull { marker ->
                 val start = marker.firstLong("startMs", "startTimeMs", "start")
@@ -518,11 +526,24 @@ internal fun parsePreparationStatus(json: JSONObject): ProductionPreparationStat
     )
 }
 
-private fun parseTracks(array: JSONArray?): List<ProductionTrack> = array?.objects().orEmpty().mapIndexed { index, track ->
+private fun parseTracks(
+    array: JSONArray?,
+    resolver: (String) -> String,
+): List<ProductionTrack> = array?.objects().orEmpty().mapIndexed { index, track ->
+    val id = track.firstString("id", "trackId", "index") ?: index.toString()
+    val sourceUrl = track.firstString("src", "sourceUrl", "url")?.let(resolver)
     ProductionTrack(
-        id = track.firstString("id", "trackId", "index") ?: index.toString(),
+        id = id,
         label = track.firstString("label", "title", "name", "language") ?: "Spor ${index + 1}",
         language = track.firstString("language", "languageCode", "lang"),
+        sourceUrl = sourceUrl,
+        contentType = track.firstString("contentType", "mimeType"),
+        delivery = track.firstString("delivery") ?: when {
+            id.startsWith("burnin-", ignoreCase = true) -> "burn_in"
+            !sourceUrl.isNullOrBlank() -> "webvtt"
+            else -> "native"
+        },
+        forced = track.firstBoolean("forced", "isForced"),
     )
 }
 
