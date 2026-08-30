@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.3.8**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.3.9**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -99,6 +99,7 @@ PATCH  /api/v1/playback/playlists/:id/items/order
 - En ekstern markor gemmes med kilden `external` og erstatter ikke en manuel markor. Eksisterende faerdiganalyserede titler skal genanalyseres efter aktivering for at fa de nye opslag.
 - Adminlisten filtrerer, taeller og paginerer playback-analyser direkte i PostgreSQL. Den materialiserer derfor aldrig hele mediekataloget, og globale statusantal forbliver korrekte pa alle sider.
 - `Analyser manglende` opretter fulde assets for medier uden seek-preview og bruger kun `marker_only`, nar et eksisterende preview sikkert kan genbruges. Adminvisningen folger den faktiske workerko, selv nar et aktivt job ikke laengere matcher det valgte filter.
+- Assets, der har staet `queued` eller `generating` i mindst 15 minutter uden et aktivt workerjob, vises som fastlaste. `POST /api/v1/playback-analysis/queue/recover` genkoer atomisk kun disse assets, er account-scoped og genbruger eksisterende seek-preview, nar det er sikkert.
 
 ## Live TV fra M3U
 

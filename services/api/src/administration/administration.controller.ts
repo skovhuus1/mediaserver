@@ -165,6 +165,12 @@ export class AdministrationController {
     return this.administration.resumePlaybackAnalysisQueue(actor);
   }
 
+  @Post('playback-analysis/queue/recover')
+  @Roles('admin')
+  recoverPlaybackAnalysisQueue(@CurrentUser() actor: AuthenticatedUser) {
+    return this.administration.recoverPlaybackAnalysisQueue(actor);
+  }
+
   @Get('playback-analysis/schedule')
   @Roles('admin', 'operator')
   playbackAnalysisSchedule(@CurrentUser() actor: AuthenticatedUser) {
