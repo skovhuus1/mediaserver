@@ -4,6 +4,12 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.9 - 2026-08-30
+
+- Finder playback-assets, som er fastlast i `queued` eller `generating` uden et aktivt workerjob, og viser det konkrete antal i adminpanelet.
+- Tilfoejer en account-last recovery, der genkoer kun de foraeldrelose analyser og bevarer fuld versus marker-only behandling.
+- Indekserer jobtype, status og playback-medie-id, sa recovery og kopolling forbliver stabilt pa store kataloger.
+
 ## 0.3.8 - 2026-08-30
 
 - Flytter playback-analysens sogning, statusfilter og pagination til PostgreSQL, sa store kataloger ikke laengere kan overbelaste API'et eller udlose 502 fra adminvisningen.

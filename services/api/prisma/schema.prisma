@@ -555,6 +555,7 @@ model MediaPlaybackAsset {
   media             MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
 
   @@index([accountId, status])
+  @@index([accountId, status, updatedAt])
   @@map("media_playback_assets")
 }
 
@@ -1003,6 +1004,7 @@ model SystemJob {
   attempts       JobAttempt[]
 
   @@index([status, availableAt, leaseExpiresAt])
+  @@index([accountId, type, status])
   @@map("system_jobs")
 }
 

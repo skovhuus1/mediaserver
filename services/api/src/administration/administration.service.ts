@@ -818,6 +818,12 @@ export class AdministrationService {
     return state;
   }
 
+  async recoverPlaybackAnalysisQueue(actor: AuthenticatedUser) {
+    const result = await recoverOrphanedPlaybackAnalysis(this.prisma, actor.accountId);
+    await this.audit(actor, 'playback_analysis.queue_recovered', actor.accountId, result);
+    return result;
+  }
+
   playbackAnalysisSchedule(actor: AuthenticatedUser) {
     return loadPlaybackAnalysisSchedule(this.prisma, actor.accountId);
   }
@@ -1066,5 +1072,5 @@ export class AdministrationService {
     });
   }
 }
-import { playbackAnalysisQueueState, setPlaybackAnalysisQueuePaused } from './playback-analysis-queue.js';
+import { playbackAnalysisQueueState, recoverOrphanedPlaybackAnalysis, setPlaybackAnalysisQueuePaused } from './playback-analysis-queue.js';
 import { loadPlaybackAnalysisSchedule, savePlaybackAnalysisSchedule } from './playback-analysis-schedule.js';
