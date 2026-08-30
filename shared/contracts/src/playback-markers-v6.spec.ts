@@ -23,8 +23,8 @@ const sequence = (seed: bigint, length: number) => Array.from({ length }, (_, in
 });
 
 describe('playback marker analysis v6', () => {
-  it('publishes the new analysis version so stale assets are reprocessed', () => {
-    expect(playbackMarkerAnalysisVersion).toBe(6);
+  it('publishes the current analysis version so stale assets are reprocessed', () => {
+    expect(playbackMarkerAnalysisVersion).toBe(7);
   });
 
   it('detects a repeated intro despite a dropped or duplicated source frame', () => {
