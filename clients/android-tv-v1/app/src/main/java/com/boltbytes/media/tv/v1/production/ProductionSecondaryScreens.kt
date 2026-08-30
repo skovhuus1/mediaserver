@@ -79,7 +79,9 @@ internal fun ProductionSearchScreen(state: ProductionUiState, viewModel: Product
             )
             if (state.searchQuery.length < 2) {
                 ProductionEmptyState("Klar til at søge", "Skriv mindst to tegn. Resultaterne opdateres automatisk.")
-            } else if (state.searchResults.isEmpty() && !state.busy) {
+            } else if (state.searching && state.searchResults.isEmpty()) {
+                ProductionInlineLoading("Søger i biblioteket")
+            } else if (state.searchResults.isEmpty()) {
                 ProductionEmptyState("Ingen resultater", "Prøv en anden titel eller genre.")
             } else {
                 LazyVerticalGrid(
@@ -140,12 +142,18 @@ internal fun ProductionGenreScreen(state: ProductionUiState, viewModel: Producti
                     V1Button("Alle genrer", { viewModel.openGenre() }, icon = Icons.Rounded.ArrowBack)
                     Text(state.selectedGenre, color = V1Colors.Text, fontSize = 23.sp, fontWeight = FontWeight.Black)
                 }
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(158.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    items(state.genreResults, key = { it.id }) { card -> ProductionResultCard(card, viewModel) }
+                if (state.loadingGenre && state.genreResults.isEmpty()) {
+                    ProductionInlineLoading("Henter ${state.selectedGenre}")
+                } else if (state.genreResults.isEmpty()) {
+                    ProductionEmptyState("Ingen titler i genren", "Biblioteket har ingen tilgængelige titler i denne genre.")
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(158.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        items(state.genreResults, key = { it.id }) { card -> ProductionResultCard(card, viewModel) }
+                    }
                 }
             }
         }
@@ -154,7 +162,8 @@ internal fun ProductionGenreScreen(state: ProductionUiState, viewModel: Producti
 
 @Composable
 internal fun ProductionLiveTvScreen(state: ProductionUiState, viewModel: ProductionViewModel) {
-    var selectedChannel by remember(state.channels) { mutableStateOf(state.channels.firstOrNull()) }
+    var selectedChannelId by remember { mutableStateOf<String?>(null) }
+    val selectedChannel = state.channels.firstOrNull { it.id == selectedChannelId } ?: state.channels.firstOrNull()
     val selectedProgram = selectedChannel?.programs?.firstOrNull { it.isLive } ?: selectedChannel?.programs?.firstOrNull()
     V1AmbientBackground(accent = V1Colors.Blue) {
         Column(Modifier.fillMaxSize().padding(horizontal = 34.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -184,7 +193,9 @@ internal fun ProductionLiveTvScreen(state: ProductionUiState, viewModel: Product
                     }
                 }
             }
-            if (state.channels.isEmpty() && !state.busy) {
+            if (state.loadingGuide && state.channels.isEmpty()) {
+                ProductionInlineLoading("Henter programguiden")
+            } else if (state.channels.isEmpty()) {
                 ProductionEmptyState("Ingen Live TV-kanaler", "Kontrollér udbyderen eller opdater programguiden på serveren.")
             } else {
                 Row(Modifier.fillMaxWidth().height(34.dp).background(Color(0xCC151B22))) {
@@ -197,9 +208,9 @@ internal fun ProductionLiveTvScreen(state: ProductionUiState, viewModel: Product
                     items(state.channels, key = { it.id }) { channel ->
                         Row(Modifier.fillMaxWidth().height(58.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                             V1FocusSurface(
-                                onClick = { selectedChannel = channel },
+                                onClick = { selectedChannelId = channel.id },
                                 onLongClick = { viewModel.toggleFavorite(channel) },
-                                onFocused = { selectedChannel = channel },
+                                onFocused = { selectedChannelId = channel.id },
                                 modifier = Modifier.width(190.dp).fillMaxHeight(),
                                 radius = 4.dp,
                                 focusedScale = 1.01f,
@@ -212,7 +223,7 @@ internal fun ProductionLiveTvScreen(state: ProductionUiState, viewModel: Product
                             }
                             channel.programs.take(4).forEach { program ->
                                 V1FocusSurface(
-                                    onClick = { if (program.isLive) viewModel.playChannel(channel) else selectedChannel = channel },
+                                    onClick = { if (program.isLive) viewModel.playChannel(channel) else selectedChannelId = channel.id },
                                     modifier = Modifier.weight(1f).fillMaxHeight(),
                                     radius = 4.dp,
                                     focusedScale = 1.01f,
@@ -237,18 +248,23 @@ internal fun ProductionLiveTvScreen(state: ProductionUiState, viewModel: Product
 
 @Composable
 internal fun ProductionNotificationsScreen(state: ProductionUiState, viewModel: ProductionViewModel) {
-    var selected by remember(state.notifications) { mutableStateOf(state.notifications.firstOrNull()) }
+    var selectedId by remember { mutableStateOf<String?>(null) }
+    val selected = state.notifications.firstOrNull { it.id == selectedId } ?: state.notifications.firstOrNull()
     V1AmbientBackground(accent = V1Colors.Blue) {
         Column(Modifier.fillMaxSize().padding(horizontal = 58.dp, vertical = 32.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
             ProductionPageHeader("Notifikationer", "${state.unreadCount} ulæste", viewModel::back) {
                 V1Button("Markér alle læst", viewModel::markAllRead, icon = Icons.Rounded.Check)
             }
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            if (state.loadingNotifications && state.notifications.isEmpty()) {
+                ProductionInlineLoading("Henter notifikationer")
+            } else if (state.notifications.isEmpty()) {
+                ProductionEmptyState("Ingen notifikationer", "Nye beskeder fra serveren vises her.")
+            } else Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 LazyColumn(Modifier.weight(0.92f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(state.notifications, key = { it.id }) { notification ->
                         V1FocusSurface(
-                            onClick = { selected = notification; viewModel.markRead(notification) },
-                            onFocused = { selected = notification },
+                            onClick = { selectedId = notification.id; viewModel.markRead(notification) },
+                            onFocused = { selectedId = notification.id },
                             modifier = Modifier.fillMaxWidth().height(82.dp),
                             radius = 15.dp,
                         ) { focused ->
@@ -283,7 +299,9 @@ internal fun ProductionDownloadsScreen(state: ProductionUiState, viewModel: Prod
             ProductionPageHeader("Downloads", "Offlineindhold og licenser", viewModel::back) {
                 V1Button("Opdater", viewModel::openDownloads, icon = Icons.Rounded.Refresh)
             }
-            if (state.downloads.isEmpty() && !state.busy) {
+            if (state.loadingDownloads && state.downloads.isEmpty()) {
+                ProductionInlineLoading("Henter downloads")
+            } else if (state.downloads.isEmpty()) {
                 ProductionEmptyState("Ingen downloads", "Downloads, der tilhører den aktive profil, vises her.")
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {

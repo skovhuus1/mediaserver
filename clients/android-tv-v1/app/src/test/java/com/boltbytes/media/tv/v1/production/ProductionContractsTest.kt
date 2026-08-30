@@ -9,6 +9,14 @@ import org.junit.Test
 
 class ProductionContractsTest {
     @Test
+    fun hlsPlaybackModuleIsPackagedWithThePlayer() {
+        assertEquals(
+            "androidx.media3.exoplayer.hls.HlsMediaSource\$Factory",
+            Class.forName("androidx.media3.exoplayer.hls.HlsMediaSource\$Factory").name,
+        )
+    }
+
+    @Test
     fun vodAuthorizationPayloadMatchesServerContract() {
         val capabilities = productionPlaybackCapabilities(
             screenHeight = 2_160,

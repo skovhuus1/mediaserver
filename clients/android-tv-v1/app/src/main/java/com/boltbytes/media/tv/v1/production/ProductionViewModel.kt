@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -64,11 +65,19 @@ data class ProductionUiState(
     val contextCard: ProductionCard? = null,
     val confirmExit: Boolean = false,
     val updateState: ProductionUpdateState = ProductionUpdateState.Idle,
+    val loadingTitle: Boolean = false,
+    val searching: Boolean = false,
+    val loadingGenre: Boolean = false,
+    val loadingGuide: Boolean = false,
+    val loadingNotifications: Boolean = false,
+    val loadingDownloads: Boolean = false,
 ) {
     val unreadCount: Int get() = notifications.count { !it.read }
 }
 
 class ProductionViewModel(application: Application) : AndroidViewModel(application) {
+    private data class CachedContent<T>(val value: T, val loadedAt: Long)
+
     val api = ProductionApi(application)
     private val updateManager = ProductionUpdateManager(application)
     private val mutableState = MutableStateFlow(ProductionUiState())
@@ -78,6 +87,14 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
     private var generation = 0L
     private var qrJob: Job? = null
     private var liveRefreshJob: Job? = null
+    private var titlePrefetchJob: Job? = null
+    private var searchJob: Job? = null
+    private var guideLoadJob: Job? = null
+    private var notificationsLoadJob: Job? = null
+    private var downloadsLoadJob: Job? = null
+    private val titleCache = mutableMapOf<String, CachedContent<ProductionTitle>>()
+    private val titleRequests = mutableMapOf<String, Deferred<ProductionTitle>>()
+    private val genreCache = mutableMapOf<String, CachedContent<List<ProductionCard>>>()
 
     init {
         viewModelScope.launch {
@@ -164,16 +181,32 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
 
     fun selectHero(card: ProductionCard) {
         mutableState.update { it.copy(selectedHero = card) }
+        scheduleTitlePrefetch(card)
     }
 
     fun selectHubFilter(filter: String) {
-        mutableState.update { it.copy(hubFilter = filter, selectedHero = filteredCards(it.home, filter).firstOrNull()) }
+        val selected = filteredCards(mutableState.value.home, filter).firstOrNull()
+        mutableState.update { it.copy(hubFilter = filter, selectedHero = selected) }
+        selected?.let(::scheduleTitlePrefetch)
     }
 
     fun openTitle(id: String) {
         navigate(ProductionRoute.Title(id))
-        launchBusy {
-            mutableState.update { it.copy(title = api.title(id)) }
+        val cached = titleCache[id]
+        mutableState.update { it.copy(title = cached?.value, loadingTitle = cached == null) }
+        viewModelScope.launch {
+            try {
+                val loaded = loadTitleCached(id)
+                if (mutableState.value.route == ProductionRoute.Title(id)) {
+                    mutableState.update { it.copy(title = loaded, loadingTitle = false, message = null) }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (mutableState.value.route == ProductionRoute.Title(id)) {
+                    mutableState.update { it.copy(loadingTitle = false, message = error.userMessage()) }
+                }
+            }
         }
     }
 
@@ -265,8 +298,10 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
         val titleRoute = mutableState.value.route as? ProductionRoute.Title
         if (titleRoute != null) {
             viewModelScope.launch {
-                runCatching { api.title(titleRoute.id) }.onSuccess { updated ->
-                    mutableState.update { it.copy(title = updated) }
+                runCatching { loadTitleCached(titleRoute.id, forceRefresh = true) }.onSuccess { updated ->
+                    if (mutableState.value.route == titleRoute) {
+                        mutableState.update { it.copy(title = updated) }
+                    }
                 }
             }
         }
@@ -277,31 +312,58 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun search(query: String) {
-        mutableState.update { it.copy(searchQuery = query) }
+        searchJob?.cancel()
         if (query.trim().length < 2) {
-            mutableState.update { it.copy(searchResults = emptyList()) }
+            mutableState.update { it.copy(searchQuery = query, searchResults = emptyList(), searching = false) }
             return
         }
-        viewModelScope.launch {
+        mutableState.update { it.copy(searchQuery = query, searching = true) }
+        searchJob = viewModelScope.launch {
             delay(250L)
             if (mutableState.value.searchQuery != query) return@launch
-            runCatching { api.search(query.trim()) }
-                .onSuccess { result -> mutableState.update { it.copy(searchResults = result, message = null) } }
-                .onFailure { error -> mutableState.update { it.copy(message = error.userMessage()) } }
+            try {
+                val result = api.search(query.trim())
+                if (mutableState.value.searchQuery == query) {
+                    mutableState.update { it.copy(searchResults = result, searching = false, message = null) }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (mutableState.value.searchQuery == query) {
+                    mutableState.update { it.copy(searching = false, message = error.userMessage()) }
+                }
+            }
         }
     }
 
     fun openGenre() {
         navigate(ProductionRoute.Genre)
-        mutableState.update { it.copy(selectedGenre = null, genreResults = emptyList()) }
+        mutableState.update { it.copy(selectedGenre = null, genreResults = emptyList(), loadingGenre = false) }
     }
 
     fun selectGenre(genre: String) {
-        mutableState.update { it.copy(selectedGenre = genre, busy = true) }
+        val cached = genreCache[genre]
+        mutableState.update {
+            it.copy(
+                selectedGenre = genre,
+                genreResults = cached?.value.orEmpty(),
+                loadingGenre = cached == null,
+            )
+        }
+        if (cached?.isFresh() == true) return
         viewModelScope.launch {
             runCatching { api.search(genre) }
-                .onSuccess { result -> mutableState.update { it.copy(genreResults = result, busy = false, message = null) } }
-                .onFailure { error -> mutableState.update { it.copy(busy = false, message = error.userMessage()) } }
+                .onSuccess { result ->
+                    genreCache[genre] = CachedContent(result, System.currentTimeMillis())
+                    if (mutableState.value.selectedGenre == genre) {
+                        mutableState.update { it.copy(genreResults = result, loadingGenre = false, message = null) }
+                    }
+                }
+                .onFailure { error ->
+                    if (mutableState.value.selectedGenre == genre) {
+                        mutableState.update { it.copy(loadingGenre = false, message = error.userMessage()) }
+                    }
+                }
         }
     }
 
@@ -511,18 +573,65 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun loadGuide() {
-        launchBusy {
-            mutableState.update { it.copy(channels = api.guide()) }
+        if (guideLoadJob?.isActive == true) return
+        mutableState.update { it.copy(loadingGuide = it.channels.isEmpty()) }
+        guideLoadJob = viewModelScope.launch {
+            runCatching { api.guide() }
+                .onSuccess { channels -> mutableState.update { it.copy(channels = channels, loadingGuide = false, message = null) } }
+                .onFailure { error -> mutableState.update { it.copy(loadingGuide = false, message = error.userMessage()) } }
         }
     }
 
     private fun loadNotifications() {
-        launchBusy { mutableState.update { it.copy(notifications = api.notifications()) } }
+        if (notificationsLoadJob?.isActive == true) return
+        mutableState.update { it.copy(loadingNotifications = it.notifications.isEmpty()) }
+        notificationsLoadJob = viewModelScope.launch {
+            runCatching { api.notifications() }
+                .onSuccess { notifications -> mutableState.update { it.copy(notifications = notifications, loadingNotifications = false, message = null) } }
+                .onFailure { error -> mutableState.update { it.copy(loadingNotifications = false, message = error.userMessage()) } }
+        }
     }
 
     private fun loadDownloads() {
-        launchBusy { mutableState.update { it.copy(downloads = api.downloads()) } }
+        if (downloadsLoadJob?.isActive == true) return
+        mutableState.update { it.copy(loadingDownloads = it.downloads.isEmpty()) }
+        downloadsLoadJob = viewModelScope.launch {
+            runCatching { api.downloads() }
+                .onSuccess { downloads -> mutableState.update { it.copy(downloads = downloads, loadingDownloads = false, message = null) } }
+                .onFailure { error -> mutableState.update { it.copy(loadingDownloads = false, message = error.userMessage()) } }
+        }
     }
+
+    private fun scheduleTitlePrefetch(card: ProductionCard) {
+        val id = card.seriesId ?: card.id
+        if (id.isBlank() || titleCache[id]?.isFresh() == true) return
+        titlePrefetchJob?.cancel()
+        titlePrefetchJob = viewModelScope.launch {
+            delay(180L)
+            runCatching { loadTitleCached(id) }
+        }
+    }
+
+    private suspend fun loadTitleCached(id: String, forceRefresh: Boolean = false): ProductionTitle {
+        val cached = titleCache[id]
+        if (!forceRefresh && cached?.isFresh() == true) return cached.value
+        val existing = titleRequests[id]
+        val request = existing ?: viewModelScope.async { api.title(id) }.also { deferred ->
+            titleRequests[id] = deferred
+            deferred.invokeOnCompletion {
+                viewModelScope.launch {
+                    if (titleRequests[id] === deferred) titleRequests.remove(id)
+                }
+            }
+        }
+        return request.await().also { loaded ->
+            titleCache[id] = CachedContent(loaded, System.currentTimeMillis())
+            if (titleCache.size > 64) titleCache.remove(titleCache.keys.first())
+        }
+    }
+
+    private fun <T> CachedContent<T>.isFresh(): Boolean =
+        System.currentTimeMillis() - loadedAt < CONTENT_CACHE_TTL_MS
 
     private fun refreshHomeSilently() {
         viewModelScope.launch {
@@ -570,4 +679,8 @@ class ProductionViewModel(application: Application) : AndroidViewModel(applicati
         }
 
     private fun Throwable.userMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Der opstod en ukendt fejl"
+
+    private companion object {
+        const val CONTENT_CACHE_TTL_MS = 5 * 60 * 1_000L
+    }
 }

@@ -489,6 +489,11 @@ private fun ProductionTitleScreen(state: ProductionUiState, viewModel: Productio
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item { V1Button("Tilbage", viewModel::back, icon = Icons.Rounded.ArrowBack) }
+            if (title == null && state.loadingTitle) {
+                item { ProductionInlineLoading("Henter titel og afsnit") }
+            } else if (title == null) {
+                item { ProductionEmptyState("Titlen kunne ikke vises", "Gå tilbage og prøv igen.") }
+            }
             if (title != null) {
                 item {
                     Column(Modifier.fillMaxWidth().height(275.dp), verticalArrangement = Arrangement.Bottom) {
@@ -658,6 +663,23 @@ internal fun ProductionEmptyState(title: String, description: String) {
         Column(Modifier.fillMaxSize().padding(26.dp), verticalArrangement = Arrangement.Center) {
             Text(title, color = V1Colors.Text, fontSize = 18.sp, fontWeight = FontWeight.Black)
             Text(description, color = V1Colors.Muted, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+internal fun ProductionInlineLoading(label: String) {
+    V1GlassPanel(Modifier.fillMaxWidth().height(104.dp), radius = 18.dp) {
+        Row(
+            Modifier.fillMaxSize().padding(horizontal = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            CircularProgressIndicator(color = V1Colors.Gold, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(label, color = V1Colors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Du kan fortsat navigere imens.", color = V1Colors.Muted, fontSize = 9.sp)
+            }
         }
     }
 }
