@@ -166,12 +166,14 @@ private class ProductionPlaybackEngine(
         progressJob?.cancel()
         heartbeatJob = scope.launch {
             while (isActive && !finished.get()) {
-                delay(20_000L)
-                val authorization = mutableState.value.authorization ?: continue
-                runCatching {
-                    if (request.live) api.heartbeatLive(authorization.sessionId, authorization.streamToken, player.currentPosition)
-                    else api.heartbeatVod(authorization.sessionId, player.currentPosition, player.isPlaying)
+                val authorization = mutableState.value.authorization
+                if (authorization != null) {
+                    runCatching {
+                        if (request.live) api.heartbeatLive(authorization.sessionId, authorization.streamToken, player.currentPosition)
+                        else api.heartbeatVod(authorization.sessionId, player.currentPosition, player.isPlaying)
+                    }
                 }
+                delay(5_000L)
             }
         }
         if (!request.live) {

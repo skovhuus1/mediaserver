@@ -250,8 +250,18 @@ internal fun parseCard(item: JSONObject): ProductionCard? {
     val duration = item.firstPresentLong("durationMs", "runtimeMs", "duration")
         ?: playbackMedia?.optJSONObject("file")?.firstPresentLong("durationMs")
         ?: 0L
+    val progressObject = item.optJSONObject("progress")
+        ?: item.optJSONObject("playback")?.optJSONObject("progress")
+        ?: item.optJSONObject("playback")
     val position = item.firstLong("positionMs", "progressMs", "resumePositionMs", "startPositionMs")
-    val raw = item.optDouble("progress", item.optDouble("progressPercent", 0.0)).toFloat()
+        .takeIf { it > 0L }
+        ?: progressObject?.firstLong("positionMs", "progressMs", "resumePositionMs", "startPositionMs")
+        ?: 0L
+    val raw = progressObject
+        ?.optDouble("percent", Double.NaN)
+        ?.takeUnless(Double::isNaN)
+        ?.toFloat()
+        ?: item.optDouble("progress", item.optDouble("progressPercent", 0.0)).toFloat()
     val progress = when {
         raw > 1f -> raw / 100f
         raw > 0f -> raw

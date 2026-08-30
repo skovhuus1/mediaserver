@@ -278,7 +278,9 @@ class ProductionApi(context: Context) {
         request(
             "PATCH",
             "playback/sessions/${encodePath(sessionId)}/heartbeat",
-            JSONObject().put("positionMs", positionMs).put("isPlaying", playing),
+            JSONObject()
+                .put("positionMs", positionMs)
+                .put("runtimeState", if (playing) "playing" else "paused"),
         )
     }
 
@@ -309,9 +311,8 @@ class ProductionApi(context: Context) {
             "live-tv/playback/authorize",
             JSONObject()
                 .put("channelId", channelId)
-                .put("deviceId", deviceId)
-                .put("preferredMethod", "hls")
-                .put("capabilities", JSONObject().put("hls", true).put("adaptiveStreaming", true)),
+                .put("isCastSession", false)
+                .put("preferredMethod", "auto"),
         )
         return parseAuthorization(response, ::resolvePublicUrl)
     }
@@ -321,13 +322,14 @@ class ProductionApi(context: Context) {
         channelId: String,
         streamToken: String?,
     ): ProductionAuthorization {
+        require(!streamToken.isNullOrBlank()) { "Live TV-sessionen mangler stream-token" }
         val response = request(
             "POST",
             "live-tv/playback/leases/${encodePath(leaseId)}/switch",
             JSONObject()
                 .put("channelId", channelId)
-                .put("streamToken", streamToken ?: JSONObject.NULL)
-                .put("preferredMethod", "hls"),
+                .put("streamToken", streamToken)
+                .put("preferredMethod", "auto"),
         )
         return parseAuthorization(response, ::resolvePublicUrl)
     }
@@ -336,7 +338,7 @@ class ProductionApi(context: Context) {
         request(
             "PATCH",
             "live-tv/stream/${encodePath(leaseId)}/heartbeat${tokenQuery(token)}",
-            JSONObject().put("positionMs", positionMs).put("deviceId", deviceId),
+            JSONObject().put("runtimeState", "playing"),
             authenticated = false,
         )
     }

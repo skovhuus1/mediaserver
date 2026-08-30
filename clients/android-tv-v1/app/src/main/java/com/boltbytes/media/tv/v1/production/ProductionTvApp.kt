@@ -422,7 +422,13 @@ private fun ProductionMediaRow(row: ProductionRow, viewModel: ProductionViewMode
 @Composable
 private fun ProductionMediaCard(card: ProductionCard, viewModel: ProductionViewModel) {
     V1FocusSurface(
-        onClick = { viewModel.openCard(card) },
+        onClick = {
+            if (card.startPositionMs > 0L && !card.seriesId.isNullOrBlank()) {
+                viewModel.playCard(card)
+            } else {
+                viewModel.openCard(card)
+            }
+        },
         onLongClick = { viewModel.showContext(card) },
         onFocused = { viewModel.selectHero(card) },
         modifier = Modifier.width(154.dp).height(232.dp),
