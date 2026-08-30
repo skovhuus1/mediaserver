@@ -162,6 +162,9 @@ export async function generatePlaybackAssets(prisma: PrismaClient, job: Playback
         error: null,
       },
     });
+    if (media.type === 'episode' && fingerprint) {
+      await enqueuePendingSeasonReanalysis(prisma, media).catch(() => undefined);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Playback asset generation failed';
     await prisma.mediaPlaybackAsset.updateMany({
@@ -220,21 +223,17 @@ async function discoverMarkers(
   if (media.type === 'episode' && fingerprint && (!markers.some((marker) => marker.kind === 'recap') || !markers.some((marker) => marker.kind === 'intro'))) {
     const siblings = await prisma.mediaItem.findMany({
       where: {
-        accountId: media.accountId,
-        type: 'episode',
+        ...episodeSeriesWhere(media),
         id: { not: media.id },
+        seasonNumber: media.seasonNumber,
         file: { is: { status: 'ready' } },
-        ...(media.seriesMetadataProviderId
-          ? { seriesMetadataProviderId: media.seriesMetadataProviderId }
-          : media.seriesDisplayTitle
-            ? { seriesDisplayTitle: { equals: media.seriesDisplayTitle, mode: 'insensitive' } }
-            : { seriesTitle: { equals: media.seriesTitle ?? '', mode: 'insensitive' } }),
       },
       select: { id: true, seasonNumber: true, episodeNumber: true, file: { select: { modifiedAt: true } } },
+      orderBy: [{ episodeNumber: 'asc' }, { id: 'asc' }],
       take: 24,
     });
     const siblingAssets = siblings.length ? await prisma.mediaPlaybackAsset.findMany({
-      where: { mediaId: { in: siblings.map((sibling) => sibling.id) }, status: { in: ['ready', 'queued', 'generating'] }, fingerprint: { not: Prisma.JsonNull } },
+      where: { mediaId: { in: siblings.map((sibling) => sibling.id) }, status: 'ready', fingerprint: { not: Prisma.JsonNull } },
       select: { mediaId: true, fingerprint: true, sourceModifiedAt: true },
     }) : [];
     const siblingModifiedAt = new Map(siblings.map((sibling) => [sibling.id, sibling.file?.modifiedAt ?? null]));
@@ -250,11 +249,10 @@ async function discoverMarkers(
         (markers.find((marker) => marker.kind === 'recap')?.endMs ?? 0) / 1_000,
       );
       const references = siblingFingerprints.map((asset) => asset.fingerprint.opening);
-      const minimumReferences = references.length >= 2 ? 2 : 1;
       const detection = analyzeRepeatedIntro(fingerprint.opening, references, {
         minimumSeconds: 12,
-        minimumReferences,
-        minimumConfidence: minimumReferences === 1 ? 0.9 : 0.8,
+        minimumReferences: 2,
+        minimumConfidence: 0.82,
         minimumStartSeconds: explicitRecapEndSeconds > 0 ? explicitRecapEndSeconds : 0,
         maximumStartSeconds: 10 * 60,
         maximumEndSeconds: 15 * 60,
@@ -310,6 +308,115 @@ export async function commitPlaybackAnalysis(prisma: PrismaClient, input: Playba
       data: input.assetData,
     });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+type EpisodeSeriesIdentity = {
+  id: string;
+  accountId: string;
+  type: string;
+  seriesMetadataProviderId: string | null;
+  seriesDisplayTitle: string | null;
+  seriesTitle: string | null;
+  seasonNumber: number | null;
+};
+
+function episodeSeriesWhere(media: EpisodeSeriesIdentity): Prisma.MediaItemWhereInput {
+  return {
+    accountId: media.accountId,
+    type: 'episode',
+    ...(media.seriesMetadataProviderId
+      ? { seriesMetadataProviderId: media.seriesMetadataProviderId }
+      : media.seriesDisplayTitle
+        ? { seriesDisplayTitle: { equals: media.seriesDisplayTitle, mode: 'insensitive' } }
+        : { seriesTitle: { equals: media.seriesTitle ?? '', mode: 'insensitive' } }),
+  };
+}
+
+export function pendingSeasonReanalysisMediaIds(
+  assets: readonly { mediaId: string; manifest: Prisma.JsonValue; sourceCurrent: boolean }[],
+  activeMediaIds: ReadonlySet<string>,
+): string[] {
+  return assets.flatMap((asset) => {
+    if (!asset.sourceCurrent || activeMediaIds.has(asset.mediaId)) return [];
+    const analysis = jsonObject(jsonObject(asset.manifest).analysis);
+    const intro = jsonObject(analysis.intro);
+    return analysis.markerAnalysisVersion === playbackMarkerAnalysisVersion
+      && intro.state === 'pending'
+      && intro.reason === 'insufficient_references'
+      ? [asset.mediaId]
+      : [];
+  });
+}
+
+async function enqueuePendingSeasonReanalysis(prisma: PrismaClient, media: EpisodeSeriesIdentity): Promise<void> {
+  const seriesKey = media.seriesMetadataProviderId
+    ?? media.seriesDisplayTitle?.trim().toLocaleLowerCase('da-DK')
+    ?? media.seriesTitle?.trim().toLocaleLowerCase('da-DK')
+    ?? media.id;
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT pg_advisory_xact_lock(
+        hashtext('bbmedia:playback-analysis-cohort'),
+        hashtext(${`${media.accountId}:${seriesKey}:${media.seasonNumber ?? 0}`})
+      )::text AS lock_result
+    `;
+    const cohort = await tx.mediaPlaybackAsset.findMany({
+      where: {
+        accountId: media.accountId,
+        status: 'ready',
+        fingerprint: { not: Prisma.JsonNull },
+        media: {
+          is: {
+            ...episodeSeriesWhere(media),
+            seasonNumber: media.seasonNumber,
+            file: { is: { status: 'ready' } },
+          },
+        },
+      },
+      select: {
+        mediaId: true,
+        manifest: true,
+        sourceModifiedAt: true,
+        media: { select: { file: { select: { modifiedAt: true } } } },
+      },
+      orderBy: { media: { episodeNumber: 'asc' } },
+      take: 48,
+    });
+    const currentCohort = cohort.map((asset) => ({
+      mediaId: asset.mediaId,
+      manifest: asset.manifest,
+      sourceCurrent: playbackFingerprintMatchesSource(asset.sourceModifiedAt, asset.media.file?.modifiedAt ?? null),
+    }));
+    if (currentCohort.filter((asset) => asset.sourceCurrent).length < 3) return;
+    const pendingIds = pendingSeasonReanalysisMediaIds(currentCohort, new Set()).filter((mediaId) => mediaId !== media.id);
+    if (!pendingIds.length) return;
+    const activeJobs = await tx.systemJob.findMany({
+      where: {
+        accountId: media.accountId,
+        type: 'media.playback-assets',
+        status: { in: ['queued', 'running', 'paused'] },
+        OR: pendingIds.map((mediaId) => ({ payload: { path: ['mediaId'], equals: mediaId } })),
+      },
+      select: { payload: true },
+    });
+    const activeMediaIds = new Set(activeJobs.flatMap(({ payload }) => {
+      const mediaId = jsonObject(payload).mediaId;
+      return typeof mediaId === 'string' ? [mediaId] : [];
+    }));
+    const mediaIds = pendingSeasonReanalysisMediaIds(currentCohort, activeMediaIds)
+      .filter((mediaId) => mediaId !== media.id)
+      .slice(0, 12);
+    if (!mediaIds.length) return;
+    await tx.systemJob.createMany({
+      data: mediaIds.map((mediaId) => ({
+        accountId: media.accountId,
+        type: 'media.playback-assets',
+        status: 'queued',
+        payload: { mediaId, force: true, analysisScope: 'marker_only', requestedBy: 'analysis-convergence' },
+        maxAttempts: 3,
+      })),
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
 export function prioritizeTimelineMarkers(...sources: readonly TimelineMarker[][]): TimelineMarker[] {

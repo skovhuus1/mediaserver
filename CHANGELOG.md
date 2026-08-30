@@ -4,6 +4,12 @@ Alle BoltBytes Media Server-releases følger SemVer og får ét fælles versions
 
 ## Unreleased
 
+## 0.3.10 - 2026-08-30
+
+- Opgraderer playback-markoeranalysen til version 6 med tolerant, monoton frame-justering, som accepterer sma timingforskelle og enkelte tabte frames uden at acceptere spredte tilfaeldige matches.
+- Bruger mindst to faerdige fingerprints fra samme saeson til automatisk intro og fjerner produktionsgenvejen med kun et enkelt referenceafsnit.
+- Genkoer tidlige afsnit automatisk og deduplikeret, nar saesonen har tre gyldige fingerprints, sa analyser med for faa referencer konvergerer uden manuel indgriben.
+
 ## 0.3.9 - 2026-08-30
 
 - Finder playback-assets, som er fastlast i `queued` eller `generating` uden et aktivt workerjob, og viser det konkrete antal i adminpanelet.

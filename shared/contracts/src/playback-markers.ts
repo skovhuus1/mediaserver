@@ -1,6 +1,6 @@
 export type TimelineMarkerKind = 'intro' | 'recap' | 'credits';
 
-export const playbackMarkerAnalysisVersion = 5;
+export const playbackMarkerAnalysisVersion = 6;
 
 export type TimelineMarker = {
   kind: TimelineMarkerKind;
@@ -146,6 +146,15 @@ export type RepeatedSegmentOptions = {
   minimumReferences?: number;
   minimumFrameQuality?: number;
   minimumConfidence?: number;
+  maximumGapFrames?: number;
+  temporalToleranceFrames?: number;
+  minimumSequenceMatchRatio?: number;
+};
+
+type RepeatedSegmentMatch = {
+  startIndex: number;
+  length: number;
+  matchRatio: number;
 };
 
 function analyzeRepeatedSegment(
@@ -178,34 +187,26 @@ function analyzeRepeatedSegment(
     return diagnostics('not-detected', 'low_information', compatible.length, 0, usableFrameRatio, null, null);
   }
 
-  const matches: Array<{ startIndex: number; length: number }> = [];
+  const maximumGapFrames = Math.max(0, options.maximumGapFrames ?? 1);
+  const temporalToleranceFrames = Math.max(0, options.temporalToleranceFrames ?? 1);
+  const minimumSequenceMatchRatio = Math.min(1, Math.max(0.5, options.minimumSequenceMatchRatio ?? 0.72));
+  const matches: RepeatedSegmentMatch[] = [];
   for (const candidate of compatible) {
-    let candidateBest: { startIndex: number; length: number } | null = null;
-    for (let left = 0; left < primary.hashes.length; left += 1) {
-      const absoluteStart = primary.offsetSeconds + left * primary.intervalSeconds;
-      if (absoluteStart > maximumStartSeconds) break;
-      if (absoluteStart < minimumStartSeconds) continue;
-      for (let right = 0; right < candidate.hashes.length; right += 1) {
-        let length = 0;
-        while (
-          left + length < primary.hashes.length
-          && right + length < candidate.hashes.length
-          && primary.offsetSeconds + (left + length) * primary.intervalSeconds <= maximumEndSeconds
-          && frameIsUsable(primary, left + length, minimumFrameQuality)
-          && frameIsUsable(candidate, right + length, minimumFrameQuality)
-          && hammingDistance(primary.hashes[left + length]!, candidate.hashes[right + length]!) <= maximumHashDistance
-        ) length += 1;
-        if (length < minimumFrames || (candidateBest && length <= candidateBest.length)) continue;
-        const sequence = primary.hashes.slice(left, left + length);
-        const usefulHashes = sequence.filter((hash) => !/^0+$/.test(hash));
-        if (usefulHashes.length < minimumFrames || new Set(usefulHashes).size < Math.ceil(minimumFrames / 2)) continue;
-        candidateBest = { startIndex: left, length };
-      }
-    }
+    const candidateBest = bestAlignedSequence(primary, candidate, {
+      maximumEndSeconds,
+      maximumGapFrames,
+      maximumHashDistance,
+      maximumStartSeconds,
+      minimumFrameQuality,
+      minimumFrames,
+      minimumSequenceMatchRatio,
+      minimumStartSeconds,
+      temporalToleranceFrames,
+    });
     if (candidateBest) matches.push(candidateBest);
   }
 
-  let consensus: { matches: Array<{ startIndex: number; length: number }> } | null = null;
+  let consensus: { matches: RepeatedSegmentMatch[] } | null = null;
   const startToleranceFrames = Math.max(2, Math.ceil(15 / primary.intervalSeconds));
   for (const anchor of matches) {
     const supporting = matches.filter((match) => (
@@ -225,8 +226,16 @@ function analyzeRepeatedSegment(
   const startMs = Math.round((primary.offsetSeconds + startIndex * primary.intervalSeconds) * 1_000);
   const endMs = Math.round((primary.offsetSeconds + endIndex * primary.intervalSeconds) * 1_000);
   const supportRatio = supportCount / compatible.length;
+  const alignmentQuality = median(consensus.matches.map((match) => match.matchRatio));
   const durationScore = Math.min(0.1, (endMs - startMs) / 900_000);
-  const confidence = Math.min(0.98, 0.7 + supportRatio * 0.16 + durationScore + Math.min(0.06, usableFrameRatio * 0.06));
+  const confidence = Math.min(
+    0.98,
+    0.66
+      + supportRatio * 0.14
+      + alignmentQuality * 0.08
+      + durationScore
+      + Math.min(0.05, usableFrameRatio * 0.05),
+  );
   if (confidence < minimumConfidence) {
     return diagnostics('not-detected', 'no_repeated_sequence', compatible.length, supportCount, usableFrameRatio, null, null);
   }
@@ -238,6 +247,89 @@ function analyzeRepeatedSegment(
     confidence,
   };
   return diagnostics('detected', 'detected', compatible.length, supportCount, usableFrameRatio, confidence, marker);
+}
+
+function bestAlignedSequence(
+  primary: FrameFingerprint,
+  candidate: FrameFingerprint,
+  options: {
+    maximumEndSeconds: number;
+    maximumGapFrames: number;
+    maximumHashDistance: number;
+    maximumStartSeconds: number;
+    minimumFrameQuality: number;
+    minimumFrames: number;
+    minimumSequenceMatchRatio: number;
+    minimumStartSeconds: number;
+    temporalToleranceFrames: number;
+  },
+): RepeatedSegmentMatch | null {
+  const minimumPrimaryIndex = Math.max(0, Math.ceil((options.minimumStartSeconds - primary.offsetSeconds) / primary.intervalSeconds));
+  const maximumPrimaryIndex = Math.min(
+    primary.hashes.length - 1,
+    Math.floor((options.maximumEndSeconds - primary.offsetSeconds) / primary.intervalSeconds),
+  );
+  let best: RepeatedSegmentMatch | null = null;
+  const firstOffset = -(maximumPrimaryIndex);
+  const lastOffset = candidate.hashes.length - 1 - minimumPrimaryIndex;
+
+  for (let offset = firstOffset; offset <= lastOffset; offset += 1) {
+    let runStart: number | null = null;
+    let lastMatch: number | null = null;
+    let lastCandidateMatch = -1;
+    let matchedIndexes: number[] = [];
+
+    const finishRun = () => {
+      if (runStart === null || lastMatch === null) return;
+      const length = lastMatch - runStart + 1;
+      const matchRatio = matchedIndexes.length / length;
+      const usefulHashes = matchedIndexes.map((index) => primary.hashes[index]!).filter((hash) => !/^0+$/.test(hash));
+      const diverseEnough = new Set(usefulHashes).size >= Math.ceil(options.minimumFrames / 2);
+      if (
+        length >= options.minimumFrames
+        && matchedIndexes.length >= options.minimumFrames
+        && matchRatio >= options.minimumSequenceMatchRatio
+        && diverseEnough
+        && (!best || length > best.length || (length === best.length && matchRatio > best.matchRatio))
+      ) best = { startIndex: runStart, length, matchRatio };
+    };
+
+    for (let left = minimumPrimaryIndex; left <= maximumPrimaryIndex; left += 1) {
+      const absoluteStart = primary.offsetSeconds + left * primary.intervalSeconds;
+      if (absoluteStart > options.maximumStartSeconds && runStart === null) break;
+      const expectedRight = left + offset;
+      const rightStart = Math.max(0, expectedRight - options.temporalToleranceFrames, lastCandidateMatch + 1);
+      const rightEnd = Math.min(candidate.hashes.length - 1, expectedRight + options.temporalToleranceFrames);
+      let matchedRight: number | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      if (frameIsUsable(primary, left, options.minimumFrameQuality)) {
+        for (let right = rightStart; right <= rightEnd; right += 1) {
+          if (!frameIsUsable(candidate, right, options.minimumFrameQuality)) continue;
+          const distance = hammingDistance(primary.hashes[left]!, candidate.hashes[right]!);
+          if (distance <= options.maximumHashDistance && distance < bestDistance) {
+            matchedRight = right;
+            bestDistance = distance;
+          }
+        }
+      }
+      if (matchedRight !== null) {
+        if (runStart === null) runStart = left;
+        lastMatch = left;
+        lastCandidateMatch = matchedRight;
+        matchedIndexes.push(left);
+        continue;
+      }
+      if (runStart !== null && lastMatch !== null && left - lastMatch > options.maximumGapFrames) {
+        finishRun();
+        runStart = null;
+        lastMatch = null;
+        lastCandidateMatch = -1;
+        matchedIndexes = [];
+      }
+    }
+    finishRun();
+  }
+  return best;
 }
 
 export function analyzePreviousEpisodeRecap(

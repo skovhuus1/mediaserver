@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { commitPlaybackAnalysis, fingerprintFrameQuality, playbackFingerprintMatchesSource, prioritizeTimelineMarkers } from './playback-assets.js';
+import { commitPlaybackAnalysis, fingerprintFrameQuality, pendingSeasonReanalysisMediaIds, playbackFingerprintMatchesSource, prioritizeTimelineMarkers } from './playback-assets.js';
 
 describe('playback fingerprint quality', () => {
   it('rejects flat black and white frames as visual evidence', () => {
@@ -31,6 +31,19 @@ describe('playback fingerprint quality', () => {
     )).toEqual([
       marker('intro', 'manual'), marker('recap', 'chapter'), marker('credits', 'external'),
     ]);
+  });
+
+  it('requeues only current-version pending intro analyses without active jobs', () => {
+    const manifest = (version: number, state: string, reason: string) => ({
+      analysis: { markerAnalysisVersion: version, intro: { state, reason } },
+    });
+    expect(pendingSeasonReanalysisMediaIds([
+      { mediaId: 'pending', manifest: manifest(6, 'pending', 'insufficient_references'), sourceCurrent: true },
+      { mediaId: 'active', manifest: manifest(6, 'pending', 'insufficient_references'), sourceCurrent: true },
+      { mediaId: 'settled', manifest: manifest(6, 'not-detected', 'no_repeated_sequence'), sourceCurrent: true },
+      { mediaId: 'stale-version', manifest: manifest(5, 'pending', 'insufficient_references'), sourceCurrent: true },
+      { mediaId: 'stale-source', manifest: manifest(6, 'pending', 'insufficient_references'), sourceCurrent: false },
+    ] as never, new Set(['active']))).toEqual(['pending']);
   });
 
   it('commits diagnostics and generated markers atomically while preserving manual kinds', async () => {
