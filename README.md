@@ -1,6 +1,6 @@
 # BoltBytes Media Server
 
-Aktuel release: **0.3.9**. Se [CHANGELOG](CHANGELOG.md).
+Aktuel release: **0.3.10**. Se [CHANGELOG](CHANGELOG.md).
 
 ### Android TV release-start og runtime-gate
 
@@ -98,6 +98,8 @@ PATCH  /api/v1/playback/playlists/:id/items/order
 - TheIntroDB styres med `BB_MEDIA_THEINTRODB_ENABLED`, `BB_MEDIA_THEINTRODB_BASE_URL`, den valgfrie `BB_MEDIA_THEINTRODB_API_KEY` og `BB_MEDIA_THEINTRODB_TIMEOUT_MS`. Standard-timeout er 3500 ms, sa den eksterne tjeneste ikke kan blokere playback-analysen.
 - En ekstern markor gemmes med kilden `external` og erstatter ikke en manuel markor. Eksisterende faerdiganalyserede titler skal genanalyseres efter aktivering for at fa de nye opslag.
 - Adminlisten filtrerer, taeller og paginerer playback-analyser direkte i PostgreSQL. Den materialiserer derfor aldrig hele mediekataloget, og globale statusantal forbliver korrekte pa alle sider.
+- Lokal introanalyse version 6 sammenligner kun faerdige, kildeaktuelle fingerprints fra samme saeson. Mindst to referenceafsnit skal understotte en tidsmaessigt sammenhaengende sekvens; enkelte tabte frames og mindre samplingforskelle tolereres, mens spredte matches afvises.
+- Naar en saeson far sit tredje gyldige fingerprint, genkoes tidligere `insufficient_references`-afsnit automatisk som deduplikerede marker-only jobs. Seek-preview genbruges, og manuelle, kapitelbaserede og eksterne markorer bevares.
 - `Analyser manglende` opretter fulde assets for medier uden seek-preview og bruger kun `marker_only`, nar et eksisterende preview sikkert kan genbruges. Adminvisningen folger den faktiske workerko, selv nar et aktivt job ikke laengere matcher det valgte filter.
 - Assets, der har staet `queued` eller `generating` i mindst 15 minutter uden et aktivt workerjob, vises som fastlaste. `POST /api/v1/playback-analysis/queue/recover` genkoer atomisk kun disse assets, er account-scoped og genbruger eksisterende seek-preview, nar det er sikkert.
 
