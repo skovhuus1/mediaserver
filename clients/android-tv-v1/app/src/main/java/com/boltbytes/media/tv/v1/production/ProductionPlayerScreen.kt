@@ -641,7 +641,6 @@ private class ProductionPlaybackEngine(
         heartbeatJob?.cancel()
         progressJob?.cancel()
         variantMonitorJob?.cancel()
-        subtitleRefreshJob?.cancel()
         val authorization = mutableState.value.authorization
         val position = absolutePositionMs()
         val duration = absoluteDurationMs()
